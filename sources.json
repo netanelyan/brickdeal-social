@@ -130,7 +130,8 @@
       ],
       "lang": "en",
       "enabled": true,
-      "note": "Probed 2026-08-22: 200, 13KB, items present. Each entry is a country page whose 'latest update' line states what changed — the best single feed for entry and visa changes."
+      "note": "Probed 2026-08-22: 200, 13KB, items present. Each entry is a country page whose 'latest update' line states what changed — the best single feed for entry and visa changes. dedupeBy url+updated added 2026-09-14: this is a rolling feed of just-revised advisories at permanent per-country URLs, so URL-derived identity made the first sighting of each country the only one for SEEN_TTL_DAYS and silently dropped every later revision.",
+      "dedupeBy": "url+updated"
     },
     {
       "id": "unesco-whc",

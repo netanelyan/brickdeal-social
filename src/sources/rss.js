@@ -133,6 +133,30 @@ export function parseFeed(body, source) {
         ...(source.dedupeBy === 'title'
           ? { dedupeId: createHash('sha1').update(`${source.id}\n${title}`).digest('hex').slice(0, 12) }
           : {}),
+        // A feed of living documents, where the URL is not the identity.
+        //
+        // FCDO travel advice is one page per country at a permanent URL, and
+        // the feed is a rolling list of the ones just revised — Italy and
+        // Kyrgyzstan both came through on the day this was written, at URLs
+        // that have existed for years. Identity derived from the URL makes the
+        // first sighting of a country the only one: it is marked seen, and for
+        // the next SEEN_TTL_DAYS every subsequent revision is skipped in
+        // silence, however much the entry rules changed.
+        //
+        // That is the opposite of what this source is for. Folding the update
+        // timestamp into the id makes a revised advisory a new candidate, which
+        // is what a revised advisory is.
+        //
+        // Declared per source, not inferred: for UNESCO and NASA an item is a
+        // one-time article, and re-surfacing those on an edit would be noise.
+        ...(source.dedupeBy === 'url+updated'
+          ? {
+              dedupeId: createHash('sha1')
+                .update(`${source.id}\n${url}\n${dateOf(entry) || ''}`)
+                .digest('hex')
+                .slice(0, 12),
+            }
+          : {}),
       };
     })
     .filter(Boolean);

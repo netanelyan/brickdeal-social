@@ -290,6 +290,39 @@ ok(
   'sources.json lost urlIncludes'
 );
 
+// dedupeBy: 'url+updated' — a living document at a permanent URL.
+//
+// FCDO publishes one page per country and re-surfaces it whenever it is
+// revised. Under URL-derived identity the first sighting of a country was the
+// only one for SEEN_TTL_DAYS, so every later revision was skipped in silence.
+const advisory = (updated) =>
+  `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><entry>
+     <title>Italy travel advice</title>
+     <link rel="alternate" href="https://www.gov.uk/foreign-travel-advice/italy"/>
+     <summary>Entry requirements updated.</summary>
+     <updated>${updated}</updated>
+   </entry></feed>`;
+const fcdoSrc = { ...src, id: 'fcdo-travel-advice', dedupeBy: 'url+updated' };
+const sept11 = parseFeed(advisory('2026-09-11T10:00:00Z'), fcdoSrc)[0];
+const sept14 = parseFeed(advisory('2026-09-14T14:40:00Z'), fcdoSrc)[0];
+
+eq('a re-read of the same revision is the same candidate', candidateId(parseFeed(advisory('2026-09-11T10:00:00Z'), fcdoSrc)[0]), candidateId(sept11));
+ok('a revised advisory at the same URL is a new candidate', candidateId(sept11) !== candidateId(sept14), 'the revision would have been skipped as already-seen');
+
+// The opposite case, which is why this is declared per source rather than on
+// by default: a one-time article must not come back round on an edit.
+const article = { ...src, id: 'nasa-earth-observatory' };
+eq(
+  'a source without the flag still keys on the URL alone',
+  candidateId(parseFeed(advisory('2026-09-11T10:00:00Z'), article)[0]),
+  candidateId(parseFeed(advisory('2026-09-14T14:40:00Z'), article)[0])
+);
+ok(
+  'the live FCDO entry declares it',
+  registry().sources.find((s) => s.id === 'fcdo-travel-advice')?.dedupeBy === 'url+updated',
+  'sources.json lost dedupeBy'
+);
+
 /* -------------------------------------------------------------------------- */
 group('climate — monthly normals and month verdicts');
 
