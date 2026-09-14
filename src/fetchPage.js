@@ -44,7 +44,9 @@ export async function fetchText(url, { timeoutMs = DEFAULT_TIMEOUT_MS, accept = 
   }
   clearTimeout(timer);
 
-  if (!res.ok) throw new FetchError('http_error', `HTTP ${res.status}`);
+  // The status rides along on the error so a caller can tell a bot wall (403)
+  // apart from a dead link (404) without parsing the message.
+  if (!res.ok) throw Object.assign(new FetchError('http_error', `HTTP ${res.status}`), { status: res.status });
 
   // A source page that is 5MB of minified app bundle isn't going to yield a
   // claim worth publishing, and we'd rather not hold it in memory.
@@ -148,9 +150,37 @@ function safeChar(code) {
   }
 }
 
+// Sources that answer a plain fetch with 403 are not refusing us the content —
+// they serve the feed that links to these very pages. They are refusing the
+// shape of the request. A real browser is the documented way past that, and it
+// is the only status worth retrying: a 404 is a dead link and a 429 is a rate
+// limit, neither of which a second request fixes.
+//
+// Off by default in tests via FETCH_BROWSER_FALLBACK=0, because the offline
+// suite must not reach for Chromium.
+const browserFallbackEnabled = () => process.env.FETCH_BROWSER_FALLBACK !== '0';
+
 /** Fetch a URL and hand back its readable text, capped to something a prompt can hold. */
 export async function fetchReadable(url, { maxChars = 12_000, ...opts } = {}) {
-  const { body, finalUrl, contentType } = await fetchText(url, opts);
+  let fetched;
+  try {
+    fetched = await fetchText(url, opts);
+  } catch (e) {
+    if (!(e.status === 403 && browserFallbackEnabled())) throw e;
+    // Imported lazily so nothing that merely parses a feed pays for Playwright,
+    // and so a box without Chromium still runs everything that never hits a 403.
+    const { fetchViaBrowser } = await import('./browserFetch.js');
+    try {
+      fetched = await fetchViaBrowser(url);
+    } catch (browserErr) {
+      // Report the original refusal, not the retry's failure — "HTTP 403" is
+      // the fact worth acting on, and burying it under a Playwright stack is
+      // how a blocked source gets misfiled as a broken browser.
+      throw Object.assign(e, { browserRetry: browserErr.message });
+    }
+  }
+
+  const { body, finalUrl, contentType } = fetched;
   const text = /json/i.test(contentType) ? body : htmlToText(body);
   return {
     finalUrl,

@@ -160,7 +160,10 @@
       ],
       "lang": "ja",
       "enabled": true,
-      "note": "Probed 2026-08-22: 200, 17KB, items present. Japanese-language titles; the drafting step translates, and verify.js still requires the claim to trace to this page."
+      "note": "Probed 2026-08-22: 200, 17KB, items present. Japanese-language titles; the drafting step translates, and verify.js still requires the claim to trace to this page. urlIncludes added 2026-09-14: the feed also carries JNTO's corporate wire (procurement notices, trade-show exhibitor recruitment, B2B seminars) — 14 of 15 items on the day it was measured, all of them stub pages of 178-419 chars against a 700 floor. /news/press/ is the travel news.",
+      "urlIncludes": [
+        "/news/press/"
+      ]
     },
     {
       "id": "nasa-earth-observatory",

@@ -4,7 +4,7 @@ loadEnv();
 import { primaryAuthority, registry } from '../src/sources/index.js';
 import { flightPriceGuard, verifyEvidence, verifyDraftText, minSourceChars, noDecimalsUpFront, noRepeatedWord, RejectedError } from '../src/verify.js';
 import { safeStem } from '../src/render/index.js';
-import { htmlToText, stripBoilerplate, decodeEntities } from '../src/fetchPage.js';
+import { htmlToText, stripBoilerplate, decodeEntities, fetchReadable, FetchError } from '../src/fetchPage.js';
 import { parseFeed } from '../src/sources/rss.js';
 import { monthlyNormals, verdictFor } from '../src/sources/climate.js';
 import { quotaBlock } from '../src/pillars.js';
@@ -174,6 +174,64 @@ ok(
 );
 
 /* -------------------------------------------------------------------------- */
+group('the 403 browser fallback — which failures are worth a second request');
+
+// globalThis.fetch is stubbed rather than hitting the network, so this stays an
+// offline check. It deliberately never exercises the Playwright path: launching
+// Chromium to prove a routing decision would make `npm test` need a browser.
+// The browser fetch itself was verified against UNESCO's live pages.
+{
+  const realFetch = globalThis.fetch;
+  const stub = (status) => async () => ({
+    ok: status < 400,
+    status,
+    url: 'https://whc.unesco.org/en/news/1',
+    headers: new Map([['content-type', 'text/html']]),
+    text: async () => '<html><body><p>hello</p></body></html>',
+  });
+  const grab = async (fn) => {
+    try {
+      await fn();
+      return null;
+    } catch (e) {
+      return e;
+    }
+  };
+
+  const prev = process.env.FETCH_BROWSER_FALLBACK;
+  try {
+    process.env.FETCH_BROWSER_FALLBACK = '0';
+
+    globalThis.fetch = stub(404);
+    const notFound = await grab(() => fetchReadable('https://whc.unesco.org/en/news/1'));
+    ok('a 404 is a FetchError', notFound instanceof FetchError, String(notFound));
+    eq('the status rides along on the error', notFound?.status, 404);
+    ok('a 404 is never retried through a browser', notFound?.browserRetry === undefined, 'a dead link is not a bot wall');
+
+    globalThis.fetch = stub(429);
+    const rateLimited = await grab(() => fetchReadable('https://whc.unesco.org/en/news/1'));
+    ok('a 429 is not retried either', rateLimited?.browserRetry === undefined, 'asking again does not fix a rate limit');
+
+    globalThis.fetch = stub(403);
+    const blocked = await grab(() => fetchReadable('https://whc.unesco.org/en/news/1'));
+    eq('a 403 still reports 403', blocked?.status, 403);
+    ok(
+      'the kill switch stops the browser being reached for at all',
+      blocked?.browserRetry === undefined,
+      'FETCH_BROWSER_FALLBACK=0 must keep the offline suite off Chromium'
+    );
+
+    globalThis.fetch = stub(200);
+    const fine = await fetchReadable('https://whc.unesco.org/en/news/1');
+    eq('a 200 goes through the ordinary path', fine.text.trim(), 'hello');
+  } finally {
+    globalThis.fetch = realFetch;
+    if (prev === undefined) delete process.env.FETCH_BROWSER_FALLBACK;
+    else process.env.FETCH_BROWSER_FALLBACK = prev;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 group('feed parsing — RSS and Atom through one adapter');
 
 const src = { id: 't', name: 'T', authority: 'government', lang: 'en', pillars: ['entry'] };
@@ -205,6 +263,32 @@ eq('Atom: one item', atom.length, 1);
 eq('Atom: href pulled from the alternate link element', atom[0].url, 'https://www.gov.uk/b');
 ok('Atom: date parsed', atom[0].publishedAt?.startsWith('2026-08-19'), atom[0].publishedAt);
 eq('an entry with no link is dropped', parseFeed('<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>x</title></entry></feed>', src).length, 0);
+
+// urlIncludes — one feed carrying two kinds of thing.
+//
+// JNTO publishes travel news and its corporate wire down the same pipe. The
+// junk was always rejected downstream as too thin, so this is about not letting
+// fourteen procurement notices occupy the ranked list a real candidate needs.
+const mixedFeed = `<?xml version="1.0"?><rss version="2.0"><channel>
+   <item><title>Tool for inbound travellers</title><link>https://www.jnto.go.jp/news/press/_1.html</link><description>real</description></item>
+   <item><title>Procurement notice</title><link>https://www.jnto.go.jp/news/info/post_53.html</link><description>stub</description></item>
+   <item><title>Trade show exhibitors wanted</title><link>https://www.jnto.go.jp/news/expo-seminar/_925.html</link><description>stub</description></item>
+ </channel></rss>`;
+const jntoSrc = { ...src, id: 'jnto-news', urlIncludes: ['/news/press/'] };
+eq('urlIncludes: keeps only the declared path', parseFeed(mixedFeed, jntoSrc).length, 1);
+eq('urlIncludes: and it is the right one', parseFeed(mixedFeed, jntoSrc)[0].title, 'Tool for inbound travellers');
+eq('a source with no urlIncludes is unfiltered', parseFeed(mixedFeed, src).length, 3);
+eq(
+  'urlIncludes accepts more than one fragment',
+  parseFeed(mixedFeed, { ...src, urlIncludes: ['/news/press/', '/news/info/'] }).length,
+  2
+);
+// The registry is data, so the filter has to survive a round trip through it.
+ok(
+  'the live JNTO entry declares the filter',
+  (registry().sources.find((s) => s.id === 'jnto-news')?.urlIncludes || []).includes('/news/press/'),
+  'sources.json lost urlIncludes'
+);
 
 /* -------------------------------------------------------------------------- */
 group('climate — monthly normals and month verdicts');

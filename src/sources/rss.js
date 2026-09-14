@@ -86,10 +86,27 @@ export function parseFeed(body, source) {
   else if (feed) entries = arr(feed.entry);
   else if (doc?.channel) entries = arr(doc.channel.item);
 
+  // A feed that carries more than one kind of thing.
+  //
+  // JNTO publishes its travel news and its corporate wire down the same pipe:
+  // of fifteen items, one was a press release about a tool for inbound
+  // travellers and fourteen were procurement notices, trade-show exhibitor
+  // recruitment and B2B seminars. All fourteen were correctly rejected as too
+  // thin — those pages are a title, a date and "back to list" — but not before
+  // they had occupied fourteen slots in the ranked list that real candidates
+  // could have used, and a source's own URL scheme says which is which long
+  // before any of that costs anything.
+  //
+  // Declared per source in sources.json rather than hardcoded, and the
+  // thin-source floor still runs afterwards: this is a cheaper way to reach the
+  // same verdict, not a replacement for it.
+  const include = source.urlIncludes || null;
+
   return entries
     .map((entry) => {
       const url = linkOf(entry);
       if (!url) return null;
+      if (include && !include.some((frag) => url.includes(frag))) return null;
       const title = htmlToText(decodeEntities(textOf(entry.title) || String(entry.title || ''))).trim();
       if (!title) return null;
       return {

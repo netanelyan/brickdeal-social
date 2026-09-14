@@ -153,8 +153,17 @@ to loosen it: a fuzzy quote match is indistinguishable from no check at all.
 
 **Six of thirteen declared sources work.** The rest are off with the probe result
 recorded. The two most wanted are `gov.il` and the Israel Airports Authority,
-both behind Imperva. Playwright already ships here, so a real browser fetch is
-the obvious way in — unwritten.
+both behind Imperva. There is now a real browser fetch (`src/browserFetch.js`),
+written to get past UNESCO's 403 — whether it is enough for Imperva, which is a
+considerably more determined wall, is untested.
+
+**Counting feed items is not the same question as "does this source work".**
+UNESCO served ten items a run and showed a green tick in `check-sources` for a
+month while every article page behind those items returned 403 — the source was
+contributing nothing and the probe said it was fine. `check-sources` now takes a
+sample of items all the way through `verifySource()`, which is the actual gate.
+The general lesson is that a health check measuring the cheap half of a pipeline
+reports on the half that was never going to break.
 
 **Some content thresholds are tuned on small samples.** The thin-source floors
 were measured against one day of items. They are env-overridable and every
@@ -204,9 +213,17 @@ in English.
 - The bot also refuses to start with no publish destination configured — an
   approval queue with nowhere to publish silently eats what you approve.
 - Fetched page content is only ever regex-matched and shown to the model. It is
-  never rendered as HTML, never evaluated, never shelled out to. The one place
-  HTML *is* rendered is our own templates, where every interpolated value goes
+  never evaluated in this process and never shelled out to. The one place HTML
+  *is* rendered is our own templates, where every interpolated value goes
   through `escapeHtml()`.
+- **The one exception, stated plainly:** a source that answers a plain fetch
+  with 403 is retried through headless Chromium (`src/browserFetch.js`), and
+  there the page really is rendered and its scripts really do run. They run in
+  Chromium's sandbox, in a throwaway context with no storage and no
+  credentials, with images, media and fonts blocked; what comes back out is
+  HTML that goes through the same `htmlToText()` path as every other page. Only
+  403 is retried — a 404 is a dead link and a 429 is a rate limit, and neither
+  is fixed by asking again.
 - Telegram messages are sent without `parse_mode`. A scraped title containing a
   stray `*` would otherwise break Markdown parsing and drop the message — which,
   for an approval card, means silently not asking.
