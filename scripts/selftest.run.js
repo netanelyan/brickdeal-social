@@ -363,23 +363,40 @@ const fcdo = { ...base, authority: 'government', title: 'Norway', summary: 'x'.r
 const trade = { ...base, authority: 'official-dmo', title: '「第29回JNTOインバウンド旅行振興フォーラム」取材のご案内', summary: 'y'.repeat(400) };
 
 ok('a short title with a real summary is not penalised as thin', scoreItem(fcdo) > scoreItem({ ...fcdo, summary: '' }));
-// Something that happened outranks ten-year rainfall normals. The climate source
-// stamped itself with the current time, took maximum recency every day, and led
-// the queue with "4 rain days in Bangkok".
+// News that changes what a traveller can do still outranks a dataset item — but
+// it now wins for the right reason.
 //
-// This used to be asserted with an eruption at Etna on the winning side, which
-// is now precisely the wrong example: the spectacle penalty exists to stop that
-// item leading the queue. The evergreen rule is orthogonal to the trip rule, so
-// it is tested with an item that is news AND somewhere a reader could go.
+// It used to win because evergreen carried a penalty, which made the feed a wire
+// with a climate card as the fallback. Evergreen now earns a bonus, and the
+// Louvre still comes first on the actionable vocabulary alone ("reopens"). That
+// is the intended shape: something a reader can act on beats an evergreen fact,
+// and everything else loses to it.
 ok(
-  'a real event outranks an evergreen dataset item',
+  'actionable news still outranks an evergreen dataset item',
   scoreItem({ title: 'Louvre reopens the Denon wing after two years', summary: 'x'.repeat(300), authority: 'government', publishedAt: new Date().toISOString(), pillarHints: ['inCity'] }) >
     scoreItem({ title: 'Bangkok — monthly climate normals 2016–2025 (ERA5)', summary: 'x'.repeat(300), authority: 'dataset', publishedAt: null, evergreen: true, pillarHints: ['timing'] })
 );
+
+// The reversal, pinned. A travel desk is not a wire: a fact that is worth saving
+// beats a fact that merely happened, and "it happened today" is worth very
+// little on its own. Both items below are ordinary news with nothing actionable
+// in them; the evergreen one wins.
+ok(
+  'an evergreen fact now beats an undifferentiated news item',
+  scoreItem({ title: 'T', summary: 'x'.repeat(300), authority: 'dataset', evergreen: true }) >
+    scoreItem({ title: 'T', summary: 'x'.repeat(300), authority: 'dataset', publishedAt: new Date().toISOString(), evergreen: false })
+);
 ok(
   'the evergreen flag is what does it, not the source name',
-  scoreItem({ title: 'T', summary: 'x'.repeat(300), authority: 'dataset', evergreen: false }) >
-    scoreItem({ title: 'T', summary: 'x'.repeat(300), authority: 'dataset', evergreen: true })
+  scoreItem({ title: 'T', summary: 'x'.repeat(300), authority: 'dataset', evergreen: true }) >
+    scoreItem({ title: 'T', summary: 'x'.repeat(300), authority: 'dataset', evergreen: false })
+);
+// Recency is now a tie-breaker rather than a driver: it still orders two
+// otherwise identical items, and it no longer decides the feed.
+ok(
+  'recency still breaks a tie between identical items',
+  scoreItem({ title: 'T', summary: 'x'.repeat(300), authority: 'government', publishedAt: new Date().toISOString() }) >
+    scoreItem({ title: 'T', summary: 'x'.repeat(300), authority: 'government', publishedAt: new Date(Date.now() - 90 * 86_400_000).toISOString() })
 );
 
 /* -------------------------------------------------------------------------- */

@@ -82,7 +82,7 @@ const DRAFT_SCHEMA = {
     subhead: { type: 'string', description: 'Hebrew supporting line, or empty string' },
     bullets: {
       type: 'array',
-      description: 'Exactly 3 items for the tips layout; empty array for every other layout',
+      description: '3 to 5 items for the tips layout; empty array for every other layout',
       items: {
         type: 'object',
         properties: {
@@ -220,13 +220,53 @@ are not places, but they are things a reader does on a trip, and they count.
 
 WHAT THIS CHANNEL IS FOR
 In rough order of how much of the feed each should be:
-  - Places inside cities Israelis already visit and tend to walk past.
   - Why a specific month is the right or the wrong time for a destination.
-  - A neighbourhood or a short route worth a day.
   - Practical things that save money or a wasted morning.
+  - Places inside cities Israelis already visit and tend to walk past.
+  - A neighbourhood or a short route worth a day.
   - Things that change what a trip feels like: closures, seasons, crowds.
 A source that does not land somewhere in that list is usually a source for
 somebody else's channel, and usable: false is the right answer.
+
+WOULD ANYONE SAVE THIS? — THE QUESTION THAT DECIDES THE FEED
+This is a travel desk, not a wire. The single most useful test of a post is
+whether someone planning a trip would send it to the person they are going with,
+or save it for a trip they have not booked yet.
+
+That test is what separates the two kinds of item that arrive here:
+
+  A volcano's ash cloud disrupted flights to Catania this week.
+  Phuket has 7 rain days in February and 28 in October.
+
+The first is true, sourced, and correctly filed as news. It is useful to the few
+people flying to Sicily in the next fortnight, it is stale by the weekend, and
+nobody saves it. The second is useful to everyone who will ever book Thailand,
+and it is still useful in a year. The second is the post this channel wants.
+
+So: WHEN A SOURCE OFFERS BOTH A PASSING EVENT AND A LASTING FACT, TAKE THE
+LASTING FACT. A report about an eruption closing a trail is also a report about
+which months that trail is usually open. Write the second one.
+
+News still belongs here when it changes what a traveller can actually do — a
+visa rule, a border procedure, a route opening, a closure that will outlast the
+month. That is a real thread and it should keep running. It is one thread, not
+the spine.
+
+THE SHAPES THAT GET SAVED
+Reach for these before reaching for "what happened":
+
+  - The numbered list. "4 הדברים שכדאי לדעת לפני ש...", "5 החודשים ש...".
+    Concrete, countable, scannable. Use the tips layout, 3 to 5 items.
+  - The timing answer. Which month, and what the catch is.
+  - The surprising number. One figure that rearranges what someone assumed.
+  - The technique. A small specific thing done a particular way that works
+    better - a queue avoided, an hour of the day, an order of doing things.
+  - The correction. A widely held belief the source actually contradicts.
+
+Every one of those still obeys THE ONE RULE THAT MATTERS below: each item in a
+list is a claim, and each claim needs its own verbatim quote. A five-item list
+you can only source three items for is a three-item list, not a five-item list
+with two invented ones. Shorten it and move on.
 
 THE ONE RULE THAT MATTERS
 Every factual claim you write must come from the SOURCE TEXT you are given. Not from
@@ -278,7 +318,12 @@ Text-led (no photograph needed — these are the default):
 - compare: a widely held belief that the source contradicts. Fill "compare":
   a is the wrong belief, b is what the source actually says. Only when the
   source really does contradict something, never as a rhetorical frame.
-- tips: exactly three short practical tips. Use only when you have three distinct ones.
+- tips: three to five short practical tips, numbered on the card. One of the
+  strongest shapes here — a numbered list is scannable, it promises a known
+  amount of reading, and it is the format people save. Use it whenever you have
+  three or more genuinely distinct, separately sourced points. Do not pad to
+  reach five: four real tips beat five with a weak one, and the weak one is the
+  one a reader remembers.
 - whenToGo: the twelve-month strip. Use this ONLY when the shape of the year is
   itself the story - a place with one sharp window, or two seasons that swap.
   If the answer is "go in October", that is a sentence, not a chart: use
@@ -353,6 +398,17 @@ left.
 
 Hold the payoff back. Put it in the subhead, which is where the description
 starts.
+
+WHERE THAT RULE STOPS. Withholding is for the cards that carry one line of type
+over a photograph — there, an answered headline leaves nothing to open. It does
+NOT apply to the cards that are themselves the answer: tips, numbers, whenToGo,
+compare. A numbered list of five things is saved precisely because all five are
+visible, and a month strip is useful because you can read the year off it. Those
+cards are not teasers and must not be written as teasers. Deliver the goods.
+
+A post that gets saved has done better than a post that got tapped. Tapping is a
+proxy; saving is someone deciding this will be useful to them later, which is the
+whole business this channel is in.
 
 WRITING THE CARD
 - headline: 4-9 Hebrew words. Concrete and specific. A number, a name, a place.
@@ -624,7 +680,7 @@ function normalise(d, item) {
     subhead: s(d.subhead),
     caption: hyphensOnly(String(d.caption ?? '')).trim(),
     bullets: Array.isArray(d.bullets)
-      ? d.bullets.slice(0, 3).map((b) => ({ title: s(b?.title), text: s(b?.text) }))
+      ? d.bullets.slice(0, 5).map((b) => ({ title: s(b?.title), text: s(b?.text) }))
       : [],
     stat: { value: s(d.stat?.value), unit: s(d.stat?.unit), label: s(d.stat?.label) },
     compare: {
@@ -649,7 +705,7 @@ function normalise(d, item) {
   // filler, fall back to the fact card, which one good line can carry on its
   // own. Same principle as the photo layouts degrading when there is no image.
   const complete = {
-    tips: () => out.bullets.filter((b) => b.title && b.text).length === 3,
+    tips: () => out.bullets.filter((b) => b.title && b.text).length >= 3,
     numbers: () => Boolean(out.stat.value),
     compare: () => Boolean(out.compare.aTitle && out.compare.aText && out.compare.bTitle && out.compare.bText),
     route: () => Boolean(out.route.to),

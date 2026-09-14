@@ -99,20 +99,37 @@ export function scoreItem(item, { deficits = pillarDeficits(), now = Date.now() 
   const summaryLen = item.summary?.length || 0;
   const thin = item.title.length < 25 && summaryLen < 200 ? -0.25 : 0;
 
-  // An evergreen item is one that will be just as available tomorrow. It should
-  // lose to anything that actually happened, and win only when nothing did.
-  // Without this the climate source led every run — it is generated on demand,
-  // so it never ages out and never runs dry, which is precisely why it must not
-  // be allowed to compete on equal terms.
-  const evergreen = item.evergreen ? -0.25 : 0;
+  // Evergreen used to be a penalty here. It is now a bonus, and that is a
+  // deliberate reversal rather than a tuning nudge.
+  //
+  // The old reasoning was sound for a news desk: an item that will be just as
+  // available tomorrow should lose to something that actually happened, or the
+  // climate source — generated on demand, never ageing, never running dry —
+  // would lead every run.
+  //
+  // But leading every run turned out to be closer to right than the wire was. A
+  // post about an ash cloud disrupting flights to Catania is useful to the few
+  // people flying there this week and stale by the weekend; "7 rain days in
+  // Phuket in February, 28 in October" is useful to anyone booking Thailand,
+  // ever, and it is the kind of thing people save. Saving is what builds a
+  // following. The channel is a travel desk, not a wire.
+  //
+  // The news thread is kept — a border rule changing genuinely matters — but it
+  // is now one thread among many rather than the spine of the feed.
+  const evergreen = item.evergreen ? 0.2 : 0;
 
   // Enough text to work with. Past a couple of paragraphs more length stops
   // meaning more substance, so this saturates rather than growing.
   const body = Math.min(0.15, summaryLen / 4000);
 
+  // Recency was 0.3, the second-largest term in the formula. That is the right
+  // weight for a feed whose job is to tell you what just happened, and the wrong
+  // one for a feed whose job is to be worth saving. At 0.12 a fresh item still
+  // wins a tie against an identical stale one, which is all recency should ever
+  // have been deciding here.
   return (
     authority * 0.35 +
-    recency * 0.3 +
+    recency * 0.12 +
     deficit * 0.8 +
     specific +
     body +
@@ -133,14 +150,16 @@ export function scoreItem(item, { deficits = pillarDeficits(), now = Date.now() 
  *   - at most `perSource` items from any one source survive, so the single most
  *     prolific feed doesn't become the whole day's output.
  */
-// The climate source is the only one that always has something to say — it
-// interrogates a dataset rather than waiting for someone to publish. That makes
-// it the right answer on a quiet day and the wrong answer on a busy one: with
-// the general cap it contributed two of three cards in a run, and two weather
-// cards in a row reads like a forecast feed, not a travel channel.
+// The climate source interrogates a dataset rather than waiting for someone to
+// publish, so it is the only one that always has something to say. It was capped
+// at one a day to stop it leading the feed; it is now capped at two, because
+// leading the feed is closer to the job than the wire was.
 //
-// One a day, maximum. On a day when a real story exists it should lose to it.
-const PER_SOURCE_CAP = { 'open-meteo-climate': 1 };
+// Still capped rather than uncapped, and the reason has not changed: two weather
+// cards in a row reads like a forecast feed. The fix for "not enough evergreen"
+// is more evergreen SOURCES asking different questions of different datasets,
+// not the same question about a different city three times a day.
+const PER_SOURCE_CAP = { 'open-meteo-climate': 2 };
 
 export function rank(items, { perSource = 2, limit = 12, now = Date.now() } = {}) {
   const deficits = pillarDeficits();
