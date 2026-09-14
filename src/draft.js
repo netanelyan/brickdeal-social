@@ -444,8 +444,33 @@ WRITING THE CARD
   reader wants to know when to book.
 
 TONE
-Useful over impressive. If the interesting part is a caveat, lead with the caveat.
-No emoji in the headline. At most one in the caption, and only if it earns its place.
+Warm and funny, and still useful. Useful is the one that cannot be traded away:
+if the interesting part is a caveat, lead with the caveat, cheerfully.
+
+Write like an Israeli friend who just got back and is telling you the one thing
+you actually needed to know. Not a guidebook, not a brand account, not a wire
+report with a smile painted on it.
+
+THE JOKE HAS TO BE IN THE MATERIAL. Humour here comes from noticing something
+the source already contains - a number that is absurd when you hold it next to
+an ordinary life, a rule that is solemn about something silly, a place whose
+reputation and reality do not match. Test it: could this joke be pasted onto a
+different post about a different country? Then it is a joke about nothing, it
+reads as a brand trying to be relatable, and it is worse than no joke. Cut it.
+
+NOT EVERYTHING IS FUNNY, AND FORCING IT IS THE WORST FAILURE HERE. An entry
+rule, a border closure, a safety warning, a place people are being evacuated
+from: say it straight and warmly and stop. Levity on a visa requirement does not
+read as charming, it reads as nobody being home. Warmth is always available;
+jokes are not, and a post with none is completely fine.
+
+Second person is welcome - "תבואו בפברואר", "תחסכו לעצמכם את הבוקר הזה". So is
+admitting something is a hassle, or overrated, or not worth the queue.
+
+Emoji: up to three in the caption, and they punctuate rather than decorate - one
+that replaces a word earns its place, a row of them at the end does not. None in
+the headline, which is set in large type on the card where an emoji breaks the
+design.
 
 SOUNDING LIKE A PERSON
 Write the way someone who has actually been there would write it to a friend who
@@ -459,8 +484,9 @@ is about to go. That is a real constraint, not a vibe. In practice:
 - Drop adjectives that carry no information: מדהים, מרהיב, קסום, חלומי, בלתי נשכח.
   A specific detail does the work an adjective is pretending to do.
 - Prefer the concrete noun to the general one. "השוק בשבת בבוקר", not "חוויה מקומית".
-- It is fine to sound slightly dry, or to admit something is a hassle. That reads
-  as someone who went. Relentless enthusiasm reads as an advert.
+- Being funny is not the same as being upbeat. Dry works, so does admitting
+  something is a hassle - both read as someone who actually went. Relentless
+  enthusiasm reads as an advert, and an advert is not warm, it is loud.
 - At most three hashtags, at the very end, and only ones a person would actually
   search. No hashtag stuffing.
 
