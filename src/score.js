@@ -50,8 +50,26 @@ const TRADE_NOISE =
 // perfectly good "conditions" post, and it will match both lists and net out
 // roughly neutral, which is the correct treatment for an item that could go
 // either way.
+//
+// The vocabulary list is not enough on its own, and the way it failed is worth
+// writing down. Of the Smithsonian's twenty-two weekly reports, the two that
+// ranked highest were "Asosan - Continuing Unrest" and "Iwatesan - Continuing
+// Unrest", at 0.71 and 0.70 — seventh and eighth of sixty-five items, above
+// every FCDO advisory. Neither says erupt, lava, ash plume or volcano: they say
+// "unrest ... the Alert Level was lowered to 2". So the penalty was not merely
+// missing them, it was SELECTING them — twenty of the twenty-two took the hit
+// and the two that slipped through were promoted past everything by comparison,
+// then survived the trip rule (a volcano is a real place a reader could stand
+// near) while the institutional items above them were rejected. The daily pick
+// was the two volcano items that had evaded the volcano filter.
+//
+// The alert-level dialect is added below, but a wire that is one phenomenon is a
+// property of the SOURCE, not of any given item's wording — so `spectacle: true`
+// in sources.json applies the penalty to every item from that feed regardless of
+// how the week's report happens to be phrased. A penalty, still not a filter:
+// Mount Aso is one of this channel's better cards and it stays possible.
 const SPECTACLE =
-  /\b(?:erupt\w*|eruption|lava|ash (?:plume|cloud)|volcan\w*|earthquake|magnitude \d|tsunami|waterspout|tornado|hurricane|cyclone|typhoon|wildfire|flood(?:s|ing|ed)?|landslide|mudslide|iceberg|calving|glacier|avalanche|sinkhole|shipwreck|meteor|aurora|solar flare|penguin\w*|whale\w*|migration of)\b/i;
+  /\b(?:erupt\w*|eruption|lava|ash (?:plume|cloud|emission)|volcan\w*|alert level|unrest|seismicity|seismic network|pyroclastic|lahar|fumarol\w*|magma\w*|sulfur dioxide|crater|earthquake|magnitude \d|tsunami|waterspout|tornado|hurricane|cyclone|typhoon|wildfire|flood(?:s|ing|ed)?|landslide|mudslide|iceberg|calving|glacier|avalanche|sinkhole|shipwreck|meteor|aurora|solar flare|penguin\w*|whale\w*|migration of)\b/i;
 
 // The other half: vocabulary that only appears when something is actually
 // reachable, bookable, open, shut, or about to be.
@@ -89,7 +107,7 @@ export function scoreItem(item, { deficits = pillarDeficits(), now = Date.now() 
   // most 0.35 and recency at most 0.3, so -0.6 is enough that a fresh eruption
   // from a government source no longer outranks a mundane item about a museum
   // reopening — which is the exact swap this whole change is for.
-  const spectacle = SPECTACLE.test(text) ? -0.6 : 0;
+  const spectacle = item.spectacle || SPECTACLE.test(text) ? -0.6 : 0;
   const actionable = ACTIONABLE.test(text) ? 0.3 : 0;
 
   // A thin *item* rarely drafts well — but a thin title alone doesn't mean
@@ -159,7 +177,15 @@ export function scoreItem(item, { deficits = pillarDeficits(), now = Date.now() 
 // cards in a row reads like a forecast feed. The fix for "not enough evergreen"
 // is more evergreen SOURCES asking different questions of different datasets,
 // not the same question about a different city three times a day.
-const PER_SOURCE_CAP = { 'open-meteo-climate': 2 };
+//
+// The volcano wire gets the opposite treatment, and for a reason the numbers
+// made plain: it is twenty-two of the sixty-five items gathered on an ordinary
+// day, every one of them the same subject, and a weekly report re-offers those
+// twenty-two every day until the week rolls over. At two a run that is up to
+// fourteen volcano candidates a week, all of them passing the trip rule that
+// most of the rest of the pool fails. One a run, so it can still lead on a day
+// when it genuinely has the best item and cannot be half the queue.
+const PER_SOURCE_CAP = { 'open-meteo-climate': 2, 'smithsonian-volcano': 1 };
 
 export function rank(items, { perSource = 2, limit = 12, now = Date.now() } = {}) {
   const deficits = pillarDeficits();

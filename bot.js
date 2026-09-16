@@ -306,7 +306,13 @@ async function publishNext() {
   // Nothing to do — the destination was reconfigured away while this sat in the
   // queue. Recording it stops it looping forever as a card that owes nothing.
   if (!owed.length) {
-    store.recordPublished({ id: cand.id, pillar: cand.pillar, tags: cand.tags, layout: cand.layout });
+    store.recordPublished({
+      id: cand.id,
+      pillar: cand.pillar,
+      tags: cand.tags,
+      layout: cand.layout,
+      sourceId: cand.sourceId,
+    });
     return false;
   }
 
@@ -347,6 +353,7 @@ async function publishNext() {
       pillar: cand.pillar,
       tags: cand.tags,
       layout: cand.layout,
+      sourceId: cand.sourceId,
       telegram: Boolean(done.telegram),
       instagram: Boolean(done.instagram),
     });

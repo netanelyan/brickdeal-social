@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { verifySource, verifyEvidence, verifyDraftText, RejectedError } from './verify.js';
 import { draft as draftPost } from './draft.js';
 import { quotaBlock } from './pillars.js';
-import { findImage, imagesEnabled } from './images.js';
+import { findImage, imageQueries, imagesEnabled } from './images.js';
 import { renderCard } from './render/index.js';
 import { isPhotoLayout, PHOTO_FALLBACK } from './render/templates.js';
 import { channelCaption, instagramCaption } from './format.js';
@@ -126,16 +126,37 @@ async function build(item, { render = true } = {}) {
 
   // 4. Topic quotas — checked here rather than at publish time so a blocked
   //    candidate never occupies your attention in the first place.
-  const blocked = quotaBlock(d);
+  const blocked = quotaBlock({ ...d, sourceId: item.sourceId });
   if (blocked) throw new RejectedError('quota', blocked);
 
   // 5. Image, if any provider is configured. v1 runs with none, so this is null
   //    and the layout choice already assumed as much.
+  //
+  //    The downgrade below used to happen in silence, and silence is the wrong
+  //    behaviour for it: a photo-led draft that arrives as a wall of type looks
+  //    identical to a draft that chose a text layout on purpose, so a broken
+  //    image provider reads as an editorial decision for as long as nobody
+  //    thinks to check. What was asked for and what came back is recorded and
+  //    printed in the approval message.
   let image = null;
-  if (imagesEnabled() && isPhotoLayout(d.layout)) {
-    image = await findImage(d).catch(() => null);
+  let imageMiss = null;
+  if (isPhotoLayout(d.layout)) {
+    if (!imagesEnabled()) {
+      imageMiss = 'אין ספק תמונות מוגדר';
+    } else {
+      try {
+        image = await findImage(d);
+        if (!image?.src) {
+          const asked = imageQueries(d);
+          imageMiss = asked.length ? `לא נמצאה תמונה ל-"${asked[0]}"` : 'הטיוטה לא ביקשה תמונה';
+        }
+      } catch (e) {
+        imageMiss = e.message;
+      }
+    }
   }
-  if (isPhotoLayout(d.layout) && !image?.src) d.layout = PHOTO_FALLBACK;
+  const photoDowngrade = isPhotoLayout(d.layout) && !image?.src ? d.layout : null;
+  if (photoDowngrade) d.layout = PHOTO_FALLBACK;
 
   const cand = {
     id,
@@ -147,6 +168,10 @@ async function build(item, { render = true } = {}) {
     publishedAt: item.publishedAt || null,
     data: item.data || null,
     image,
+    // Only set when a photograph was wanted and did not arrive — a text-led
+    // draft has nothing to explain.
+    imageMiss: photoDowngrade ? imageMiss : null,
+    photoDowngrade,
     createdAt: new Date().toISOString(),
     publishTargets: publishTargets(),
   };

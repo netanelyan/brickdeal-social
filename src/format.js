@@ -112,6 +112,13 @@ export function approvalMessage(cand) {
       : '🖼️ תמונה: אין — כרטיס טקסט בלבד'
   );
 
+  // A card that wanted a photograph and did not get one says so. Without this
+  // line the demoted card and the deliberately text-led card look the same, and
+  // an image provider that stopped working reads as a run of editorial choices.
+  if (cand.imageMiss) {
+    lines.push(`   ⚠️ ירד ל${LAYOUT_HE[cand.layout] || cand.layout} מ-${cand.photoDowngrade}: ${cand.imageMiss}`);
+  }
+
   const n = cand.evidence?.length || 0;
   lines.push(`✅ ${n} ציטוט${n === 1 ? '' : 'ים'} אומת${n === 1 ? '' : 'ו'} מול דף המקור`);
 

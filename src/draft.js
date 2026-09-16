@@ -309,28 +309,9 @@ CHOOSING A LAYOUT
 Pick the one the content actually fits. A layout whose payload you cannot fill
 honestly is the wrong layout — say so by choosing another, never by padding.
 
-Text-led (no photograph needed — these are the default):
-- fact: one surprising, specific, verifiable fact. The headline IS the fact.
-- numbers: when a single figure carries the story. Fill "stat" with the figure
-  in digits and a short unit. The card shows the figure and the headline and
-  nothing else, so the headline must be the whole point - do not also restate it
-  in the subhead. Only when the number is genuinely striking on its own.
-- compare: a widely held belief that the source contradicts. Fill "compare":
-  a is the wrong belief, b is what the source actually says. Only when the
-  source really does contradict something, never as a rhetorical frame.
-- tips: three to five short practical tips, numbered on the card. One of the
-  strongest shapes here — a numbered list is scannable, it promises a known
-  amount of reading, and it is the format people save. Use it whenever you have
-  three or more genuinely distinct, separately sourced points. Do not pad to
-  reach five: four real tips beat five with a weak one, and the weak one is the
-  one a reader remembers.
-- whenToGo: the twelve-month strip. Use this ONLY when the shape of the year is
-  itself the story - a place with one sharp window, or two seasons that swap.
-  If the answer is "go in October", that is a sentence, not a chart: use
-  photoFull and put the month in the headline. Default to photoFull for timing.
-- alert: an entry, visa, permit or border change. Lead with what changed and from when.
-- route: a new or returning route out of Tel Aviv. Fill "route" with origin,
-  destination, operator and start date. Never a fare, in any field.
+The photo-led layouts come first here because they are the default. Reach for a
+text layout only after asking whether there is a place in this post that could
+be photographed, and answering no.
 
 Photo-led (ONLY when IMAGE AVAILABLE below says yes; otherwise forbidden, and
 the card would fall back to a text layout anyway).
@@ -381,6 +362,29 @@ carries the rest. Ask for the place by name in image_query.
   supporting line needs more room than a scrim can carry legibly.
 - photoFrame: inset picture with a gallery caption under it. Quieter, good for
   a single object or detail rather than a landscape.
+
+Text-led (for a post with no place to photograph — the exception):
+- fact: one surprising, specific, verifiable fact. The headline IS the fact.
+- numbers: when a single figure carries the story. Fill "stat" with the figure
+  in digits and a short unit. The card shows the figure and the headline and
+  nothing else, so the headline must be the whole point - do not also restate it
+  in the subhead. Only when the number is genuinely striking on its own.
+- compare: a widely held belief that the source contradicts. Fill "compare":
+  a is the wrong belief, b is what the source actually says. Only when the
+  source really does contradict something, never as a rhetorical frame.
+- tips: three to five short practical tips, numbered on the card. One of the
+  strongest shapes here — a numbered list is scannable, it promises a known
+  amount of reading, and it is the format people save. Use it whenever you have
+  three or more genuinely distinct, separately sourced points. Do not pad to
+  reach five: four real tips beat five with a weak one, and the weak one is the
+  one a reader remembers.
+- whenToGo: the twelve-month strip. Use this ONLY when the shape of the year is
+  itself the story - a place with one sharp window, or two seasons that swap.
+  If the answer is "go in October", that is a sentence, not a chart: use
+  photoFull and put the month in the headline. Default to photoFull for timing.
+- alert: an entry, visa, permit or border change. Lead with what changed and from when.
+- route: a new or returning route out of Tel Aviv. Fill "route" with origin,
+  destination, operator and start date. Never a fare, in any field.
 
 WHAT THE CARD IS FOR
 The card is a hook, not the post. Someone scrolling gives it under a second.

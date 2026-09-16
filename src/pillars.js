@@ -88,6 +88,14 @@ export const quotaConfig = () => ({
   // feed can't collapse into nothing but visa alerts just because FCDO is the
   // most reliable source.
   pillarMaxShare: capShare('PILLAR_MAX_SHARE', 0.4),
+  // And no single SOURCE takes more than this much of it, which is a different
+  // question from the pillar cap and the one that was actually missing. Every
+  // volcano report files as `conditions` — so does every closure, reopening and
+  // season — and a feed of twenty-two eruptions a week can fill that pillar's
+  // whole 40% on its own while each individual post looks correctly filed. The
+  // pillar cap asks "is the feed varied?"; this asks "is it varied because more
+  // than one source is feeding it?".
+  sourceMaxShare: capShare('SOURCE_MAX_SHARE', 0.25),
   // Below this many published posts the shares are statistical noise — a cap of
   // 0.15 would block the very first kosher post forever on an empty feed.
   minSampleSize: Math.max(1, Number(process.env.QUOTA_MIN_SAMPLE ?? '8')),
@@ -102,7 +110,7 @@ export const quotaConfig = () => ({
  * you should be able to see it working and disagree with it.
  */
 export function quotaBlock(cand, history = recentPublished()) {
-  const { kosherMaxShare, pillarMaxShare, minSampleSize } = quotaConfig();
+  const { kosherMaxShare, pillarMaxShare, sourceMaxShare, minSampleSize } = quotaConfig();
   if (history.length < minSampleSize) return null;
 
   const tags = cand.tags || [];
@@ -117,6 +125,17 @@ export function quotaBlock(cand, history = recentPublished()) {
     const share = history.filter((p) => p.pillar === cand.pillar).length / history.length;
     if (share >= pillarMaxShare) {
       return `pillar "${cand.pillar}" share ${(share * 100).toFixed(0)}% >= cap ${(pillarMaxShare * 100).toFixed(0)}%`;
+    }
+  }
+
+  // Records written before sourceId was stored have none, so they count toward
+  // nobody's share. That loosens the cap for as long as the window still holds
+  // them and then corrects itself — the alternative, treating an unknown source
+  // as a match, would block real posts over a field that was never written.
+  if (cand.sourceId) {
+    const share = history.filter((p) => p.sourceId === cand.sourceId).length / history.length;
+    if (share >= sourceMaxShare) {
+      return `source "${cand.sourceId}" share ${(share * 100).toFixed(0)}% >= cap ${(sourceMaxShare * 100).toFixed(0)}%`;
     }
   }
 

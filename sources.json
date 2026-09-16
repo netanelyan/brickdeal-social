@@ -194,7 +194,8 @@
       "enabled": true,
       "note": "Probed 2026-08-23: 200, 29KB. Weekly eruption and unrest reports - Etna, Asosan and the rest. Travel-relevant and inherently interesting, and the standing global authority on the question. Every item links to the same weekly landing page, so identity is taken from the title.",
       "dedupeBy": "title",
-      "contentInFeed": true
+      "contentInFeed": true,
+      "spectacle": true
     },
     {
       "id": "open-meteo-climate",

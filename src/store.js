@@ -358,7 +358,7 @@ export const peekQueue = () => state.queue.slice(0, 10);
  * attempt and Instagram on a later one; two rows for one post would double-count
  * it in the quota window and skew the pillar mix the scorer reads back.
  */
-export function recordPublished({ id, pillar, tags = [], layout, telegram, instagram }) {
+export function recordPublished({ id, pillar, tags = [], layout, sourceId, telegram, instagram }) {
   if (id) state.publishedIds[id] = Date.now();
   state.lastPublishedAt = Date.now();
 
@@ -375,6 +375,9 @@ export function recordPublished({ id, pillar, tags = [], layout, telegram, insta
       pillar,
       tags,
       layout,
+      // What the post was made from, so the quota window can answer "how much of
+      // the feed is one source" — see sourceMaxShare in src/pillars.js.
+      sourceId,
       telegram: Boolean(telegram),
       instagram: Boolean(instagram),
     });

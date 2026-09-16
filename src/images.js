@@ -51,6 +51,25 @@ export function assertGenericAiPrompt(prompt, { place, country } = {}) {
   return true;
 }
 
+/**
+ * What to ask a stock library for, best first.
+ *
+ * The search term is English and comes from the drafting step, because the
+ * draft's place name is Hebrew and stock libraries index in English. The Hebrew
+ * pair is still worth keeping as the last resort — Pexels does answer a Hebrew
+ * query rather than returning nothing, so it is a weak search rather than a
+ * broken one, and a weak photograph of roughly the right subject still beats
+ * silently demoting a place post to a wall of type.
+ *
+ * Exported so the caller can name the query that failed. A card that came back
+ * without its photograph should say what was asked for, not just that there is
+ * no picture.
+ */
+export function imageQueries(draft) {
+  const hebrew = [draft?.place, draft?.country].filter(Boolean).join(' ').trim();
+  return [draft?.imageQuery, hebrew].map((q) => String(q || '').trim()).filter(Boolean);
+}
+
 const providers = {
   /**
    * Commercial-license stock, via Pexels. Pluggable on purpose — the pipeline
@@ -59,10 +78,11 @@ const providers = {
    */
   async stock(draft) {
     if (!pexels.configured()) return null;
-    // The search term is English and comes from the drafting step, because the
-    // draft's place name is Hebrew and stock libraries index in English.
-    const q = draft?.imageQuery || [draft?.place, draft?.country].filter(Boolean).join(' ');
-    return pexels.search(q);
+    for (const q of imageQueries(draft)) {
+      const got = await pexels.search(q);
+      if (got?.src) return got;
+    }
+    return null;
   },
 
   /** Our own catalogue: a directory plus a manifest of what each photo shows. */

@@ -130,6 +130,10 @@ export function parseFeed(body, source) {
         // rather than guessing — a feed with genuinely duplicate titles should
         // still collapse.
         ...(source.contentInFeed ? { contentInFeed: true } : {}),
+        // A whole feed that is one natural phenomenon. Declared on the source
+        // because the per-item vocabulary check in src/score.js cannot see it:
+        // see the comment above SPECTACLE there for what that cost.
+        ...(source.spectacle ? { spectacle: true } : {}),
         ...(source.dedupeBy === 'title'
           ? { dedupeId: createHash('sha1').update(`${source.id}\n${title}`).digest('hex').slice(0, 12) }
           : {}),

@@ -355,6 +355,25 @@ ok('kosher allowed while under its share', quotaBlock({ pillar: 'timing', tags: 
 ok('a single pillar cannot take over', quotaBlock({ pillar: 'inCity', tags: [] }, hist(20, 0)) !== null);
 ok('an untagged post in a fresh pillar passes', quotaBlock({ pillar: 'route', tags: [] }, hist(20, 0)) === null);
 
+// The share that was missing. Every volcano report files as `conditions` — so
+// does every closure, reopening and season — so one feed can fill that pillar's
+// entire 40% while each individual post is filed perfectly correctly. Measured
+// against the live registry: 22 of the 65 items gathered on an ordinary day were
+// the Smithsonian's weekly volcano report, and the account read as one.
+const srcHist = (n, fromWire) =>
+  Array.from({ length: n }, (_, i) => ({
+    pillar: i % 2 ? 'inCity' : 'timing',
+    tags: [],
+    sourceId: i < fromWire ? 'smithsonian-volcano' : `other-${i}`,
+  }));
+
+ok('one source cannot become the feed', quotaBlock({ pillar: 'route', tags: [], sourceId: 'smithsonian-volcano' }, srcHist(20, 6)) !== null);
+ok('a source under its share still publishes', quotaBlock({ pillar: 'route', tags: [], sourceId: 'smithsonian-volcano' }, srcHist(20, 3)) === null);
+ok('a candidate with no source is not capped by one', quotaBlock({ pillar: 'route', tags: [] }, srcHist(20, 20)) === null);
+// Records written before sourceId was stored count toward nobody's share, so the
+// cap loosens for a window rather than blocking real posts over a missing field.
+ok('history from before the field existed blocks nothing', quotaBlock({ pillar: 'route', tags: [], sourceId: 'smithsonian-volcano' }, hist(20, 0)) === null);
+
 /* -------------------------------------------------------------------------- */
 group('ranking — the two misfires found against live feeds');
 
@@ -425,6 +444,30 @@ for (const title of [
 // the drafting step, which has read the page, gets to make the actual call.
 const both = scoreItem({ ...sameDay, title: 'Etna: summit craters closed to visitors until further notice' });
 ok('a closure at a volcano is not treated as pure spectacle', both > scoreItem({ ...sameDay, title: 'Lava flows continue at Kilauea summit' }));
+
+// The hole the penalty left, found by scoring a live gather rather than a
+// fixture. Of the Smithsonian's 22 weekly reports, the two that ranked highest —
+// 7th and 8th of 65 items, above every FCDO advisory — were the two that never
+// say erupt, lava, ash or volcano. They say "unrest" and "the Alert Level was
+// lowered". The vocabulary filter was not missing them, it was selecting them.
+const unrest = {
+  ...sameDay,
+  title: 'Asosan (Japan) - Report for 27 August-2 September 2026 - Continuing Unrest',
+  summary:
+    'The Japan Meteorological Agency (JMA) reported that unrest at Asosan showed a downward trend ' +
+    'since 17 August based on seismic and gas emission data. At 1600 on 1 September the Alert Level ' +
+    'was lowered to 2 (on a scale of 1-5) and the public was warned not to enter the area around the crater.',
+};
+ok('an unrest report that never says volcano is still spectacle', scoreItem(unrest) < ordinary);
+
+// And the guarantee that does not depend on wording at all: a feed that is one
+// phenomenon is declared as such in sources.json, so next week's phrasing cannot
+// walk around it.
+const plainWording = { ...sameDay, title: 'Report for 27 August-2 September 2026' };
+ok(
+  'a wire declared as one phenomenon takes the penalty whatever the wording',
+  scoreItem({ ...plainWording, spectacle: true }) < scoreItem(plainWording)
+);
 
 // The hard rule itself. Three ways the answer comes back no, and the case the
 // brief was explicit about: a volcano you can stand near is a post, the same
@@ -917,6 +960,20 @@ ok('states the image provenance (or that there is none)', /תמונה:/.test(msg
 ok('reports how many quotes were verified', /1 ציטוט/.test(msg));
 ok('says where it will publish, before you tap', msg.includes('יפורסם לאינסטגרם'));
 ok('warns when there is nowhere to publish', approvalMessage({ ...cand, publishTargets: [] }).includes('אין יעד פרסום'));
+
+// A photo-led draft that arrives as a wall of type looks exactly like a draft
+// that chose a text layout on purpose, so a stock provider that has stopped
+// answering reads as a run of editorial decisions for as long as nobody checks.
+const demoted = approvalMessage({
+  ...cand,
+  publishTargets: ['telegram'],
+  layout: 'fact',
+  photoDowngrade: 'photoFull',
+  imageMiss: 'Pexels search failed: HTTP 429',
+});
+ok('a card that wanted a photograph and did not get one says so', demoted.includes('HTTP 429'));
+ok('and names the layout it was demoted from', demoted.includes('photoFull'));
+ok('a deliberately text-led card has nothing to explain', !/ירד ל/.test(approvalMessage({ ...cand, publishTargets: ['telegram'] })));
 
 /* -------------------------------------------------------------------------- */
 group('publish targets — Telegram may be approval-only');
