@@ -483,6 +483,40 @@ ok('a missing trip object is not a trip', tripGap(undefined) !== null);
 
 ok('B2B trade notices rank below traveller content',scoreItem(trade) < scoreItem({ ...trade, title: '箸作り体験を渋谷で開始' }));
 
+// The intergovernmental half of the same problem, checked against the live
+// UNESCO feed rather than invented: the post that prompted this — the first
+// World Heritage site of São Tomé — was ranking BELOW a fund project, a side
+// event, a policy adoption and a public forum, each of which cost a drafting
+// call to be told that a strategy document is not a place anyone can stand.
+const unesco = (title, summary) => scoreItem({ ...sameDay, authority: 'intergovernmental', title, summary });
+
+const inscription = unesco(
+  'Three New Countries Join the World Heritage List: A Major Milestone for Africa and SIDS',
+  'With the inscription of three new properties located in the Comoros, São Tomé and Príncipe, and South Sudan, three countries have joined the World Heritage List for the first time.'
+);
+
+for (const [title, summary] of [
+  ['UNESCO Supports Nauru in Completing its First World Heritage International Assistance Project', 'Supported through the World Heritage Fund, the project has strengthened national capacities for implementing the Convention.'],
+  ['World Heritage Committee adopts a landmark strategy for Small Island Developing States', 'The Committee adopted the World Heritage Strategy for SIDS 2026-2034, with over 20 SIDS State Parties present. A comprehensive roadmap backed by a budget of US$13 million.'],
+  ['Flying Beyond Borders: Connecting People, Birds and Habitats', 'The side event was organized on 25 July 2026 during the 48th session of the World Heritage Committee in Busan.'],
+  ['UNESCO-supported Public Forum Empowers Youth and Advances Partnerships', 'A Public Forum was held in Ravno, bringing together representatives of government institutions, academia and civil society.'],
+]) {
+  ok(`a new place outranks institutional news: ${title.slice(0, 38)}`, inscription > unesco(title, summary));
+}
+
+// Both halves of the feed say "the 48th session of the World Heritage
+// Committee", so the session is not the signal and must not be treated as one.
+ok(
+  'the committee session itself is not what gets penalised',
+  unesco('25 new sites inscribed', 'The World Heritage Committee wrapped up its 48th session in Busan with the addition of 25 new sites.') > 0.5
+);
+
+// Somewhere nobody can go, ever — top item of all 65 on the day this was found.
+ok(
+  'a post about Mars is not a trip and does not lead the run',
+  scoreItem({ ...sameDay, title: "Curiosity Postcard Celebrates Rover's 5,000th Day on Mars" }) < ordinary
+);
+
 /* -------------------------------------------------------------------------- */
 group('dedupe identity');
 

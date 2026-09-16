@@ -262,6 +262,12 @@ Reach for these before reaching for "what happened":
   - The technique. A small specific thing done a particular way that works
     better - a queue avoided, an hour of the day, an order of doing things.
   - The correction. A widely held belief the source actually contradicts.
+  - The first, the only, the newest. One singular thing, named, tied to one
+    place: "אתר המורשת העולמית הראשון של סאו טומה". A definite noun phrase that
+    names something specific and withholds why it matters is the strongest card
+    this channel makes - it gives a reader a reason to open the post, and it is
+    the shape to reach for whenever a source says a place has just become
+    somewhere you can go.
 
 Every one of those still obeys THE ONE RULE THAT MATTERS below: each item in a
 list is a claim, and each claim needs its own verbatim quote. A five-item list

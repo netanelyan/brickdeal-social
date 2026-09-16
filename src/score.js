@@ -36,6 +36,40 @@ const SPECIFIC = /\d{2,}|\d+\s*(?:%|km|℃|°C|€|\$|£)|\b(?:20\d\d|from \d|un
 const TRADE_NOISE =
   /商談会|募集|フォーラム|取材|セミナー|説明会|出展|受賞|\b(?:trade (?:show|fair|mission)|b2b|webinar|roadshow|press (?:conference|briefing)|call for (?:applications|entries|papers)|now open for registration|appointment of|has been awarded)\b/i;
 
+// The same problem in the register an intergovernmental body writes in, which
+// is a different dialect and was going straight past the list above.
+//
+// Measured against the live UNESCO feed: of the nine items ranked above the
+// inscription news, seven were a conference side event, a fund project, a
+// policy adoption, a public forum, a civil-society webpage, a publication
+// announcement and an ambassadorial visit. Every one of them is real, all of
+// them outranked "Three New Countries Join the World Heritage List" on
+// authority and recency alone, and each cost a drafting call to be told that
+// a strategy document is not a place anyone can stand.
+//
+// Written to discriminate rather than to match the topic: both good items also
+// say "the 48th session of the World Heritage Committee", so the session itself
+// is not a signal and does not appear here.
+const INSTITUTIONAL_NOISE =
+  /\b(?:side event|capacity[- ]building|national capacit\w+|international assistance|states? part(?:y|ies)|member states|stakeholder\w*|civil society|public forum|round ?table|steering committee|working group|memorandum of understanding|action plan|roadmap|strategy for|framework for|practical guide|now available|bringing together representatives|development partners|technical assistance|sustainable development goals)\b|訪日外客数|推計値|統計/i;
+
+// Somewhere nobody can go, ever, in the one feed that is otherwise the best
+// source of a specific place on Earth. NASA Earth Observatory carries planetary
+// science alongside the daily image, and the Mars rover led the entire pool at
+// 0.89 — top item of sixty-five — for a post that fails the trip rule by
+// definition rather than by judgement. The drafting step would have reached the
+// same verdict, after paying for it.
+const OFF_EARTH =
+  /\b(?:mars|martian|lunar|jupiter|saturn|venus|asteroid|comet|exoplanet|rover|orbiter|spacecraft|galaxy|nebula|solar system|milky way|astronaut)\b/i;
+
+// The shape of the post this channel is actually for, in the vocabulary the
+// heritage sources use for it: somewhere that has just become a place to go.
+// "The first World Heritage site of São Tomé" is a specific named thing a
+// reader could visit, and it withholds its own story — the exact card that
+// prompted this. It was ranking below a fund project.
+const NEW_PLACE =
+  /\b(?:inscri(?:bed|ption|ptions)|newly listed|added to the world heritage list|first-ever|for the first time)\b/i;
+
 // The two conditions, as far as a title and a summary can carry them.
 //
 // The real gate is the drafting step — it has read the page and it answers both
@@ -101,7 +135,12 @@ export function scoreItem(item, { deficits = pillarDeficits(), now = Date.now() 
 
   const text = `${item.title} ${item.summary || ''}`;
   const specific = SPECIFIC.test(text) ? 0.2 : 0;
-  const trade = TRADE_NOISE.test(text) ? -0.5 : 0;
+  // One term, two dialects: a DMO writing for the travel trade and an
+  // intergovernmental body writing for its own members are the same problem —
+  // a real item addressed to somebody who is not a traveller.
+  const trade = TRADE_NOISE.test(text) || INSTITUTIONAL_NOISE.test(text) ? -0.5 : 0;
+  const offEarth = OFF_EARTH.test(text) ? -0.6 : 0;
+  const newPlace = NEW_PLACE.test(text) ? 0.3 : 0;
 
   // Sized against the rest of the formula deliberately. Authority contributes at
   // most 0.35 and recency at most 0.3, so -0.6 is enough that a fresh eruption
@@ -155,7 +194,9 @@ export function scoreItem(item, { deficits = pillarDeficits(), now = Date.now() 
     trade +
     evergreen +
     spectacle +
-    actionable
+    actionable +
+    offEarth +
+    newPlace
   );
 }
 
