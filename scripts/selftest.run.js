@@ -1112,8 +1112,17 @@ eq('a plain error passes through untouched', describeTikTokError(new Error('boom
 // "*1" to the code on some redirects — pasting it raw fails as an invalid code,
 // which reads like the login went wrong rather than the copy.
 eq('reads the code out of a redirected URL', codeFrom('https://tiyulplus.com/cb?code=abc123&state=x'), 'abc123');
-eq('strips the trailing *1 TikTok appends', codeFrom('https://tiyulplus.com/cb?code=abc123*1&state=x'), 'abc123');
+// The one that cost an evening. A v2 code carries a `*v!NNNN.sN` tail and it is
+// part of the code — trimming it sends a truncated code, and TikTok reports a
+// truncated code as an EXPIRED one, so every fresh attempt fails with an error
+// that blames the clock and sends you back to fetch another doomed code.
+eq(
+  'keeps the *v!... tail, which is part of the code and not a suffix to discard',
+  codeFrom('https://tiyulplus.com/cb?code=abc123%2Av%215236.s1&state=x'),
+  'abc123*v!5236.s1'
+);
 eq('accepts a bare code too', codeFrom('abc123'), 'abc123');
+eq('a bare code copied still encoded is decoded once', codeFrom('abc123%2Av%215236.s1'), 'abc123*v!5236.s1');
 eq('nothing pasted, nothing returned', codeFrom('   '), null);
 eq('a URL with no code at all', codeFrom('https://tiyulplus.com/cb'), null);
 ok(

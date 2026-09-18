@@ -37,14 +37,23 @@ const ask = async (q) => {
 /**
  * The code, from whatever was pasted.
  *
- * Accepts the whole redirected URL or a bare code. A URL is what people
- * actually have in front of them, and TikTok URL-encodes the code — pasting it
- * raw and having it fail with "invalid code" is a confusing ten minutes.
+ * Accepts the whole redirected URL or a bare code, because a URL is what people
+ * actually have in front of them.
+ *
+ * Nothing is trimmed off the end. A v2 code arrives percent-encoded and looks
+ * like `...JbN8pg%2Av%215236.s1` — decoded, `...JbN8pg*v!5236.s1`. The `*` and
+ * everything after it are PART OF THE CODE. An earlier version of this stripped
+ * from the `*` on the strength of TikTok's v1 behaviour, where a literal `*1`
+ * was appended and discarded; against v2 that silently sent a code truncated
+ * two-thirds of the way through, and TikTok answers a malformed code with
+ * "Authorization code is expired". Every fresh code failed, and the error
+ * blamed the clock.
  */
 export function codeFrom(pasted) {
   const s = String(pasted || '').trim();
   if (!s) return null;
-  if (!/^https?:\/\//i.test(s)) return decodeURIComponent(s.replace(/[*#].*$/, ''));
+  // A bare code may still be percent-encoded if it was copied out of the bar.
+  if (!/^https?:\/\//i.test(s)) return decodeURIComponent(s);
   let url;
   try {
     url = new URL(s);
@@ -56,9 +65,8 @@ export function codeFrom(pasted) {
       `TikTok refused the authorization: ${url.searchParams.get('error_description') || url.searchParams.get('error')}`
     );
   }
-  // TikTok appends a literal "*1" fragment to the code on some redirects.
-  const code = url.searchParams.get('code');
-  return code ? code.replace(/[*#].*$/, '') : null;
+  // searchParams decodes for us; whatever comes back goes to TikTok verbatim.
+  return url.searchParams.get('code') || null;
 }
 
 async function main() {
