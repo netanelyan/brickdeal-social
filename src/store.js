@@ -59,6 +59,10 @@ const empty = {
   // come back, rather than being dropped. /retry replays them.
   held: [],
   igToken: null,
+  // TikTok's pair. Kept separately from igToken because the two expire on
+  // completely different clocks — 60 days against 24 hours — and the refresh
+  // token here is the one that needs a browser to replace.
+  tiktokToken: null,
 };
 
 // How long a published id is remembered. Long, because the cost of forgetting
@@ -358,7 +362,7 @@ export const peekQueue = () => state.queue.slice(0, 10);
  * attempt and Instagram on a later one; two rows for one post would double-count
  * it in the quota window and skew the pillar mix the scorer reads back.
  */
-export function recordPublished({ id, pillar, tags = [], layout, sourceId, telegram, instagram }) {
+export function recordPublished({ id, pillar, tags = [], layout, sourceId, telegram, instagram, tiktok }) {
   if (id) state.publishedIds[id] = Date.now();
   state.lastPublishedAt = Date.now();
 
@@ -368,6 +372,7 @@ export function recordPublished({ id, pillar, tags = [], layout, sourceId, teleg
     // as un-published by a later attempt that only covered the other one.
     existing.telegram = existing.telegram || Boolean(telegram);
     existing.instagram = existing.instagram || Boolean(instagram);
+    existing.tiktok = existing.tiktok || Boolean(tiktok);
   } else {
     state.published.push({
       ts: Date.now(),
@@ -380,6 +385,7 @@ export function recordPublished({ id, pillar, tags = [], layout, sourceId, teleg
       sourceId,
       telegram: Boolean(telegram),
       instagram: Boolean(instagram),
+      tiktok: Boolean(tiktok),
     });
   }
   prunePublished(state);
@@ -494,5 +500,28 @@ export function setIgToken({ token, expiresAt }) {
   save();
 }
 export const getIgToken = () => state.igToken || null;
+
+// --- TikTok token -------------------------------------------------------------
+// Two clocks, both persisted. The access token lasts a day and is refreshed on
+// the publish path; the refresh token lasts about a year and cannot be renewed
+// without opening a browser, so its expiry is worth being able to report before
+// it arrives rather than after.
+export function setTikTokToken({ accessToken, refreshToken, expiresAt, refreshExpiresAt, openId, scope }) {
+  state.tiktokToken = {
+    accessToken,
+    refreshToken,
+    expiresAt,
+    refreshExpiresAt,
+    openId: openId ?? state.tiktokToken?.openId ?? null,
+    scope: scope ?? state.tiktokToken?.scope ?? null,
+    updatedAt: Date.now(),
+  };
+  save();
+}
+export const getTikTokToken = () => state.tiktokToken || null;
+export function clearTikTokToken() {
+  state.tiktokToken = null;
+  save();
+}
 
 export { existsSync };

@@ -16,6 +16,7 @@
     "eval-feed": "node scripts/eval-feed.js",
     "check-cards": "node scripts/check-cards.js",
     "ig-token": "node scripts/ig-token.js",
+    "tiktok-token": "node scripts/tiktok-token.js",
     "backfill-ig": "node scripts/backfill-instagram.js",
     "render-samples": "node scripts/render-samples.js",
     "test-url": "node test.js"

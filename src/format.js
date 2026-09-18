@@ -2,6 +2,7 @@ import { pillarHe } from './pillars.js';
 import { LAYOUT_HE } from './render/templates.js';
 import { provenanceHe } from './images.js';
 import { targetsHe } from './publish/targets.js';
+import { privacyHe } from './publish/tiktok.js';
 
 // Two different texts, for two different readers.
 //
@@ -52,7 +53,7 @@ export function channelCaption(cand) {
 // the wording is fixed and reviewable in one place.
 const SIGNATURE = ['לסוכן הטיולים החכם שלנו:', 'www.tiyulplus.com'].join('\n');
 
-export function instagramCaption(cand) {
+function publishedDescription(cand, limit) {
   // The subhead is deliberately absent from the rendered card, so this is the
   // only place it appears. Putting it first means the description opens by
   // answering the headline rather than repeating it.
@@ -63,8 +64,20 @@ export function instagramCaption(cand) {
   if (sub) parts.push(sub);
   if (body) parts.push(body);
 
-  return [parts.join('\n\n'), '', SIGNATURE].join('\n').trim().slice(0, 2200); // IG caption limit
+  return [parts.join('\n\n'), '', SIGNATURE].join('\n').trim().slice(0, limit);
 }
+
+export const instagramCaption = (cand) => publishedDescription(cand, 2200); // IG caption limit
+
+/**
+ * The TikTok description. Deliberately the same text as Instagram's.
+ *
+ * Same card, same claim, same signature — a second wording would be a second
+ * thing to review, and the approval message shows you one description. The only
+ * difference is the ceiling, and the headline, which travels separately as the
+ * post title rather than being repeated here.
+ */
+export const tiktokCaption = (cand) => publishedDescription(cand, 4000); // TikTok description limit
 
 /**
  * The staging card.
@@ -131,6 +144,20 @@ export function approvalMessage(cand) {
   // publish time, so what you were shown is what was true when you decided.
   const targets = cand.publishTargets?.length ? cand.publishTargets : [];
   lines.push(targets.length ? `📤 יפורסם ל${targetsHe(targets)}` : '⛔ אין יעד פרסום מוגדר');
+
+  // TikTok's Direct Post rules require the creator to see the privacy level
+  // before the post goes out, so it is shown here rather than assumed from
+  // .env — and the button under this message is what changes it. A card whose
+  // creator-info call failed says so instead of showing a level that was never
+  // confirmed against the account.
+  if (targets.includes('tiktok')) {
+    if (cand.tiktok?.error) {
+      lines.push(`⚠️ טיקטוק: לא ניתן לקרוא את הגדרות החשבון — ${cand.tiktok.error}`);
+    } else if (cand.tiktok?.privacy) {
+      const who = cand.tiktok.username ? ` · @${cand.tiktok.username}` : '';
+      lines.push(`🔒 פרטיות בטיקטוק: ${privacyHe(cand.tiktok.privacy)}${who}`);
+    }
+  }
 
   // The rule is "the source URL is always in the approval message", so it is
   // pushed unconditionally, in full, never truncated and never folded into a

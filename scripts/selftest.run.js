@@ -13,10 +13,20 @@ import * as store from '../src/store.js';
 import { candidateId, tripGap } from '../src/candidate.js';
 import { renderHtml, LAYOUTS, PHOTO_LAYOUTS, isPhotoLayout } from '../src/render/templates.js';
 import { assertGenericAiPrompt, ImagePolicyError, imageQueries } from '../src/images.js';
-import { approvalMessage, instagramCaption } from '../src/format.js';
+import { approvalMessage, instagramCaption, tiktokCaption } from '../src/format.js';
 import { quietAlert } from '../src/notify.js';
 import { describeError, InstagramError } from '../src/publish/instagram.js';
 import { publishTargets } from '../src/publish/targets.js';
+import {
+  defaultPrivacy,
+  nextPrivacy,
+  privacyHe,
+  publishTikTok,
+  tiktokConfigured,
+  describeError as describeTikTokError,
+  TikTokError,
+} from '../src/publish/tiktok.js';
+import { codeFrom } from './tiktok-token.js';
 import { hyphensOnly, stripEmoji, capHashtags, normalise } from '../src/draft.js';
 
 // Offline behaviour checks. No network, no credentials, no Telegram.
@@ -1050,6 +1060,95 @@ withEnv({ ...IG, CARD_PUBLIC_BASE_URL: undefined }, () => {
     0
   );
 });
+
+/* -------------------------------------------------------------------------- */
+group('tiktok - the privacy level is chosen, never assumed');
+
+// The whole point of the privacy plumbing: a default that errs towards the
+// quietest setting, and a level the owner actually saw before tapping.
+eq('defaults to the most private level available', defaultPrivacy(['PUBLIC_TO_EVERYONE', 'SELF_ONLY']), 'SELF_ONLY');
+eq(
+  'honours TIKTOK_PRIVACY when the account really offers it',
+  defaultPrivacy(['PUBLIC_TO_EVERYONE', 'SELF_ONLY'], 'PUBLIC_TO_EVERYONE'),
+  'PUBLIC_TO_EVERYONE'
+);
+eq(
+  'ignores TIKTOK_PRIVACY when the account does not offer it - an unaudited app gets SELF_ONLY only',
+  defaultPrivacy(['SELF_ONLY'], 'PUBLIC_TO_EVERYONE'),
+  'SELF_ONLY'
+);
+eq('falls back to whatever came back when SELF_ONLY is absent', defaultPrivacy(['FOLLOWER_OF_CREATOR']), 'FOLLOWER_OF_CREATOR');
+eq('with nothing offered at all, still names a level rather than undefined', defaultPrivacy([]), 'SELF_ONLY');
+
+const two = ['PUBLIC_TO_EVERYONE', 'SELF_ONLY'];
+eq('the button cycles forward', nextPrivacy('PUBLIC_TO_EVERYONE', two), 'SELF_ONLY');
+eq('and wraps', nextPrivacy('SELF_ONLY', two), 'PUBLIC_TO_EVERYONE');
+eq('a level no longer offered lands on the first available one', nextPrivacy('MUTUAL_FOLLOW_FRIENDS', two), two[0]);
+eq('one option means the button cannot change anything', nextPrivacy('SELF_ONLY', ['SELF_ONLY']), 'SELF_ONLY');
+ok('every level has Hebrew', two.every((l) => privacyHe(l) !== l));
+
+// Refusing before the network, not during it. A publish that reaches TikTok
+// without a chosen privacy level is the one failure this path exists to stop,
+// so it must not depend on the API to catch it.
+const noPrivacy = await publishTikTok({ card: { url: 'https://x/c.jpg' } }).then(
+  () => null,
+  (e) => e
+);
+ok('refuses to publish with no privacy level chosen', noPrivacy instanceof TikTokError);
+ok('and says so before any API call', noPrivacy.step === 'config', `step was ${noPrivacy?.step}`);
+ok('tiktok is not configured in the test environment', !tiktokConfigured());
+
+// The error text has to name the code, because TikTok's sentence alone often
+// does not say what to do — same lesson as Instagram's describeError().
+const unverified = describeTikTokError(
+  new TikTokError('url ownership unverified', { step: 'init', code: 'url_ownership_unverified' })
+);
+ok('failure text carries the code', unverified.includes('url_ownership_unverified'));
+ok('and the step', unverified.includes('init'));
+ok('and translates the ones worth acting on', unverified.includes('דומיין'));
+eq('a plain error passes through untouched', describeTikTokError(new Error('boom')), 'boom');
+
+// What people actually paste is the whole address bar, and TikTok appends a
+// "*1" to the code on some redirects — pasting it raw fails as an invalid code,
+// which reads like the login went wrong rather than the copy.
+eq('reads the code out of a redirected URL', codeFrom('https://tiyulplus.com/cb?code=abc123&state=x'), 'abc123');
+eq('strips the trailing *1 TikTok appends', codeFrom('https://tiyulplus.com/cb?code=abc123*1&state=x'), 'abc123');
+eq('accepts a bare code too', codeFrom('abc123'), 'abc123');
+eq('nothing pasted, nothing returned', codeFrom('   '), null);
+eq('a URL with no code at all', codeFrom('https://tiyulplus.com/cb'), null);
+ok(
+  'a refusal in the URL is raised rather than read as a missing code',
+  (() => {
+    try {
+      codeFrom('https://tiyulplus.com/cb?error=access_denied&error_description=user%20said%20no');
+      return false;
+    } catch (e) {
+      return /access_denied|said/.test(e.message);
+    }
+  })()
+);
+
+// TikTok's rule for Direct Post: the creator sees the privacy level before it
+// publishes. That means it has to be on the approval card, and only there.
+const tkCand = { ...cand, publishTargets: ['tiktok'], tiktok: { privacy: 'SELF_ONLY', username: 'tiyulplus', options: ['SELF_ONLY'] } };
+const tkMsg = approvalMessage(tkCand);
+ok('the approval card names the privacy level', tkMsg.includes(privacyHe('SELF_ONLY')));
+ok('and the account it would post as', tkMsg.includes('@tiyulplus'));
+ok(
+  'a card with no TikTok target says nothing about privacy',
+  !approvalMessage({ ...cand, publishTargets: ['telegram'] }).includes('פרטיות')
+);
+ok(
+  'a failed creator-info call is reported rather than papered over with a default',
+  approvalMessage({ ...cand, publishTargets: ['tiktok'], tiktok: { error: 'access_token_invalid', options: [] } }).includes(
+    'access_token_invalid'
+  )
+);
+
+// One description, one review. A second wording would be a second thing to
+// approve, and the approval message only ever shows you one.
+const bothCand = { headline: 'כותרת', subhead: 'תת כותרת', caption: 'גוף הטקסט.', sourceUrl: 'https://gov.uk/x' };
+eq('the TikTok description is the same text as the Instagram one', tiktokCaption(bothCand), instagramCaption(bothCand));
 
 /* -------------------------------------------------------------------------- */
 group('copy style - hyphens only, never em or en dashes');

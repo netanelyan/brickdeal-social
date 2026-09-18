@@ -2,7 +2,8 @@
 
 A Hebrew travel-content pipeline for Israeli travellers. It reads primary
 sources, drafts a post, renders a card, sends it to one person on Telegram for
-approval, and publishes to Instagram only when that person taps approve.
+approval, and publishes to Instagram and TikTok only when that person taps
+approve.
 
 Nothing publishes without a human tap. No claim is made without a source that
 was fetched, right then, from a domain on an allowlist.
@@ -22,7 +23,7 @@ Earth Observatory piece, and ten years of ERA5 climate normals.</em></p>
 
 ```
 sources → rank → draft (Claude) → verify → render → Telegram → you tap ✅ → Instagram
-                                    ↑                              ↓
+                                    ↑                              ↓        + TikTok
                               reject with a reason            queue, drip out
 ```
 
@@ -36,8 +37,11 @@ sources → rank → draft (Claude) → verify → render → Telegram → you t
 5. **Render.** Headless Chromium, because Hebrew needs real bidirectional text
    layout. 1080×1350 JPEG.
 6. **Approve.** A Telegram DM with the card, the source URL, where the image
-   came from, and how many quotes were checked.
-7. **Publish.** Instagram Graph API. One post drips out every four hours.
+   came from, how many quotes were checked, and — when TikTok is a destination —
+   the privacy level it would publish at, with a button to change it.
+7. **Publish.** Instagram Graph API and the TikTok Content Posting API. One post
+   drips out every four hours; a destination that fails is retried on its own,
+   without re-posting to the one that worked.
 
 ## What makes it different from "an AI wrote a post"
 
@@ -145,6 +149,12 @@ npm run run-once          # a full pass, printed to the terminal, publishes noth
 npm start
 ```
 
+TikTok, if you want it, is connected once with `npm run tiktok-token` — it
+prints an authorization URL, you paste back the address you land on, and the
+token pair is stored. Nothing about it goes in `.env` except the client key,
+secret and redirect URI, because the access token lasts a day and is refreshed
+continuously.
+
 You need a Telegram bot token, your own Telegram user id, an Anthropic API key,
 a Pexels key for photos, and an Instagram Business account with the Graph API.
 [`SETUP.md`](SETUP.md) walks through each one, including the parts of Meta's
@@ -156,8 +166,9 @@ fetches the card image from a public URL rather than receiving bytes.
 ### Commands in the bot
 
 `/run` gather now · `/redo` forget what was seen and re-run, for testing a change
-· `/status` · `/usage` tokens and cost · `/igquota` · `/mix` topic balance ·
-`/why` last run's rejections · `/queue` `/next` `/pending`
+· `/status` · `/usage` tokens and cost · `/igquota` · `/tiktok` connection,
+tokens and available privacy levels · `/mix` topic balance · `/why` last run's
+rejections · `/queue` `/next` `/pending`
 
 ## Layout of the code
 
@@ -206,6 +217,18 @@ contributing nothing and the probe said it was fine. `check-sources` now takes a
 sample of items all the way through `verifySource()`, which is the actual gate.
 The general lesson is that a health check measuring the cheap half of a pipeline
 reports on the half that was never going to break.
+
+**TikTok publishes privately until the app passes review.** An unaudited
+Content Posting API client is offered `SELF_ONLY` and nothing else, so posts go
+out visible to the account itself. That is not a bug to work around — it is what
+the approval card shows you, what `/tiktok` reports, and what the review
+recording is supposed to demonstrate. The privacy button grows more options the
+moment TikTok grants them.
+
+**The TikTok card is one image, not a carousel.** Photo posts accept up to 35,
+the pipeline renders one, and one is what is sent. Nothing in the publisher
+would object to more — but there is no second slide to send, so the post is a
+single-image photo post.
 
 **Some content thresholds are tuned on small samples.** The thin-source floors
 were measured against one day of items. They are env-overridable and every

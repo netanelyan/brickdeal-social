@@ -5,7 +5,7 @@ import { quotaBlock } from './pillars.js';
 import { findImage, imageQueries, imagesEnabled } from './images.js';
 import { renderCard } from './render/index.js';
 import { isPhotoLayout, PHOTO_FALLBACK } from './render/templates.js';
-import { channelCaption, instagramCaption } from './format.js';
+import { channelCaption, instagramCaption, tiktokCaption } from './format.js';
 import { publishTargets } from './publish/targets.js';
 import { recordWasted } from './usage.js';
 
@@ -189,6 +189,7 @@ async function build(item, { render = true } = {}) {
 
   cand.channelCaption = channelCaption(cand);
   cand.instagramCaption = instagramCaption(cand);
+  cand.tiktokCaption = tiktokCaption(cand);
 
   return cand;
   }

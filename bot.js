@@ -8,10 +8,22 @@ import * as notify from './src/notify.js';
 import { runOnce, dailyTarget } from './src/pipeline.js';
 import { toCandidate, RejectedError } from './src/candidate.js';
 import { primaryAuthority, enabledSources, registry } from './src/sources/index.js';
-import { approvalMessage, decidedMessage, evidenceReport, channelCaption, instagramCaption } from './src/format.js';
+import { approvalMessage, decidedMessage, evidenceReport, channelCaption, instagramCaption, tiktokCaption } from './src/format.js';
 import { renderCard, closeBrowser } from './src/render/index.js';
 import { publishTelegram, sendForApproval } from './src/publish/telegram.js';
 import { publishInstagram, instagramConfigured, remainingQuota, refreshToken, tokenDaysLeft, authMode, describeError } from './src/publish/instagram.js';
+import {
+  publishTikTok,
+  tiktokConfigured,
+  creatorInfo,
+  defaultPrivacy,
+  nextPrivacy,
+  privacyHe,
+  refreshTikTokToken,
+  tokenHoursLeft as tiktokHoursLeft,
+  refreshTokenDaysLeft as tiktokRefreshDaysLeft,
+  describeError as describeTikTokError,
+} from './src/publish/tiktok.js';
 import { publishTargets, targetsHe } from './src/publish/targets.js';
 import { imagesEnabled } from './src/images.js';
 import { reasonHe } from './src/verify.js';
@@ -97,16 +109,55 @@ bot.use(async (ctx, next) => {
 // Staging
 // ---------------------------------------------------------------------------
 
-function stagingButtons(key) {
-  return Markup.inlineKeyboard([
+function stagingButtons(key, cand) {
+  const rows = [
     [Markup.button.callback('✅ אשר ופרסם', `ok:${key}`), Markup.button.callback('❌ דחה', `no:${key}`)],
     [Markup.button.callback('✏️ ערוך כותרת', `edit:${key}`), Markup.button.callback('📎 ציטוטים', `ev:${key}`)],
-  ]);
+  ];
+  // Only when there is a real choice to make. With one privacy level available
+  // — the unaudited case, where TikTok offers SELF_ONLY and nothing else — a
+  // button that cycles back to the same value is a button that lies about
+  // having options.
+  if (cand?.tiktok?.options?.length > 1) {
+    rows.push([
+      Markup.button.callback(`🔒 פרטיות: ${privacyHe(cand.tiktok.privacy)}`, `tp:${key}`),
+    ]);
+  }
+  return Markup.inlineKeyboard(rows);
 }
 
-async function stage(cand) {
+/**
+ * Ask TikTok who we would be posting as, and which privacy levels it allows.
+ *
+ * Done at staging rather than at publish time, because the answer has to be on
+ * the card you are looking at when you tap approve — that is TikTok's rule for
+ * Direct Post and the reason this call exists. A failure here does not block
+ * staging: the card still goes out for approval carrying the reason, and the
+ * publish attempt is what fails, loudly, with the same message.
+ */
+async function attachTikTok(cand) {
+  if (!cand.publishTargets?.includes('tiktok')) return cand;
+  try {
+    const info = await creatorInfo();
+    return {
+      ...cand,
+      tiktok: {
+        username: info.username,
+        options: info.options,
+        privacy: defaultPrivacy(info.options),
+      },
+    };
+  } catch (e) {
+    const detail = describeTikTokError(e);
+    console.error('tiktok: creator_info failed:', detail);
+    return { ...cand, tiktok: { error: detail, options: [] } };
+  }
+}
+
+async function stage(candidate) {
+  const cand = await attachTikTok(candidate);
   const key = store.addStaging(cand);
-  await sendForApproval(bot.telegram, staging, cand, approvalMessage(cand), stagingButtons(key));
+  await sendForApproval(bot.telegram, staging, cand, approvalMessage(cand), stagingButtons(key, cand));
   // Stamped after the send, so the quiet alarm measures cards that actually
   // arrived — not ones that were built and then failed to reach you.
   store.noteStagedAt();
@@ -157,6 +208,33 @@ bot.action(/^ev:(.+)$/, async (ctx) => {
   if (!cand) return ctx.answerCbQuery('כבר טופל');
   await ctx.answerCbQuery();
   await notify.send(bot.telegram, staging, evidenceReport(cand));
+});
+
+/**
+ * Cycle the TikTok privacy level for one staged card.
+ *
+ * The card is rewritten in place so the level you are about to publish at is
+ * always the level printed on the message — a button that changed hidden state
+ * would defeat the point of showing it at all.
+ */
+bot.action(/^tp:(.+)$/, async (ctx) => {
+  const key = ctx.match[1];
+  const cand = store.getStaging(key);
+  if (!cand) return ctx.answerCbQuery('כבר טופל');
+
+  const options = cand.tiktok?.options || [];
+  if (options.length < 2) return ctx.answerCbQuery('אין רמות פרטיות אחרות זמינות');
+
+  const privacy = nextPrivacy(cand.tiktok.privacy, options);
+  const updated = { ...cand, tiktok: { ...cand.tiktok, privacy } };
+  store.updateStaging(key, updated);
+
+  await ctx.answerCbQuery(`🔒 ${privacyHe(privacy)}`);
+  const isPhoto = Boolean(ctx.callbackQuery?.message?.photo);
+  const edit = isPhoto ? ctx.editMessageCaption.bind(ctx) : ctx.editMessageText.bind(ctx);
+  await edit(approvalMessage(updated), stagingButtons(key, updated)).catch((e) =>
+    console.error('approval UX: privacy edit failed:', e.message)
+  );
 });
 
 bot.action(/^edit:(.+)$/, async (ctx) => {
@@ -211,11 +289,12 @@ async function handleEditReply(ctx, key) {
   }
   updated.channelCaption = channelCaption(updated);
   updated.instagramCaption = instagramCaption(updated);
+  updated.tiktokCaption = tiktokCaption(updated);
   store.updateStaging(key, updated);
 
   // The old message carried the old image, so it can't be edited in place —
   // the card is re-sent with fresh buttons instead.
-  await sendForApproval(bot.telegram, pending.chatId, updated, approvalMessage(updated), stagingButtons(key));
+  await sendForApproval(bot.telegram, pending.chatId, updated, approvalMessage(updated), stagingButtons(key, updated));
   await ctx.reply('✏️ הכותרת עודכנה והכרטיס רונדר מחדש — אשר/דחה למעלה');
 }
 
@@ -325,15 +404,22 @@ async function publishNext() {
   const done = {};
   const failed = [];
 
+  const publishers = {
+    telegram: () => publishTelegram(bot.telegram, CHANNEL_ID, cand),
+    instagram: () => publishInstagram(cand),
+    tiktok: () => publishTikTok(cand),
+  };
+  const errorText = {
+    instagram: describeError,
+    tiktok: describeTikTokError,
+  };
+
   for (const target of live) {
     try {
-      done[target] =
-        target === 'telegram'
-          ? await publishTelegram(bot.telegram, CHANNEL_ID, cand)
-          : await publishInstagram(cand);
+      done[target] = await publishers[target]();
       store.noteTargetOk(target);
     } catch (e) {
-      const detail = target === 'instagram' ? describeError(e) : e.message;
+      const detail = (errorText[target] || ((x) => x.message))(e);
       console.error(`publish: ${target} failed:`, detail);
       const health = store.noteTargetFailed(target, detail);
       failed.push({ target, message: detail });
@@ -356,6 +442,7 @@ async function publishNext() {
       sourceId: cand.sourceId,
       telegram: Boolean(done.telegram),
       instagram: Boolean(done.instagram),
+      tiktok: Boolean(done.tiktok),
     });
   }
 
@@ -444,6 +531,39 @@ async function maybeRefreshIgToken() {
       staging,
       `🔴 חידוש טוקן אינסטגרם נכשל: ${e.message}
 אם לא יחודש, הפרסום יפסיק לעבוד. הרץ npm run ig-token.`
+    );
+  }
+}
+
+// TikTok's access token lives about a day, so this is not the same kind of
+// housekeeping as Instagram's 60-day one: a bot that only refreshed on a daily
+// timer would spend part of every day holding a dead token. The publish path
+// refreshes too (see liveToken) — this is the belt to that's braces, and the
+// place a failure gets reported while there is still time to act on it.
+async function maybeRefreshTikTokToken() {
+  if (!tiktokConfigured()) return;
+  try {
+    const r = await refreshTikTokToken();
+    if (r.refreshed) console.log(`   tiktok: token refreshed, ${Math.round(r.hoursLeft)}h left`);
+  } catch (e) {
+    console.error('tiktok: token refresh failed:', e.message);
+    await notify.send(
+      bot.telegram,
+      staging,
+      `🔴 חידוש טוקן טיקטוק נכשל: ${describeTikTokError(e)}
+אם לא יחודש, הפרסום לטיקטוק יפסיק לעבוד. הרץ npm run tiktok-token.`
+    );
+  }
+
+  // The refresh token is the one that cannot be renewed from here. A year is
+  // long enough to forget it exists entirely, which is why it is worth saying
+  // out loud before it lapses rather than after.
+  const days = tiktokRefreshDaysLeft();
+  if (days != null && days <= 14) {
+    await notify.send(
+      bot.telegram,
+      staging,
+      `🔑 טוקן הרענון של טיקטוק פג בעוד ${days} ימים — הרץ npm run tiktok-token כדי לחדש`
     );
   }
 }
@@ -655,6 +775,46 @@ bot.command('igquota', async (ctx) => {
   }
 });
 
+bot.command('tiktok', async (ctx) => {
+  if (!tiktokConfigured()) {
+    return ctx.reply(
+      'טיקטוק לא מחובר.\nהגדר TIKTOK_CLIENT_KEY ו-TIKTOK_CLIENT_SECRET ו-TIKTOK_REDIRECT_URI ב-.env, ואז npm run tiktok-token'
+    );
+  }
+
+  const health = store.targetHealth('tiktok');
+  const hours = tiktokHoursLeft();
+  const refreshDays = tiktokRefreshDaysLeft();
+
+  // Everything knowable without asking TikTok anything comes first, for the
+  // same reason /igquota does it: when the API refuses, the token state is the
+  // first thing you want next to the refusal, not after it.
+  const local = [];
+  if (hours != null) {
+    local.push(
+      hours > 0
+        ? `🔑 טוקן הגישה תקף עוד ${hours} שעות (מתחדש אוטומטית)`
+        : `🔑 טוקן הגישה פג — יתחדש בפרסום הבא, או npm run tiktok-token`
+    );
+  }
+  if (refreshDays != null) local.push(`🔁 טוקן הרענון תקף עוד ${refreshDays} ימים`);
+  if (health.lastOkAt) local.push(`✅ פורסם לאחרונה לפני ${notify.humanDuration(Date.now() - health.lastOkAt)}`);
+  else local.push('⚪ עוד לא פורסם לטיקטוק מהמכונה הזו');
+  if (health.failures) local.push(`⚠️ ${health.failures} כשלונות ברצף`);
+
+  try {
+    const info = await creatorInfo();
+    const levels = info.options.map(privacyHe).join(', ') || 'לא התקבלו';
+    const audit =
+      info.options.length === 1 && info.options[0] === 'SELF_ONLY'
+        ? '\n⚠️ רק פרסום פרטי זמין — זה מה שאפליקציה לפני אישור (audit) מקבלת'
+        : '';
+    ctx.reply([`🎵 @${info.username || '?'}`, `🔒 רמות פרטיות זמינות: ${levels}${audit}`, ...local].join('\n'));
+  } catch (e) {
+    ctx.reply([`🔴 ${describeTikTokError(e)}`, '', ...local].join('\n'));
+  }
+});
+
 bot.command('help', (ctx) =>
   ctx.reply(
     [
@@ -669,6 +829,7 @@ bot.command('help', (ctx) =>
       '/mix — תמהיל הנושאים שפורסמו',
       '/sources — רשימת המקורות',
       '/igquota — מכסת אינסטגרם',
+      '/tiktok — חיבור טיקטוק, טוקנים ורמות פרטיות',
       '/clear_pending',
       '',
       'אפשר גם להדביק כתובת של מקור ראשוני והיא תיבדק ותיכתב.',
@@ -794,6 +955,7 @@ function tick() {
     if (day !== lastRunDay) {
       lastRunDay = day;
       maybeRefreshIgToken().catch(() => {});
+      maybeRefreshTikTokToken().catch(() => {});
     }
     // Announce only the first pass of the day. The later ones are routine and a
     // "0 staged" report every few hours is noise you would learn to ignore.
@@ -837,6 +999,7 @@ async function main() {
   console.log(`   daily run at ${RUN_HOUR}:00 · target ${dailyTarget()} · drip every ${POST_INTERVAL_MINUTES} min`);
 
   await maybeRefreshIgToken();
+  await maybeRefreshTikTokToken();
   await probeInstagram();
 
   setInterval(() => {
