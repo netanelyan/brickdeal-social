@@ -9,7 +9,7 @@
     "it. Turn one on only once its adapter genuinely works; a source that 404s",
     "silently is worse than one that is honestly switched off.",
     "",
-    "Probed 2026-08-22; the official-DMO batch probed 2026-09-18."
+    "Probed 2026-08-22; the official-DMO batch probed 2026-09-18; the regional-DMO batch probed 2026-09-18 (second pass, ~360 domains)."
   ],
   "allowlist": [
     {
@@ -167,6 +167,66 @@
     {
       "suffix": "visitmaldives.com",
       "why": "Visit Maldives Corporation (state-owned)"
+    },
+    {
+      "suffix": "visitasevilla.es",
+      "why": "Turismo de Sevilla — the city council's tourism agency"
+    },
+    {
+      "suffix": "visitsicily.info",
+      "why": "Regione Siciliana — official tourism portal"
+    },
+    {
+      "suffix": "visitlazio.com",
+      "why": "Regione Lazio — official tourism portal"
+    },
+    {
+      "suffix": "visitgreenland.com",
+      "why": "Visit Greenland — the national tourist board (government-owned)"
+    },
+    {
+      "suffix": "visitnsw.com",
+      "why": "Destination NSW — NSW government tourism agency (same publisher as sydney.com)"
+    },
+    {
+      "suffix": "supernaturalbc.com",
+      "why": "Destination British Columbia — provincial crown corporation"
+    },
+    {
+      "suffix": "tourismpanama.com",
+      "why": "Autoridad de Turismo de Panamá"
+    },
+    {
+      "suffix": "tahititourisme.com",
+      "why": "Tahiti Tourisme — French Polynesia's official tourism body"
+    },
+    {
+      "suffix": "emiliaromagnaturismo.it",
+      "why": "Regione Emilia-Romagna — official tourism portal"
+    },
+    {
+      "suffix": "feelflorence.it",
+      "why": "Comune di Firenze — the city's official tourism site"
+    },
+    {
+      "suffix": "holaislascanarias.com",
+      "why": "Turismo de Islas Canarias — regional government"
+    },
+    {
+      "suffix": "visitmorocco.com",
+      "why": "Moroccan National Tourist Office"
+    },
+    {
+      "suffix": "visitlasvegas.com",
+      "why": "Las Vegas Convention and Visitors Authority"
+    },
+    {
+      "suffix": "novascotia.com",
+      "why": "Tourism Nova Scotia — provincial crown corporation"
+    },
+    {
+      "suffix": "newmexico.org",
+      "why": "New Mexico Tourism Department"
     }
   ],
   "sources": [
@@ -552,6 +612,232 @@
       "lang": "en",
       "enabled": false,
       "note": "Probed 2026-09-18: 200, 10 items - three seasonal walks (Regent's Park, Hyde Park, Richmond) and seven FAQ entries. The walk links 404 at the URL the feed gives, so nothing can be fetched and verified. Worth re-probing: an autumn walk in Richmond Park is exactly the post this channel wants."
+    },
+    {
+      "kind": "rss",
+      "enabled": true,
+      "id": "visitsevilla",
+      "name": "Visit Sevilla — Turismo de Sevilla",
+      "url": "https://visitasevilla.es/feed/",
+      "authority": "official-dmo",
+      "pillars": [
+        "inCity",
+        "tip",
+        "timing"
+      ],
+      "lang": "es",
+      "note": "Probed 2026-09-18: 200, 10 items over eight weeks, pages ~4,200 chars, Spanish. A \"¿Sabías que…\" series of one-fact curiosities - a Murillo cut out by a thief and found in a New York antique shop, the Flamenco Biennial only in even years, a vaulted passage on calle Judería - plus long-weekend guides. Exactly the \"walk straight past it\" pillar for a city Israelis already fly to."
+    },
+    {
+      "kind": "rss",
+      "enabled": true,
+      "id": "visitsicily",
+      "name": "Visit Sicily — Regione Siciliana",
+      "url": "https://www.visitsicily.info/feed/",
+      "authority": "official-dmo",
+      "pillars": [
+        "day",
+        "conditions",
+        "timing"
+      ],
+      "lang": "it",
+      "note": "Probed 2026-09-18: 200, 10 items in ten weeks, pages ~10,000 chars, Italian. Real articles: Ustica as Italy's first marine reserve, a village in the Nebrodi park, the year's Green Flag beaches, film locations on Favignana. Regional, so it names places the national portal never would."
+    },
+    {
+      "kind": "rss",
+      "enabled": true,
+      "id": "visitlazio",
+      "name": "Visit Lazio — Regione Lazio",
+      "url": "https://www.visitlazio.com/feed/",
+      "authority": "official-dmo",
+      "pillars": [
+        "day",
+        "inCity",
+        "conditions"
+      ],
+      "lang": "it",
+      "note": "Probed 2026-09-18: 200, 10 items in nine days, pages ~12,000 chars (truncated), Italian. The region around Rome: a pilgrim walk from Frosinone, a balloon festival on Ventotene, the Capannelle racecourse centenary. Heavy on village festivals - the scorer's festival-vs-concert judgement gets exercised here."
+    },
+    {
+      "kind": "rss",
+      "enabled": true,
+      "id": "visitgreenland",
+      "name": "Visit Greenland — national tourist board",
+      "url": "https://visitgreenland.com/feed/",
+      "authority": "official-dmo",
+      "pillars": [
+        "timing",
+        "day"
+      ],
+      "lang": "en",
+      "note": "Probed 2026-09-18: 200, 10 items spanning May 2025 to September 2026, pages ~9,600 chars, English. Slow - a few articles a year - but each one is a real essay: summer \"coolcation\", why April, what spring looks like. Bucket-list destination; recency scoring will keep the old ones down."
+    },
+    {
+      "kind": "rss",
+      "enabled": true,
+      "id": "visitnsw",
+      "name": "Visit NSW — Destination NSW",
+      "url": "https://www.visitnsw.com/articles.xml",
+      "authority": "government",
+      "pillars": [
+        "day",
+        "timing"
+      ],
+      "lang": "en",
+      "note": "Probed 2026-09-18: 200, 10 items in four weeks, pages ~9,900 chars, English. Same publisher and same feed shape as sydney.com, one level out: a day trip to the Blue Mountains from Sydney, day trips from Byron Bay, whale-watching season on the Coffs Coast. Links carry utm_ parameters, which candidateId() strips."
+    },
+    {
+      "kind": "rss",
+      "enabled": true,
+      "id": "destination-bc",
+      "name": "Super, Natural BC — Destination British Columbia",
+      "url": "https://www.supernaturalbc.com/feed/",
+      "authority": "official-dmo",
+      "pillars": [
+        "day",
+        "timing"
+      ],
+      "lang": "en",
+      "note": "Probed 2026-09-18: 200, 10 items in seven weeks, pages ~12,000 chars (truncated), English. hellobc.com redirects here. Long seasonal pieces - two national parks for autumn, harvest in the Okanagan, which ski region. Expect ski and mountain-bike listicles the drafting step should decline."
+    },
+    {
+      "kind": "rss",
+      "enabled": true,
+      "id": "tourism-panama",
+      "name": "Tourism Panama — Autoridad de Turismo de Panamá",
+      "url": "https://www.tourismpanama.com/blog/rss/",
+      "authority": "government",
+      "pillars": [
+        "day",
+        "tip"
+      ],
+      "lang": "en",
+      "note": "Probed 2026-09-18: 200, 10 items but the newest is April 2026 - a slow blog, pages ~9,600 chars, English. Trails and waterfalls in Boquete, museums in Panama City, coffee farms in Tierras Altas: numbered listicles, but each with named places. Central America is on the post-army route."
+    },
+    {
+      "kind": "rss",
+      "enabled": true,
+      "id": "tahiti-tourisme",
+      "name": "Tahiti Tourisme — French Polynesia",
+      "url": "https://www.tahititourisme.com/feed/",
+      "authority": "official-dmo",
+      "pillars": [
+        "conditions",
+        "day",
+        "timing"
+      ],
+      "lang": "en",
+      "note": "Probed 2026-09-18: 200, 10 items spanning 2023 to March 2026, pages ~9,500 chars. Very slow, but the two 2026 items are the creation of the world's largest marine protected area and the Gambier reserve - the kind of change-on-the-ground the aurora post was. Feed is English; the site's chrome is French."
+    },
+    {
+      "kind": "rss",
+      "enabled": false,
+      "id": "unesco-ich",
+      "name": "UNESCO Intangible Cultural Heritage — news",
+      "url": "https://ich.unesco.org/cron_rss.php?flux-rss=news&lang=en",
+      "authority": "intergovernmental",
+      "pillars": [
+        "timing",
+        "conditions"
+      ],
+      "lang": "en",
+      "note": "Probed 2026-09-18: 200, 633 items back to 2012, pages ~1,150 chars - under the 1,200 floor. Between sessions the feed is committee administration (reporting forms, exchange meetings); the inscriptions that would make a post (a festival, a cuisine) land in one week of December. Worth a seasonal switch-on that week, not a standing source."
+    },
+    {
+      "kind": "rss",
+      "enabled": false,
+      "id": "emiliaromagna",
+      "name": "Emilia-Romagna Turismo — Regione Emilia-Romagna",
+      "url": "https://emiliaromagnaturismo.it/it/news/feed",
+      "authority": "official-dmo",
+      "pillars": [
+        "conditions",
+        "timing"
+      ],
+      "lang": "it",
+      "note": "Probed 2026-09-18: 200, 201 items with 900-1,500-char summaries, Italian - the Pope in Rimini after 44 years, Ravenna as capital of the sea 2026. But every item link resolves to the site homepage, so verifySource() would be reading the wrong page. Usable the day the feed carries real article URLs; the summaries alone clear the feed floor if the verifier is ever taught to trust them."
+    },
+    {
+      "kind": "rss",
+      "enabled": false,
+      "id": "feelflorence",
+      "name": "Feel Florence — Comune di Firenze",
+      "url": "https://www.feelflorence.it/en/rss.xml",
+      "authority": "official-dmo",
+      "pillars": [
+        "inCity",
+        "conditions"
+      ],
+      "lang": "it",
+      "note": "Probed 2026-09-18: 200, 10 items with 70-char summaries; the /en/ feed links to /it/ pages of ~1,800 chars that are mostly navigation. A Dürer exhibition and a September events roundup were the only items about Florence itself; the rest are the province. Off until the pages carry the article."
+    },
+    {
+      "kind": "rss",
+      "enabled": false,
+      "id": "holaislascanarias",
+      "name": "Hola Islas Canarias — Turismo de Canarias",
+      "url": "https://www.holaislascanarias.com/rss.xml",
+      "authority": "official-dmo",
+      "pillars": [
+        "day"
+      ],
+      "lang": "es",
+      "note": "Probed 2026-09-18: 200, 10 items - bookable activity listings (a wine tasting, a whale-watching excursion, an adventure park) with price and opening days, and one item literally titled \"Prueba Tipo Actividades\". Pages ~1,350 chars of booking form. Not articles."
+    },
+    {
+      "kind": "rss",
+      "enabled": false,
+      "id": "visitmorocco",
+      "name": "Visit Morocco — Moroccan National Tourist Office",
+      "url": "https://www.visitmorocco.com/en/rss.xml",
+      "authority": "official-dmo",
+      "pillars": [
+        "day",
+        "timing"
+      ],
+      "lang": "en",
+      "note": "Probed 2026-09-18: 200, 10 items but seven share one date (2025-11-03) and the rest are 2020; pages ~350 chars - client-rendered, nothing to verify against. Morocco is a destination the audience wants; needs a Playwright fetch and a feed that moves."
+    },
+    {
+      "kind": "rss",
+      "enabled": false,
+      "id": "visitlasvegas",
+      "name": "Visit Las Vegas — LVCVA",
+      "url": "https://www.visitlasvegas.com/experience/rss/",
+      "authority": "official-dmo",
+      "pillars": [
+        "inCity",
+        "timing"
+      ],
+      "lang": "en",
+      "note": "Probed 2026-09-18: 200, 9 items, pages ~2,700 chars, English. Residencies at Sphere, chef takeovers, where to watch football - the performer noise the scorer already nudges down, with one usable seasonal piece (Halloween) in nine. Off until it would pay for its draft budget."
+    },
+    {
+      "kind": "rss",
+      "enabled": false,
+      "id": "novascotia",
+      "name": "Tourism Nova Scotia",
+      "url": "https://novascotia.com/feed/",
+      "authority": "official-dmo",
+      "pillars": [
+        "timing",
+        "day"
+      ],
+      "lang": "en",
+      "note": "Probed 2026-09-18: 200, 10 items, pages ~6,900 chars, English. Four posts on one day titled \"… this Fall\", each a roundup of packages and getaways. One real piece (Isle Madame on Cape Breton) in ten. Works technically; off because the audience rarely goes and the feed is mostly offers."
+    },
+    {
+      "kind": "rss",
+      "enabled": false,
+      "id": "newmexico",
+      "name": "New Mexico True — state tourism department",
+      "url": "https://www.newmexico.org/blog/rss/",
+      "authority": "government",
+      "pillars": [
+        "day"
+      ],
+      "lang": "en",
+      "note": "Probed 2026-09-18: 200, 10 items, newest June 2026, 99-char summaries, pages ~4,800 chars. Fine content (stargazing and trails in Grant County) but slow and far off the audience's map. Recorded so nobody re-probes it."
     }
   ]
 }

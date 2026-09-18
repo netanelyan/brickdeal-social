@@ -26,7 +26,7 @@ sources → rank → draft (Claude) → verify → render → Telegram → you t
                               reject with a reason            queue, drip out
 ```
 
-1. **Gather.** Twelve enabled feeds and one dataset, fetched live.
+1. **Gather.** Twenty enabled feeds and one dataset, fetched live.
 2. **Rank.** A cheap sort on titles and summaries, because the next step costs
    money. Authority, recency, specificity, topic balance.
 3. **Draft.** One Claude call returns Hebrew copy, a layout choice, an image
@@ -76,15 +76,23 @@ Primary sources only — the publisher of the fact, not someone reporting it.
 | This is Athens (City of Athens) | closures, car-free days, what's new in the most-flown city |
 | Tourism Authority of Thailand | the newsroom, with its trade half scored down |
 | Vietnam National Authority of Tourism | islands, street food, heritage villages |
-| My Helsinki, Sydney.com (Destination NSW) | neighbourhood and day-trip guides with addresses |
+| My Helsinki, Sydney.com + Visit NSW (Destination NSW) | neighbourhood and day-trip guides with addresses; the Blue Mountains from Sydney |
+| Visit Sevilla (Turismo de Sevilla) | a "¿Sabías que…" series — one odd fact per post about a street, a painting, a tower |
+| Visit Sicily, Visit Lazio (regional governments) | the places the national portal never names: Ustica, the Nebrodi, a walk out of Frosinone |
+| Visit Greenland, Tahiti Tourisme | slow feeds, long essays — when to go, a new marine reserve |
+| Destination BC, Tourism Panama | seasonal long-form and trail-and-waterfall lists with named places |
 | Open-Meteo ERA5 | ten years of daily values → monthly climate normals |
 
 The official-DMO batch came from probing ~150 tourism-board and city-guide
 domains for a feed our parser accepts, then reading what each one actually
-publishes. Fourteen more are declared and switched off, each with the probe
-result recorded in `sources.json` rather than quietly omitted — the Cyprus feed
-is a restaurant directory, the Maldives one is resort marketing, the US park
-feeds are mostly fatalities. `npm run check-sources` re-probes every enabled
+publishes; a second pass over ~360 more (regions, provinces, states, parks,
+museums, met offices) found that national boards almost never publish a feed
+and regional ones often do. Twenty-two more are declared and switched off, each
+with the probe result recorded in `sources.json` rather than quietly omitted —
+the Cyprus feed is a restaurant directory, the Maldives one is resort marketing,
+the US park feeds are mostly fatalities, Emilia-Romagna's item links all resolve
+to its homepage, UNESCO's intangible-heritage feed is committee minutes except
+for one week in December. `npm run check-sources` re-probes every enabled
 one; `npm run eval-feed <url>` sizes up a candidate before it goes in.
 
 The allowlist matches on a domain-label boundary, so `evil-gov.uk` and
@@ -177,7 +185,7 @@ faithfully repeat FCDO being wrong. "Verified" here means *traceable*.
 summarises two sentences into one loses the whole draft. Better to re-run than
 to loosen it: a fuzzy quote match is indistinguishable from no check at all.
 
-**Thirteen of twenty-seven declared sources work.** The rest are off with the
+**Twenty-one of forty-three declared sources work.** The rest are off with the
 probe result recorded. The two most wanted are `gov.il` and the Israel Airports
 Authority, both behind Imperva. There is now a real browser fetch
 (`src/browserFetch.js`), written to get past UNESCO's 403 — whether it is enough
