@@ -10,12 +10,9 @@
 // We record and print the photographer anyway. Not required, but a photograph
 // on a published card should say whose it is.
 
-const API = 'https://api.pexels.com/v1/search';
+import { CARD_W, CARD_H } from '../render/theme.js';
 
-// Instagram cards are 1080x1350 portrait, so ask for portrait crops. A
-// landscape photo letterboxed into a 4:5 frame either crops the subject out or
-// leaves the composition off-centre behind the scrim.
-const ORIENTATION = 'portrait';
+const API = 'https://api.pexels.com/v1/search';
 
 // Bigger than the card, so downscaling is what happens rather than upscaling.
 const MIN_WIDTH = 1080;
@@ -30,40 +27,22 @@ export const configured = () => Boolean(process.env.PEXELS_API_KEY);
  * Returns { src, provenance, credit } with `src` as a data URI, or null when
  * nothing suitable came back. Null is a completely ordinary outcome — the
  * caller falls back to a text-led layout, which is a fine card.
+ *
+ * Two passes. The first asks for portrait photographs, which fit a 4:5 card
+ * without losing their subject. If that pass has nothing worth using, the
+ * second asks for anything and takes the best-scoring result — a landscape
+ * shot centre-cropped to 4:5 is a worse card than a portrait one, but it is a
+ * far better card than the text fallback the post would otherwise get.
  */
 export async function search(query, { timeoutMs = 15_000 } = {}) {
   const q = String(query || '').trim();
   if (!q) return null;
 
-  const url = `${API}?${new URLSearchParams({
-    query: q,
-    orientation: ORIENTATION,
-    per_page: '15',
-    // Pexels' "large" ordering is by relevance; leaving it default gives better
-    // subject matches than sorting by popularity, which drifts toward generic
-    // wallpaper shots of anywhere.
-  })}`;
-
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  let json;
-  try {
-    const res = await fetch(url, {
-      headers: { Authorization: process.env.PEXELS_API_KEY },
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error(`Pexels search failed: HTTP ${res.status}`);
-    json = await res.json();
-  } finally {
-    clearTimeout(timer);
-  }
-
-  const photo = (json.photos || []).find((p) => (p.width || 0) >= MIN_WIDTH);
+  let photo = await bestOf(q, { orientation: 'portrait', timeoutMs });
+  if (!photo) photo = await bestOf(q, { orientation: null, timeoutMs });
   if (!photo) return null;
 
-  // Prefer the portrait crop Pexels generates; fall back through progressively
-  // larger generic sizes.
-  const href = photo.src?.portrait || photo.src?.large2x || photo.src?.large || photo.src?.original;
+  const href = cropUrl(photo);
   if (!href) return null;
 
   const bytes = await download(href, timeoutMs);
@@ -77,8 +56,121 @@ export async function search(query, { timeoutMs = 15_000 } = {}) {
     provenance: 'stock',
     credit: photo.photographer ? `Pexels / ${photo.photographer}` : 'Pexels',
     sourceUrl: photo.url || null,
+    alt: photo.alt || '',
     query: q,
   };
+}
+
+async function bestOf(q, { orientation, timeoutMs }) {
+  const params = { query: q, per_page: '30' };
+  if (orientation) params.orientation = orientation;
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let json;
+  try {
+    const res = await fetch(`${API}?${new URLSearchParams(params)}`, {
+      headers: { Authorization: process.env.PEXELS_API_KEY },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`Pexels search failed: HTTP ${res.status}`);
+    json = await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+
+  return pickBest(json.photos || [], q);
+}
+
+// Not the first result — the best one.
+//
+// The first version took the first photograph wide enough for the card, and a
+// query for "Reykjavik house" duly returned a red house on an ordinary street.
+// Pexels ranks by its own relevance, which is decent, but the top hit is often
+// a person posing in front of the place, a product shot, or a picture of
+// somewhere else that shares a word with the query. The alt text the API
+// returns is enough to tell those apart from the landscape the card wants.
+//
+// Exported so the ranking is testable without a key.
+const PEOPLE =
+  /\b(?:woman|women|man|men|girl|boy|person|people|couple|portrait|selfie|model|bride|groom|wedding|family|tourist|traveler|traveller|smiling|posing|fashion|dress|bikini|hand|hands|face|closeup|close-up)\b/i;
+const NOT_A_PLACE =
+  /\b(?:logo|text|sign|screenshot|illustration|drawing|render|3d|map|flag|passport|money|coins?|banknotes?|food|dish|plate|coffee|cup|laptop|phone|car|cars|dog|cat|toy|product|package|bottle|abstract|texture|pattern|background|mockup)\b/i;
+const SCENERY =
+  /\b(?:aerial|drone|landscape|skyline|panorama|sunset|sunrise|dusk|golden hour|night|lights|mountain|mountains|coast|coastline|cliff|cliffs|beach|island|lagoon|bay|harbou?r|sea|ocean|lake|river|waterfall|valley|glacier|snow|forest|desert|dunes|canyon|old town|street|alley|square|plaza|bridge|castle|palace|cathedral|church|temple|shrine|mosque|tower|dome|ruins|architecture|cityscape|view|vista|scenic|aurora|northern lights)\b/i;
+
+export function scorePhoto(photo, query) {
+  const alt = String(photo.alt || '').toLowerCase();
+  const w = Number(photo.width) || 0;
+  const h = Number(photo.height) || 0;
+  let score = 0;
+
+  // Resolution: at least the card, and comfortably above it is better.
+  if (w < MIN_WIDTH || h < CARD_H) return -Infinity;
+  score += Math.min(1, (Math.min(w, h) - 1080) / 2000) * 0.3;
+
+  // Shape: a portrait fits the card, a square crops a little, a wide landscape
+  // loses its sides.
+  const ratio = h / w;
+  if (ratio >= 1.15) score += 0.6;
+  else if (ratio >= 0.9) score += 0.3;
+  else if (ratio < 0.6) score -= 0.5;
+
+  // Does the description mention what was asked for? Counted per query word,
+  // so "Kyoto wooden bridge" wants to see kyoto, and a bridge, and not merely
+  // wood.
+  const words = String(query || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 2);
+  const hits = words.filter((t) => alt.includes(t)).length;
+  if (words.length) score += (hits / words.length) * 1.5;
+
+  // Sized so that a person or a product shot lands below zero on shape and
+  // resolution alone - it is refused unless the description also matches the
+  // query well, in which case it is at least a picture of the right place.
+  if (SCENERY.test(alt)) score += 0.6;
+  if (PEOPLE.test(alt)) score -= 2.0;
+  if (NOT_A_PLACE.test(alt)) score -= 2.5;
+
+  return score;
+}
+
+export function pickBest(photos, query) {
+  let best = null;
+  let bestScore = -Infinity;
+  for (const p of photos) {
+    const s = scorePhoto(p, query);
+    if (s > bestScore) {
+      best = p;
+      bestScore = s;
+    }
+  }
+  // Below zero the "best" is a people shot or a product shot that happened to
+  // be least bad. Say no, and let the caller try a broader query.
+  return bestScore >= 0 ? best : null;
+}
+
+// The exact card size, cut by Pexels' own CDN.
+//
+// The API's ready-made `portrait` crop is 800x1200, which is smaller than the
+// card in both directions — every photo card was being upscaled by a third
+// before this. The CDN takes the same query parameters that crop generates,
+// so asking for 1080x1350 directly returns a sharp, centre-cropped image at
+// exactly the card's size. Falls back to the largest generic size if the
+// original URL is missing.
+export function cropUrl(photo) {
+  const original = photo?.src?.original;
+  if (original) {
+    const u = new URL(original);
+    u.searchParams.set('auto', 'compress');
+    u.searchParams.set('cs', 'tinysrgb');
+    u.searchParams.set('fit', 'crop');
+    u.searchParams.set('w', String(CARD_W));
+    u.searchParams.set('h', String(CARD_H));
+    return u.toString();
+  }
+  return photo?.src?.large2x || photo?.src?.large || photo?.src?.portrait || null;
 }
 
 async function download(href, timeoutMs) {

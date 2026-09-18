@@ -11,6 +11,21 @@ const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
   trimValues: true,
+  // The parser's default budget is 1,000 entity expansions per document. That
+  // is a defence against a hostile DTD, and it also rejects any ordinary feed
+  // that escapes its HTML summaries: every `&amp;` and `&lt;p&gt;` in a
+  // full-text feed is one expansion, and a ten-item DMO feed spends the whole
+  // budget on the second item. Three of the first six official tourism feeds
+  // probed died here with "Entity expansion limit exceeded". The depth limit
+  // is what actually stops a billion-laughs document, so it stays tight; the
+  // count and the length are lifted to what a 5MB feed can legitimately need.
+  processEntities: {
+    enabled: true,
+    maxExpansionDepth: 10,
+    maxTotalExpansions: 200_000,
+    maxExpandedLength: 6_000_000,
+    maxEntityCount: 1000,
+  },
 });
 
 const arr = (x) => (x == null ? [] : Array.isArray(x) ? x : [x]);

@@ -152,6 +152,10 @@ const RETRYABLE = new Set([
   // right, so the item should come back rather than being lost for 45 days.
   'unrounded_number',
   'repeated_word',
+  'headline_length',
+  'caption_too_long',
+  'filler_adjective',
+  'rhetorical_opening',
   'quota',
   'error',
 ]);

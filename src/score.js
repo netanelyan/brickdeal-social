@@ -1,6 +1,7 @@
 import { pillarDeficits } from './pillars.js';
 import * as store from './store.js';
 import { candidateId } from './candidate.js';
+import { loadDestinations } from './sources/climate.js';
 
 // Ranking raw source items, before anything expensive happens to them.
 //
@@ -34,7 +35,21 @@ const SPECIFIC = /\d{2,}|\d+\s*(?:%|km|℃|°C|€|\$|£)|\b(?:20\d\d|from \d|un
 // feed actually uses: on a quiet day a trade item that genuinely concerns
 // travellers can still surface, and the drafting step gets the final say.
 const TRADE_NOISE =
-  /商談会|募集|フォーラム|取材|セミナー|説明会|出展|受賞|\b(?:trade (?:show|fair|mission)|b2b|webinar|roadshow|press (?:conference|briefing)|call for (?:applications|entries|papers)|now open for registration|appointment of|has been awarded)\b/i;
+  /商談会|募集|フォーラム|取材|セミナー|説明会|出展|受賞|\b(?:trade (?:show|fair|mission|mart)|travel mart|b2b|webinar|roadshow|press (?:conference|briefing)|call for (?:applications|entries|papers)|now open for registration|appointment of|has been awarded|awards? ceremony|wins? (?:an? )?awards?|mou\b|memorandum of understanding|signs? (?:an? )?(?:mou|agreement|partnership)|delegation|fam(?:iliari[sz]ation)? trip|strengthens? .{0,30}\bmarket|governor|minister (?:welcomes|meets|visits)|visitation statistics|superintendent|environmental (?:impact|assessment)|invasive (?:species|fish)|market(?:ing)? campaign|concludes)\b/i;
+
+// Things that never become a post on this channel, however primary the source:
+// a death, an injury, a search, a crime, a disease. A national park's news feed
+// is the standing authority on the park and it also carries every recovery of
+// a body, and the model reads each one before declining it - for money. These
+// are filtered on the title, before anything is paid for.
+const GRIM =
+  /\b(?:deceased|fatal(?:ity|ities)?|death|deaths|died|dies|killed|bod(?:y|ies) (?:recovered|found)|missing (?:hiker|person|man|woman|visitor)|search and rescue|rescued|drown\w*|assault\w*|arrest\w*|stabb\w*|shooting|homicide|rabies|outbreak|evacuat\w*|remains found)\b/i;
+
+// A city guide's feed is half its events calendar, and a comedian's tour date
+// is not a trip. Mild: a festival or a market is an event too, and those are
+// posts, so only the performer vocabulary is nudged down.
+const PERFORMER =
+  /\b(?:concert|gig|comedian|comedy|stand-up|dj set|live show|in concert|tour dates|album|band|singer|orchestra|recital|screening)\b/i;
 
 // The same problem in the register an intergovernmental body writes in, which
 // is a different dialect and was going straight past the list above.
@@ -110,6 +125,50 @@ const SPECTACLE =
 const ACTIONABLE =
   /\b(?:open(?:s|ed|ing)? (?:to (?:the )?(?:public|visitors)|its doors)|reopen\w*|closed? (?:for|until|to)|closure|shut(?:s|ting)? |visitor cent\w+|opening hours|ticket(?:s|ing)?|book(?:ing|able)|reservation|timed entry|permit|entry (?:requirement|fee|rule)|visa|border|timetable|new (?:route|service|line|flight)|direct flight|non-stop|season|peak|off-peak|shoulder|crowd\w*|queue|free (?:entry|admission)|discount|city pass|day pass|itinerar\w+|walking route|neighbo?urhood|district|quarter|market|museum|opens? in \w+)\b/i;
 
+// Somewhere an Israeli traveller actually flies to. Built from the climate
+// rotation (which was chosen for exactly that) plus the countries around it.
+// A title that names one of these is a title with a photograph and a trip in
+// it, which is the other half of what a post needs - so it is nudged up. Not a
+// filter: a story about somewhere off this list still gets read.
+const NAMED_PLACES = (() => {
+  const cities = loadDestinations().map((d) => d.en);
+  const more = [
+    'Greece', 'Athens', 'Crete', 'Rhodes', 'Santorini', 'Mykonos', 'Thessaloniki', 'Corfu',
+    'Cyprus', 'Paphos', 'Ayia Napa', 'Limassol',
+    'Italy', 'Rome', 'Milan', 'Venice', 'Florence', 'Naples', 'Sicily', 'Amalfi', 'Tuscany', 'Dolomites',
+    'Spain', 'Barcelona', 'Madrid', 'Seville', 'Valencia', 'Malaga', 'Andalusia', 'Ibiza', 'Mallorca', 'Canary',
+    'Portugal', 'Lisbon', 'Porto', 'Algarve', 'Madeira', 'Azores',
+    'France', 'Paris', 'Nice', 'Provence', 'Alps', 'Chamonix',
+    'Netherlands', 'Amsterdam', 'Belgium', 'Brussels', 'Bruges',
+    'Germany', 'Berlin', 'Munich', 'Bavaria', 'Hamburg', 'Frankfurt',
+    'Austria', 'Vienna', 'Salzburg', 'Innsbruck', 'Tyrol',
+    'Switzerland', 'Zurich', 'Geneva', 'Interlaken', 'Zermatt', 'Lucerne',
+    'Czech', 'Prague', 'Hungary', 'Budapest', 'Poland', 'Krakow', 'Warsaw',
+    'Slovenia', 'Ljubljana', 'Bled', 'Croatia', 'Dubrovnik', 'Split', 'Montenegro', 'Albania',
+    'Bulgaria', 'Sofia', 'Varna', 'Romania', 'Bucharest', 'Serbia', 'Belgrade',
+    'United Kingdom', 'Britain', 'England', 'London', 'Scotland', 'Edinburgh', 'Ireland', 'Dublin',
+    'Norway', 'Oslo', 'Bergen', 'Lofoten', 'Tromso', 'Sweden', 'Stockholm', 'Denmark', 'Copenhagen',
+    'Finland', 'Helsinki', 'Lapland', 'Rovaniemi', 'Iceland', 'Reykjavik', 'Faroe',
+    'Estonia', 'Tallinn', 'Latvia', 'Riga', 'Lithuania', 'Vilnius',
+    'Georgia', 'Tbilisi', 'Batumi', 'Kazbegi', 'Armenia', 'Yerevan', 'Azerbaijan', 'Baku',
+    'Turkey', 'Istanbul', 'Antalya', 'Cappadocia',
+    'Dubai', 'Abu Dhabi', 'Emirates', 'Bahrain', 'Morocco', 'Marrakech', 'Egypt', 'Sinai', 'Jordan', 'Petra',
+    'Thailand', 'Bangkok', 'Phuket', 'Koh Samui', 'Chiang Mai', 'Krabi', 'Pai',
+    'Vietnam', 'Hanoi', 'Ho Chi Minh', 'Hoi An', 'Ha Long', 'Da Nang',
+    'Japan', 'Tokyo', 'Kyoto', 'Osaka', 'Hokkaido', 'Okinawa', 'Nara', 'Hiroshima', 'Fuji',
+    'South Korea', 'Seoul', 'Taiwan', 'Taipei', 'Singapore', 'Hong Kong', 'Bali', 'Indonesia',
+    'Sri Lanka', 'India', 'Goa', 'Nepal', 'Kathmandu', 'Annapurna', 'Everest', 'Maldives', 'Philippines',
+    'Laos', 'Cambodia', 'Angkor', 'Malaysia',
+    'Australia', 'Sydney', 'Melbourne', 'New Zealand', 'Queenstown',
+    'United States', 'New York', 'Miami', 'Los Angeles', 'Las Vegas', 'San Francisco', 'Hawaii', 'Grand Canyon', 'Yosemite', 'Yellowstone', 'Alaska',
+    'Canada', 'Toronto', 'Vancouver', 'Montreal', 'Banff',
+    'Mexico', 'Cancun', 'Costa Rica', 'Peru', 'Machu Picchu', 'Argentina', 'Patagonia', 'Brazil', 'Colombia', 'Chile', 'Bolivia',
+    'Tanzania', 'Zanzibar', 'Kenya', 'Seychelles', 'Mauritius', 'South Africa', 'Cape Town', 'Namibia', 'Rwanda', 'Ethiopia', 'Uganda',
+  ];
+  const escaped = [...new Set([...cities, ...more])].map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return new RegExp(`\\b(?:${escaped.join('|')})\\b`, 'i');
+})();
+
 const DAY_MS = 86_400_000;
 
 function recencyScore(publishedAt, now) {
@@ -148,6 +207,19 @@ export function scoreItem(item, { deficits = pillarDeficits(), now = Date.now() 
   // reopening — which is the exact swap this whole change is for.
   const spectacle = item.spectacle || SPECTACLE.test(text) ? -0.6 : 0;
   const actionable = ACTIONABLE.test(text) ? 0.3 : 0;
+
+  // Bigger than spectacle, because it has to beat the rest of the formula
+  // outright: a fatality at a famous park is government, recent, specific and
+  // named, and it must still come last.
+  const grim = GRIM.test(item.title) ? -1.5 : 0;
+  const performer = PERFORMER.test(text) ? -0.3 : 0;
+
+  // Named somewhere Israelis fly. Half the size of the actionable nudge: it
+  // says "there is a picture and a destination here", not "there is a post".
+  // Not for the evergreen dataset items: every one of those names a destination
+  // by construction, so the nudge would be a flat bonus for the climate source
+  // rather than a signal about a story.
+  const named = !item.evergreen && NAMED_PLACES.test(text) ? 0.15 : 0;
 
   // A thin *item* rarely drafts well — but a thin title alone doesn't mean
   // that. FCDO publishes one entry per country, titled just "Norway", with the
@@ -196,7 +268,10 @@ export function scoreItem(item, { deficits = pillarDeficits(), now = Date.now() 
     spectacle +
     actionable +
     offEarth +
-    newPlace
+    newPlace +
+    grim +
+    performer +
+    named
   );
 }
 

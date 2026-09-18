@@ -2,7 +2,7 @@ import { loadEnv } from '../src/env.js';
 loadEnv();
 
 import { primaryAuthority, registry } from '../src/sources/index.js';
-import { flightPriceGuard, verifyEvidence, verifyDraftText, minSourceChars, noDecimalsUpFront, noRepeatedWord, RejectedError } from '../src/verify.js';
+import { flightPriceGuard, verifyEvidence, verifyDraftText, minSourceChars, noDecimalsUpFront, noRepeatedWord, headlineLength, captionLength, fillerAdjective, rhetoricalOpening, RejectedError } from '../src/verify.js';
 import { safeStem } from '../src/render/index.js';
 import { htmlToText, stripBoilerplate, decodeEntities, fetchReadable, FetchError } from '../src/fetchPage.js';
 import { parseFeed } from '../src/sources/rss.js';
@@ -12,12 +12,12 @@ import { scoreItem, rank } from '../src/score.js';
 import * as store from '../src/store.js';
 import { candidateId, tripGap } from '../src/candidate.js';
 import { renderHtml, LAYOUTS, PHOTO_LAYOUTS, isPhotoLayout } from '../src/render/templates.js';
-import { assertGenericAiPrompt, ImagePolicyError } from '../src/images.js';
+import { assertGenericAiPrompt, ImagePolicyError, imageQueries } from '../src/images.js';
 import { approvalMessage, instagramCaption } from '../src/format.js';
 import { quietAlert } from '../src/notify.js';
 import { describeError, InstagramError } from '../src/publish/instagram.js';
 import { publishTargets } from '../src/publish/targets.js';
-import { hyphensOnly } from '../src/draft.js';
+import { hyphensOnly, stripEmoji, capHashtags, normalise } from '../src/draft.js';
 
 // Offline behaviour checks. No network, no credentials, no Telegram.
 //
@@ -1107,23 +1107,34 @@ group('pexels stock provider');
   process.env.PEXELS_API_KEY = 'test-key';
 
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
-  let searchUrl = null;
+  const searchUrls = [];
   let sentAuth = null;
+  let downloaded = null;
+
+  const photo = (over) => ({
+    width: 3000, height: 4000, alt: 'Lisbon old town alley at sunset', photographer: 'Ada L',
+    url: 'https://pexels.com/photo/1',
+    src: { original: 'https://images.pexels.com/photos/1/pexels-photo-1.jpeg', portrait: 'https://images.pexels.com/p.jpg' },
+    ...over,
+  });
 
   globalThis.fetch = async (url, opts = {}) => {
     if (String(url).includes('api.pexels.com')) {
-      searchUrl = String(url);
+      searchUrls.push(String(url));
       sentAuth = opts.headers?.Authorization;
       return {
         ok: true,
         json: async () => ({
           photos: [
-            { width: 400, src: { portrait: 'https://x/small.jpg' }, photographer: 'Too Small' },
-            { width: 2000, src: { portrait: 'https://images.pexels.com/p.jpg' }, photographer: 'Ada L', url: 'https://pexels.com/photo/1' },
+            photo({ width: 400, height: 600, photographer: 'Too Small' }),
+            // Pexels' own first result: a person posing. Ranked below the scene.
+            photo({ alt: 'Woman smiling in front of a tram in Lisbon', photographer: 'Portrait Guy' }),
+            photo({ photographer: 'Ada L' }),
           ],
         }),
       };
     }
+    downloaded = String(url);
     return {
       ok: true,
       headers: { get: () => 'image/jpeg' },
@@ -1131,19 +1142,152 @@ group('pexels stock provider');
     };
   };
 
-  const { search } = await import('../src/images/pexels.js');
+  const { search, scorePhoto, pickBest, cropUrl } = await import('../src/images/pexels.js');
   const got = await search('Lisbon old town alley');
 
   ok('sends the API key as an Authorization header', sentAuth === 'test-key');
-  ok('asks for portrait crops - the card is 4:5, a landscape crop loses the subject', /orientation=portrait/.test(searchUrl || ''));
+  ok('asks for portrait crops first - the card is 4:5, a landscape crop loses the subject', /orientation=portrait/.test(searchUrls[0] || ''));
   ok('inlines the bytes as a data URI rather than hotlinking', got?.src?.startsWith('data:image/jpeg;base64,'));
   eq('tags provenance as stock', got?.provenance, 'stock');
-  ok('credits the photographer', got?.credit?.includes('Ada L'));
+  ok('picks the scene over the person, not the first result', got?.credit?.includes('Ada L'));
   ok('skips photos narrower than the card', !/Too Small/.test(JSON.stringify(got)));
+  ok('downloads an exact 1080x1350 crop from the CDN, not the 800x1200 portrait', /w=1080/.test(downloaded) && /h=1350/.test(downloaded) && /fit=crop/.test(downloaded));
   eq('an empty query returns null rather than searching', await search('  '), null);
+
+  // Ranking on its own, no network.
+  const scene = photo({});
+  const person = photo({ alt: 'Man posing with a selfie stick in Lisbon' });
+  const product = photo({ alt: 'Lisbon souvenir coffee cup mockup' });
+  const wide = photo({ width: 6000, height: 2000 });
+  ok('a described scene outranks a person in front of it', scorePhoto(scene, 'Lisbon old town alley') > scorePhoto(person, 'Lisbon old town alley'));
+  ok('a product shot ranks below zero and is refused', scorePhoto(product, 'Lisbon old town alley') < 0);
+  ok('portrait outranks a wide landscape of the same scene', scorePhoto(scene, 'Lisbon alley') > scorePhoto(wide, 'Lisbon alley'));
+  eq('nothing acceptable means null, so the caller can broaden the query', pickBest([person, product], 'Lisbon alley'), null);
+  ok('cropUrl keeps the original and adds the crop parameters', cropUrl(scene).startsWith('https://images.pexels.com/photos/1/pexels-photo-1.jpeg?'));
+  ok('cropUrl falls back to a generic size without an original', cropUrl({ src: { large2x: 'https://x/l.jpg' } }) === 'https://x/l.jpg');
+
+  // The second pass: the portrait search finds nothing usable, any orientation does.
+  searchUrls.length = 0;
+  let calls = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('api.pexels.com')) {
+      searchUrls.push(String(url));
+      calls++;
+      return { ok: true, json: async () => ({ photos: calls === 1 ? [person] : [wide] }) };
+    }
+    return { ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => jpeg.buffer.slice(0, 6) };
+  };
+  const second = await search('Lisbon alley');
+  eq('a portrait miss triggers a second, unconstrained search', searchUrls.length, 2);
+  ok('the second search carries no orientation', !/orientation=/.test(searchUrls[1]));
+  ok('and its landscape result is used rather than a text card', Boolean(second?.src));
 
   globalThis.fetch = realFetch;
   if (realKey === undefined) delete process.env.PEXELS_API_KEY; else process.env.PEXELS_API_KEY = realKey;
+}
+
+/* -------------------------------------------------------------------------- */
+group('image query fallback chain');
+
+{
+  const qs = imageQueries({ imageQuery: 'Kyoto wooden bridge', imageQueryAlt: 'Kyoto autumn temple', placeEn: 'Kyoto', countryEn: 'Japan' });
+  eq('most specific first', qs[0], 'Kyoto wooden bridge');
+  eq('then the broader one the model supplied', qs[1], 'Kyoto autumn temple');
+  ok('then the place by name', qs.some((q) => q === 'Kyoto Japan landmark'));
+  ok('and the country as a last resort', qs.at(-1) === 'Japan travel scenery');
+  eq('no duplicates', new Set(qs).size, qs.length);
+  eq('nothing to search for is an empty list, not [""]', imageQueries({}).length, 0);
+  eq('a country alone still yields searches', imageQueries({ countryEn: 'Japan' }).length, 2);
+}
+
+/* -------------------------------------------------------------------------- */
+group('copy shape — the exemplar passes, its failure modes do not');
+
+{
+  const exemplar = {
+    headline: 'החודשים שבהם הזוהר הצפוני עובד לטובתכם',
+    subhead: 'סביב השוויונים - ספטמבר ומרץ - הגיאומטריה המגנטית פשוט נוחה יותר.',
+    caption:
+      'זוהר אפשר לראות בכל חודש בשנה, אבל סביב השוויונים הזווית בין השדה המגנטי של כדור הארץ לרוח השמש מעבירה אנרגיה פנימה ביעילות - האפקט נקרא ראסל-מקפרון. ואם יצא לכם לראות סגול ולא ירוק: זה פשוט צבעים של גזים שונים שמתערבבים בעין. 💜 #זוהרצפוני #מתיטסים',
+  };
+  ok('the post that set the standard passes every check', verifyDraftText(exemplar) === true);
+
+  ok('a one-word headline is too short', Boolean(headlineLength({ headline: 'ליסבון' })));
+  ok('a twelve-word headline is a sentence', Boolean(headlineLength({ headline: 'א ב ג ד ה ו ז ח ט י כ ל' })));
+  eq('six words is fine', headlineLength(exemplar), null);
+  throws('rejected as headline_length', () => verifyDraftText({ ...exemplar, headline: 'ליסבון' }), 'headline_length');
+
+  ok('six sentences is an article', Boolean(captionLength({ caption: 'א. ב. ג. ד. ה. ו.' })));
+  ok('five hundred characters is an article', Boolean(captionLength({ caption: 'א'.repeat(500) })));
+  eq('hashtags do not count toward the length', captionLength({ caption: 'משפט אחד. ' + '#תג '.repeat(3) }), null);
+  throws('rejected as caption_too_long', () => verifyDraftText({ ...exemplar, caption: 'א. ב. ג. ד. ה. ו. ז.' }), 'caption_too_long');
+
+  ok('"מדהים" is filler', Boolean(fillerAdjective({ headline: 'הנוף המדהים של ליסבון' })));
+  ok('a prefixed form is still filler', Boolean(fillerAdjective({ caption: 'והמרהיבים שבהם' })));
+  ok('"בלתי נשכח" is filler', Boolean(fillerAdjective({ caption: 'חוויה בלתי נשכחת' })));
+  eq('a specific noun is not', fillerAdjective({ caption: 'השוק בשבת בבוקר' }), null);
+  throws('rejected as filler_adjective', () => verifyDraftText({ ...exemplar, subhead: 'נוף מרהיב.' }), 'filler_adjective');
+
+  ok('a headline ending in ? is rhetorical', Boolean(rhetoricalOpening({ headline: 'למה ליסבון?' })));
+  ok('"ידעתם ש" is an opening the brief forbids', Boolean(rhetoricalOpening({ headline: 'x', caption: 'ידעתם שבליסבון יש חשמלית? כן.' })));
+  ok('a caption opening on a question is rhetorical', Boolean(rhetoricalOpening({ headline: 'x', caption: 'רוצים לדעת מה? הנה.' })));
+  eq('a question later in the caption is allowed', rhetoricalOpening({ headline: 'x', caption: 'השוק פתוח בשבת. למה? כי כן.' }), null);
+  throws('rejected as rhetorical_opening', () => verifyDraftText({ ...exemplar, headline: 'מתי הזוהר הצפוני עובד לטובתכם?' }), 'rhetorical_opening');
+}
+
+/* -------------------------------------------------------------------------- */
+group('normalise — what is fixed for free rather than re-drafted');
+
+{
+  eq('emoji leave the headline', stripEmoji('הזוהר 💜 הצפוני ✨'), 'הזוהר הצפוני');
+  eq('three hashtags stay', capHashtags('טקסט. 💜 #א #ב #ג'), 'טקסט. 💜 #א #ב #ג');
+  eq('a fourth and fifth are trimmed', capHashtags('טקסט. 💜 #א #ב #ג #ד #ה'), 'טקסט. 💜 #א #ב #ג');
+
+  const item = { pillarHints: ['inCity'] };
+  const base = { usable: true, layout: 'fact', headline: 'x', place_en: 'Lisbon', country_en: 'Portugal', image_query: '' };
+  eq('a fact card about a named place becomes a photo card when images are available', normalise(base, item, { imagesAvailable: true }).layout, 'photoFull');
+  eq('...but not when they are not', normalise(base, item, { imagesAvailable: false }).layout, 'fact');
+  eq('...and not when the post names nowhere', normalise({ ...base, place_en: '', country_en: '' }, item, { imagesAvailable: true }).layout, 'fact');
+  eq('the alert layout is left alone', normalise({ ...base, layout: 'alert' }, item, { imagesAvailable: true }).layout, 'alert');
+  const n = normalise({ ...base, image_query: 'Lisbon tram', image_query_alt: 'Lisbon skyline' }, item, { imagesAvailable: true });
+  eq('the second image query is carried', n.imageQueryAlt, 'Lisbon skyline');
+  eq('the English place is carried', n.placeEn, 'Lisbon');
+}
+
+/* -------------------------------------------------------------------------- */
+group('feed parsing — a full-text feed is not an entity bomb');
+
+{
+  // Three of the first six official tourism feeds probed carried escaped HTML
+  // summaries with more than 1,000 entities between them, and the parser's
+  // default budget rejected the whole feed. A billion-laughs document is
+  // stopped by depth, not by count.
+  const item = (i) =>
+    `<item><title>Post ${i}</title><link>https://example.gov/${i}</link><description>${'&lt;p&gt;a &amp; b&lt;/p&gt;'.repeat(60)}</description></item>`;
+  const body = `<?xml version="1.0"?><rss><channel><title>t</title>${Array.from({ length: 12 }, (_, i) => item(i)).join('')}</channel></rss>`;
+  let parsed = null;
+  let err = null;
+  try {
+    parsed = parseFeed(body, { id: 'x', name: 'x', authority: 'government', lang: 'en', pillars: [] });
+  } catch (e) {
+    err = e;
+  }
+  ok('a feed with thousands of ordinary entities parses', !err, err?.message);
+  eq('all twelve items survive', parsed?.length, 12);
+  ok('and the escaped HTML is decoded to text', parsed?.[0]?.summary.includes('a & b'));
+}
+
+/* -------------------------------------------------------------------------- */
+group('ranking — what a title alone can rule out');
+
+{
+  const base = { authority: 'government', publishedAt: new Date().toISOString(), pillarHints: [], summary: 'x'.repeat(300) };
+  const sc = (title) => scoreItem({ ...base, title });
+  ok('a fatality comes last, however fresh and official', sc('Two Deceased Hikers Recovered and Identified Following Flash Flood') < sc('Timed entry reservations return in May'));
+  ok('an MoU signing is trade noise', sc('Visit Maldives and Emirates sign MoU to strengthen tourism promotion') < sc('The night market reopens on the riverbank'));
+  ok('a travel mart is trade noise', sc('TAT strengthens global golf tourism connections at Thailand Golf Travel Mart 2026') < sc('The night market reopens on the riverbank'));
+  ok('a named destination is nudged up', sc('The Odeon of Herodes Atticus in Athens closes for restoration') > sc('The Odeon closes for restoration'));
+  ok('a comedian is not a trip', sc('Elena Gabrielle: comedy special, live') < sc('Elena Gabrielle: the square'));
 }
 
 /* -------------------------------------------------------------------------- */

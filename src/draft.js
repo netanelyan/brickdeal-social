@@ -78,6 +78,8 @@ const DRAFT_SCHEMA = {
     tags: { type: 'array', items: { type: 'string', enum: TAGS } },
     place: { type: 'string', description: 'Place name in Hebrew, or empty string' },
     country: { type: 'string', description: 'Country in Hebrew, or empty string' },
+    place_en: { type: 'string', description: 'The same place in English, as a stock library would index it, or empty string' },
+    country_en: { type: 'string', description: 'The same country in English, or empty string' },
     headline: { type: 'string', description: 'Hebrew headline for the card' },
     subhead: { type: 'string', description: 'Hebrew supporting line, or empty string' },
     bullets: {
@@ -139,6 +141,13 @@ const DRAFT_SCHEMA = {
         'Empty string for a text-led layout. Stock libraries index in English, so this ' +
         'is never Hebrew.',
     },
+    image_query_alt: {
+      type: 'string',
+      description:
+        'ENGLISH, 2-4 words: a broader second search if the first finds nothing - the ' +
+        'region or country and what it is known for, e.g. "Iceland northern lights", ' +
+        '"Kyoto autumn temple". Empty for a text-led layout.',
+    },
     caption: { type: 'string', description: 'Hebrew caption for Telegram and Instagram' },
     evidence: {
       type: 'array',
@@ -166,6 +175,8 @@ const DRAFT_SCHEMA = {
     'tags',
     'place',
     'country',
+    'place_en',
+    'country_en',
     'headline',
     'subhead',
     'bullets',
@@ -173,6 +184,7 @@ const DRAFT_SCHEMA = {
     'compare',
     'route',
     'image_query',
+    'image_query_alt',
     'caption',
     'evidence',
   ],
@@ -323,7 +335,10 @@ Photo-led (ONLY when IMAGE AVAILABLE below says yes; otherwise forbidden, and
 the card would fall back to a text layout anyway).
 
 When you choose one of these, fill "image_query" with 2-5 ENGLISH words naming
-what should be behind the card. Name the actual place when the post is about a
+what should be behind the card, and "image_query_alt" with a broader second
+search in case the first finds nothing - the country or region and what it is
+known for. Also fill "place_en" and "country_en": the last resort is a search
+for the place by name, and it has to be in English to find anything. Name the actual place when the post is about a
 place - "Lisbon old town alley", "Kyoto wooden bridge", "Faroe Islands cliffs".
 Describe the scene you want, not the abstract idea: "Tokyo metro platform"
 finds something; "Japanese efficiency" does not.
@@ -362,12 +377,13 @@ A WHEN-TO-GO POST IS ABOUT A PLACE, NOT ABOUT WEATHER. "When should I go to
 Tokyo" is answered by a picture of Tokyo and a month. The temperature is the
 reason, not the subject - it belongs in the supporting line, and the picture
 carries the rest. Ask for the place by name in image_query.
-- photoFull: full-bleed picture, headline and one supporting line over the
-  bottom of it. The strongest choice when the place itself is the story.
-- photoBand: picture on top, a solid band of type beneath. Best when the
-  supporting line needs more room than a scrim can carry legibly.
-- photoFrame: inset picture with a gallery caption under it. Quieter, good for
-  a single object or detail rather than a landscape.
+- photoFull: full-bleed picture, the headline over the bottom of it. This is
+  the layout to reach for: the picture fills the phone and the headline sits
+  on it. Choose it unless one of the next two is clearly better.
+- photoBand: picture on top, a solid band of type beneath. Only when the
+  headline is long enough that a scrim could not carry it legibly.
+- photoFrame: inset picture with a gallery caption under it. Quieter, for a
+  single object or detail rather than a landscape. Rare.
 
 Text-led (for a post with no place to photograph — the exception):
 - fact: one surprising, specific, verifiable fact. The headline IS the fact.
@@ -478,7 +494,10 @@ WRITING THE CARD
   matters to someone actually going. Do not restate the headline - it is
   already the largest thing on the card - and do not restate the subhead, which
   is printed immediately above the caption as the description's first line.
-  At most three hashtags, at the end.
+  Two or three hashtags on the very last line, in Hebrew, joined-up the way
+  people actually search them: #זוהרצפוני #מתיטסים #ליסבון. One emoji, at the
+  end of the last sentence, is welcome when it fits the mood; two is a
+  newsletter. None in the headline, ever.
 
   The caption expands the HEADLINE'S subject. It is not a summary of the page.
   A source often mentions several unrelated things; picking up each one in turn
@@ -555,6 +574,44 @@ is about to go. That is a real constraint, not a vibe. In practice:
   enthusiasm reads as an advert, and an advert is not warm, it is loud.
 - At most three hashtags, at the very end, and only ones a person would actually
   search. No hashtag stuffing.
+
+A POST THAT GOT IT RIGHT
+This one published, and it is the standard. Source: a NASA Earth Observatory
+piece on a purple aurora. Layout photoFull, image_query "aurora borealis night
+sky", tags ["nature"].
+
+  headline:  החודשים שבהם הזוהר הצפוני עובד לטובתכם
+  subhead:   סביב השוויונים - ספטמבר ומרץ - הגיאומטריה המגנטית פשוט נוחה יותר.
+  caption:   זוהר אפשר לראות בכל חודש בשנה, אבל סביב השוויונים הזווית בין השדה
+             המגנטי של כדור הארץ לרוח השמש מעבירה אנרגיה פנימה ביעילות - האפקט
+             נקרא ראסל-מקפרון. ואם יצא לכם לראות סגול ולא ירוק: זה פשוט צבעים
+             של גזים שונים שמתערבבים בעין. 💜 #זוהרצפוני #מתיטסים
+  trip:      where "יעדי הזוהר הצפוני בצפון הרחוק" · how "Plan an aurora trip
+             for around the equinoxes - late September or late March - rather
+             than midwinter by default." · open true · want "Around the
+             equinoxes the Earth-Sun magnetic geometry is unusually good at
+             feeding solar wind into the magnetosphere, which is what lights
+             the sky up."
+
+Why it works, in the order that matters:
+  1. The headline is a definite noun phrase - "the months when..." - that names
+     something specific and does not say which months. A reader has to tap.
+  2. The subhead pays it off in one line: the months, and the reason in four
+     words. Nothing the headline already said.
+  3. The caption is two sentences. The first gives the mechanism, plainly, and
+     names it; the second answers the question the picture raises (why purple)
+     with something a friend would say. Then one emoji, then two hashtags a
+     person would search. It does not restate the headline, it does not list
+     numbers, it does not sum up, and it stops.
+  4. The picture is the scene itself, asked for by what it is called in stock
+     libraries, not by the story's abstract idea.
+  5. The trip is honest: it names a category of destination rather than
+     inventing a town the source never mentioned, and "how" is advice someone
+     could act on when booking.
+Every post should be built the same way, whatever the pillar: a picture worth
+stopping on, a headline that names and withholds, a subhead that answers, a
+short caption that adds one or two things worth knowing, and a trip a reader
+could actually take.
 
 PUNCTUATION
 Use a plain hyphen (-) only. Never an em dash or an en dash. This applies to the
@@ -640,7 +697,7 @@ export async function draft(item, sourceText, { imagesAvailable = false } = {}) 
     throw new Error(`drafting returned unparseable JSON: ${e.message}`);
   }
 
-  return normalise(parsed, item);
+  return normalise(parsed, item, { imagesAvailable });
 }
 
 // Everything the JSON Schema subset can't express (lengths, cross-field rules)
@@ -663,7 +720,7 @@ export function hyphensOnly(text) {
     .replace(/[^\S\n]{2,}/g, ' ');
 }
 
-function normalise(d, item) {
+export function normalise(d, item, { imagesAvailable = false } = {}) {
   const s = (v) => hyphensOnly(String(v ?? '').replace(/\s+/g, ' ').trim()).trim();
 
   const out = {
@@ -684,11 +741,14 @@ function normalise(d, item) {
     },
     tags: Array.isArray(d.tags) ? d.tags.filter((t) => TAGS.includes(t)) : [],
     imageQuery: s(d.image_query),
+    imageQueryAlt: s(d.image_query_alt),
     place: s(d.place),
     country: s(d.country),
-    headline: s(d.headline),
+    placeEn: s(d.place_en),
+    countryEn: s(d.country_en),
+    headline: stripEmoji(s(d.headline)),
     subhead: s(d.subhead),
-    caption: hyphensOnly(String(d.caption ?? '')).trim(),
+    caption: capHashtags(hyphensOnly(String(d.caption ?? '')).trim()),
     bullets: Array.isArray(d.bullets)
       ? d.bullets.slice(0, 5).map((b) => ({ title: s(b?.title), text: s(b?.text) }))
       : [],
@@ -726,5 +786,39 @@ function normalise(d, item) {
   // the renderer or the store.
   if (out.layout !== 'tips') out.bullets = [];
 
+  // A fact card about somewhere with a name is a photograph that was not asked
+  // for. The prompt says photo-led is the default and the model mostly agrees,
+  // but "mostly" is the gap this closes: when the post names a place and a
+  // photograph can be fetched, the plain dark card is never the right answer
+  // for a travel channel. If every search then comes back empty, the render
+  // step degrades it back to the fact card anyway - so this can only add a
+  // picture, never lose a post.
+  if (imagesAvailable && out.layout === 'fact' && (out.placeEn || out.countryEn)) {
+    out.layout = 'photoFull';
+  }
+
   return out;
+}
+
+// Emoji are asked for nowhere in a headline and enforced here, because a stray
+// one in 90px type is the loudest possible way to look automated.
+export function stripEmoji(text) {
+  return String(text ?? '')
+    .replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+// At most three hashtags, and only at the end. The prompt asks for two or
+// three; a model with an enthusiastic day returns six, and trimming is cheaper
+// than a re-draft for something that is not a claim about the world.
+const MAX_HASHTAGS = 3;
+export function capHashtags(caption) {
+  const tags = caption.match(/#[\p{L}\p{N}_]+/gu) || [];
+  if (tags.length <= MAX_HASHTAGS) return caption;
+  let seen = 0;
+  return caption
+    .replace(/[ \t]*#[\p{L}\p{N}_]+/gu, (m) => (++seen <= MAX_HASHTAGS ? m : ''))
+    .replace(/[ \t]+$/gm, '')
+    .trim();
 }

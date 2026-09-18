@@ -26,7 +26,7 @@ sources → rank → draft (Claude) → verify → render → Telegram → you t
                               reject with a reason            queue, drip out
 ```
 
-1. **Gather.** Six enabled feeds and one dataset, fetched live.
+1. **Gather.** Twelve enabled feeds and one dataset, fetched live.
 2. **Rank.** A cheap sort on titles and summaries, because the next step costs
    money. Authority, recency, specificity, topic balance.
 3. **Draft.** One Claude call returns Hebrew copy, a layout choice, an image
@@ -51,7 +51,12 @@ the case where the claim came from the model's memory rather than the source.
 prompt holds until the model meets a source that pushes against it. The fare
 ban, the rounding rule, the repeated-word check, the allowlist and the quote
 check are all enforced after the model has spoken, and each returns a reason you
-can read in Hebrew.
+can read in Hebrew. So is the shape of the copy: a headline outside 3-11 words,
+a caption past four sentences, a filler adjective (מדהים, מרהיב, קסום...), or a
+post that opens on a rhetorical question or "ידעתם ש" is sent back for another
+draft rather than published. The brief also carries one real published post as
+the standard every draft is measured against — headline that names and
+withholds, subhead that answers, two-sentence caption, one emoji, two hashtags.
 
 **Every filter is visible.** Rejections arrive as a digest with the reason and
 the URL. A filter you cannot see is a filter you cannot disagree with.
@@ -66,12 +71,21 @@ Primary sources only — the publisher of the fact, not someone reporting it.
 | UNESCO World Heritage Centre | new inscriptions, site decisions |
 | NASA Earth Observatory | one specific place on Earth per day, from orbit |
 | Smithsonian Global Volcanism Program | eruptions and unrest, weekly |
-| JNTO (Japan) | Japanese-language travel news |
+| JNTO (Japan) | Japanese-language travel news, plus the English Travel Japan blog |
+| Kyoto City Tourism Association | festival seats, guided tours, tax rules — the things a visitor books |
+| This is Athens (City of Athens) | closures, car-free days, what's new in the most-flown city |
+| Tourism Authority of Thailand | the newsroom, with its trade half scored down |
+| Vietnam National Authority of Tourism | islands, street food, heritage villages |
+| My Helsinki, Sydney.com (Destination NSW) | neighbourhood and day-trip guides with addresses |
 | Open-Meteo ERA5 | ten years of daily values → monthly climate normals |
 
-Seven more are declared and switched off, each with the probe result recorded in
-`sources.json` rather than quietly omitted. `npm run check-sources` re-probes
-every one.
+The official-DMO batch came from probing ~150 tourism-board and city-guide
+domains for a feed our parser accepts, then reading what each one actually
+publishes. Fourteen more are declared and switched off, each with the probe
+result recorded in `sources.json` rather than quietly omitted — the Cyprus feed
+is a restaurant directory, the Maldives one is resort marketing, the US park
+feeds are mostly fatalities. `npm run check-sources` re-probes every enabled
+one; `npm run eval-feed <url>` sizes up a candidate before it goes in.
 
 The allowlist matches on a domain-label boundary, so `evil-gov.uk` and
 `gov.uk.attacker.com` do not pass as `gov.uk`.
@@ -97,6 +111,17 @@ lifted from a news article or a business's page. Which one it was is printed in
 the approval message. AI imagery may only ever be generic; a prompt naming the
 post's own place is rejected in code.
 
+A photo post should almost never fall back to a text card, so the picture is
+looked for five times before giving up: the scene the draft asked for, a broader
+second search it also supplies, the place by its English name, the country. Each
+search ranks the library's thirty results by their own descriptions — a scene
+beats a person posing in front of it, a product shot is refused outright — and
+asks for a portrait first, anything second. The bytes come from the CDN as an
+exact 1080×1350 crop rather than the 800×1200 thumbnail that was being upscaled
+before. A `fact` card about somewhere with a name is promoted to `photoFull` in
+code, because on a travel channel a dark card with a headline is a photograph
+that was not asked for.
+
 ## Running it
 
 Requires Node 18+ (developed on 24) and no build step.
@@ -105,8 +130,9 @@ Requires Node 18+ (developed on 24) and no build step.
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env      # then fill it in
-npm test                  # 164 offline checks, no credentials needed
+npm test                  # 302 offline checks, no credentials needed
 npm run check-sources     # probe every feed
+npm run eval-feed <url>   # size up a feed before adding it
 npm run run-once          # a full pass, printed to the terminal, publishes nothing
 npm start
 ```
@@ -151,11 +177,19 @@ faithfully repeat FCDO being wrong. "Verified" here means *traceable*.
 summarises two sentences into one loses the whole draft. Better to re-run than
 to loosen it: a fuzzy quote match is indistinguishable from no check at all.
 
-**Six of thirteen declared sources work.** The rest are off with the probe result
-recorded. The two most wanted are `gov.il` and the Israel Airports Authority,
-both behind Imperva. There is now a real browser fetch (`src/browserFetch.js`),
-written to get past UNESCO's 403 — whether it is enough for Imperva, which is a
-considerably more determined wall, is untested.
+**Thirteen of twenty-seven declared sources work.** The rest are off with the
+probe result recorded. The two most wanted are `gov.il` and the Israel Airports
+Authority, both behind Imperva. There is now a real browser fetch
+(`src/browserFetch.js`), written to get past UNESCO's 403 — whether it is enough
+for Imperva, which is a considerably more determined wall, is untested. Most
+official tourism boards (Spain, Portugal, Greece, Dubai, Georgia, the Nordics)
+publish no feed at all; those would need a page scraper, not a URL.
+
+**The DMO sources are promotional by nature.** A city guide's feed is its events
+calendar and its own campaigns. The scorer nudges performers and trade items
+down and the drafting step declines what is not a trip, but the drafting step
+costs money and the nudges are tuned on one week of items — `/usage` reports
+how much drafting was thrown away, and that number is the one to watch.
 
 **Counting feed items is not the same question as "does this source work".**
 UNESCO served ten items a run and showed a green tick in `check-sources` for a

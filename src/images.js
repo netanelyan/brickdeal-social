@@ -51,25 +51,6 @@ export function assertGenericAiPrompt(prompt, { place, country } = {}) {
   return true;
 }
 
-/**
- * What to ask a stock library for, best first.
- *
- * The search term is English and comes from the drafting step, because the
- * draft's place name is Hebrew and stock libraries index in English. The Hebrew
- * pair is still worth keeping as the last resort — Pexels does answer a Hebrew
- * query rather than returning nothing, so it is a weak search rather than a
- * broken one, and a weak photograph of roughly the right subject still beats
- * silently demoting a place post to a wall of type.
- *
- * Exported so the caller can name the query that failed. A card that came back
- * without its photograph should say what was asked for, not just that there is
- * no picture.
- */
-export function imageQueries(draft) {
-  const hebrew = [draft?.place, draft?.country].filter(Boolean).join(' ').trim();
-  return [draft?.imageQuery, hebrew].map((q) => String(q || '').trim()).filter(Boolean);
-}
-
 const providers = {
   /**
    * Commercial-license stock, via Pexels. Pluggable on purpose — the pipeline
@@ -78,10 +59,19 @@ const providers = {
    */
   async stock(draft) {
     if (!pexels.configured()) return null;
+    // One search failing (a timeout, a 429) is not a reason to skip the rest
+    // of the chain - the next query is a fresh request.
+    let lastError = null;
     for (const q of imageQueries(draft)) {
-      const got = await pexels.search(q);
-      if (got?.src) return got;
+      try {
+        const got = await pexels.search(q);
+        if (got?.src) return got;
+      } catch (e) {
+        lastError = e;
+        console.error(`images: pexels "${q}" failed - ${e.message}`);
+      }
     }
+    if (lastError) throw lastError;
     return null;
   },
 
@@ -97,6 +87,42 @@ const providers = {
     throw new ImagePolicyError('IMAGE_GEN_API_KEY is set but no image-gen provider is implemented yet');
   },
 };
+
+/**
+ * The search terms to try, most specific first.
+ *
+ * All English, because stock libraries index in English and the draft's place
+ * name is Hebrew. The drafting step supplies the scene it wants and a broader
+ * second choice; the last two are built from the English place and country
+ * it also returns, so that a post about somewhere real almost never ends up
+ * as a text card because one search came back empty. The first version had
+ * one query and no fallback, and a miss on "Reykjavik house" was the end of
+ * the photograph.
+ *
+ * The Hebrew pair is still the very last resort - Pexels does answer a Hebrew
+ * query rather than returning nothing, so it is a weak search rather than a
+ * broken one, and it only runs when the draft gave no English name at all.
+ *
+ * Exported so the caller can name the query that failed. A card that came back
+ * without its photograph should say what was asked for, not just that there is
+ * no picture.
+ */
+export function imageQueries(draft) {
+  const place = String(draft?.placeEn || '').trim();
+  const country = String(draft?.countryEn || '').trim();
+  const hebrew = [draft?.place, draft?.country].filter(Boolean).join(' ').trim();
+  const out = [
+    draft?.imageQuery,
+    draft?.imageQueryAlt,
+    place && `${place} ${country} landmark`,
+    (place || country) && `${place || country} landscape`,
+    country && `${country} travel scenery`,
+    !(place || country) && hebrew,
+  ]
+    .map((q) => String(q || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  return [...new Set(out)];
+}
 
 export const imagesEnabled = () =>
   Boolean(pexels.configured() || process.env.CATALOGUE_DIR || process.env.IMAGE_GEN_API_KEY);

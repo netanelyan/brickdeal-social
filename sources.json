@@ -9,7 +9,7 @@
     "it. Turn one on only once its adapter genuinely works; a source that 404s",
     "silently is worse than one that is honestly switched off.",
     "",
-    "Probed 2026-08-22."
+    "Probed 2026-08-22; the official-DMO batch probed 2026-09-18."
   ],
   "allowlist": [
     {
@@ -115,6 +115,58 @@
     {
       "suffix": "si.edu",
       "why": "Smithsonian Institution — incl. the Global Volcanism Program, the standing authority on volcanic activity"
+    },
+    {
+      "suffix": "thisisathens.org",
+      "why": "The official Athens visitor guide, run by the City of Athens' destination agency"
+    },
+    {
+      "suffix": "kyoto.travel",
+      "why": "Kyoto City Tourism Association — the city's official DMO"
+    },
+    {
+      "suffix": "japan.travel",
+      "why": "JNTO's own traveller site — same body as jnto.go.jp"
+    },
+    {
+      "suffix": "vietnam.travel",
+      "why": "Vietnam National Authority of Tourism (government)"
+    },
+    {
+      "suffix": "tatnews.org",
+      "why": "Tourism Authority of Thailand — the official newsroom"
+    },
+    {
+      "suffix": "myhelsinki.fi",
+      "why": "Helsinki Partners — the city's own marketing company"
+    },
+    {
+      "suffix": "sydney.com",
+      "why": "Destination NSW — a New South Wales state government agency"
+    },
+    {
+      "suffix": "esa.int",
+      "why": "European Space Agency"
+    },
+    {
+      "suffix": "royalparks.org.uk",
+      "why": "The Royal Parks — operator of London's eight royal parks"
+    },
+    {
+      "suffix": "visitberlin.de",
+      "why": "visitBerlin — Berlin's official DMO"
+    },
+    {
+      "suffix": "visitcyprus.com",
+      "why": "Cyprus Deputy Ministry of Tourism"
+    },
+    {
+      "suffix": "visitvalencia.com",
+      "why": "Visit València — the city's official tourism foundation"
+    },
+    {
+      "suffix": "visitmaldives.com",
+      "why": "Visit Maldives Corporation (state-owned)"
     }
   ],
   "sources": [
@@ -211,6 +263,109 @@
       "note": "Probed 2026-08-22: 200, valid JSON. Not a feed — a queryable dataset. The adapter asks it about destinations in data/destinations.json and proposes when-to-go candidates from real monthly normals."
     },
     {
+      "id": "thisisathens",
+      "name": "This is Athens — the official Athens guide",
+      "kind": "rss",
+      "url": "https://www.thisisathens.org/rss.xml",
+      "authority": "official-dmo",
+      "pillars": [
+        "inCity",
+        "conditions",
+        "day"
+      ],
+      "lang": "en",
+      "enabled": true,
+      "note": "Probed 2026-09-18: 200, 126KB, 10 items with ~1,500-char summaries, article pages ~1,800 chars. Events and 'what's new' for the city Israelis fly to most - a three-year closure of the Odeon of Herodes Atticus, a car-free day. Links are http:// and redirect to https on the same host."
+    },
+    {
+      "id": "kyoto-travel",
+      "name": "Kyoto City Tourism Association",
+      "kind": "rss",
+      "url": "https://kyoto.travel/rss.xml",
+      "authority": "official-dmo",
+      "pillars": [
+        "inCity",
+        "tip",
+        "timing"
+      ],
+      "lang": "en",
+      "enabled": true,
+      "note": "Probed 2026-09-18: 200, 17KB, 50 items, English, no summaries but article pages ~6,000 chars. Festival viewing seats, guided tours, tax and currency rules, seasonal dance performances - the practical, dated things a visitor to Kyoto actually books."
+    },
+    {
+      "id": "jnto-blog",
+      "name": "JNTO — Travel Japan blog",
+      "kind": "rss",
+      "url": "https://www.japan.travel/en/blog/feed",
+      "authority": "official-dmo",
+      "pillars": [
+        "day",
+        "inCity",
+        "timing"
+      ],
+      "lang": "en",
+      "enabled": true,
+      "note": "Probed 2026-09-18: 200, 6KB, 10 items spread over a year, article pages ~12,000 chars. JNTO's English long-form: national parks, heritage villages, museums. Slow, but every item is a place with a way to get there."
+    },
+    {
+      "id": "vietnam-travel",
+      "name": "Vietnam National Authority of Tourism",
+      "kind": "rss",
+      "url": "https://vietnam.travel/rss.xml",
+      "authority": "government",
+      "pillars": [
+        "day",
+        "inCity",
+        "timing"
+      ],
+      "lang": "en",
+      "enabled": true,
+      "note": "Probed 2026-09-18: 200, 76KB, 10 items with full 1,500-char summaries, pages ~2,000+ chars. Islands, street food, heritage villages. One stale 2021 item sits in the feed and recency handles it. Needed the parser's entity budget lifted (src/sources/rss.js)."
+    },
+    {
+      "id": "tat-newsroom",
+      "name": "Tourism Authority of Thailand — newsroom",
+      "kind": "rss",
+      "url": "https://www.tatnews.org/feed/",
+      "authority": "official-dmo",
+      "pillars": [
+        "inCity",
+        "conditions",
+        "timing"
+      ],
+      "lang": "en",
+      "enabled": true,
+      "note": "Probed 2026-09-18: 200, 14KB, 10 items, pages ~6,000 chars. Roughly half is trade - MoUs, travel marts, the Governor welcoming a minister - and the scorer's trade-noise penalty was extended for exactly that vocabulary. The other half is Bangkok events, heritage walks and festival dates for the most-flown long-haul destination."
+    },
+    {
+      "id": "myhelsinki",
+      "name": "My Helsinki — the city's official guide",
+      "kind": "rss",
+      "url": "https://www.myhelsinki.fi/feed/",
+      "authority": "official-dmo",
+      "pillars": [
+        "inCity",
+        "day"
+      ],
+      "lang": "en",
+      "enabled": true,
+      "note": "Probed 2026-09-18: 200, 200KB, 10 items, pages ~6,000 chars. Neighbourhood guides and seven-things lists, all with addresses. A small destination for Israelis, so it will mostly lose on ranking - but it never produces noise."
+    },
+    {
+      "id": "sydney-dnsw",
+      "name": "Sydney.com — Destination NSW",
+      "kind": "rss",
+      "url": "https://www.sydney.com/articles.xml",
+      "authority": "government",
+      "pillars": [
+        "day",
+        "inCity"
+      ],
+      "lang": "en",
+      "enabled": true,
+      "note": "Probed 2026-09-18: 200, 7KB, 10 items, pages ~12,000 chars. Ocean pools, markets, a day trip to the Royal National Park - long, specific and photographable. Links carry utm_ parameters, which candidateId() already strips."
+    },
+    {
       "id": "us-state-advisories",
       "name": "US Dept of State — Travel Advisories",
       "kind": "rss",
@@ -300,6 +455,103 @@
       "lang": "en",
       "enabled": false,
       "note": "Probed 2026-08-22: 403 Access Denied to non-browser clients."
+    },
+    {
+      "id": "esa-observing-earth",
+      "name": "ESA — Observing the Earth",
+      "kind": "rss",
+      "url": "https://www.esa.int/rssfeed/Our_Activities/Observing_the_Earth",
+      "authority": "intergovernmental",
+      "pillars": [
+        "conditions"
+      ],
+      "lang": "en",
+      "enabled": false,
+      "note": "Probed 2026-09-18: 200, 15 items - but it is mission news (launches, contracts, briefings), not the 'Earth from Space' place-of-the-week series, and no separate feed for that series was found at any obvious path. Left off: NASA Earth Observatory already covers this and covers it better."
+    },
+    {
+      "id": "nps-grand-canyon",
+      "name": "US National Park Service — Grand Canyon news",
+      "kind": "rss",
+      "url": "https://www.nps.gov/feeds/getnewsrss.htm?id=grca",
+      "authority": "government",
+      "pillars": [
+        "conditions",
+        "tip"
+      ],
+      "lang": "en",
+      "enabled": false,
+      "note": "Probed 2026-09-18: 200, 225 items, pages ~3,500 chars. The per-park feed pattern works for every park code (yell, yose, zion...). Left off because the feed is mostly administration and grief - fatalities, flood recovery, superintendent appointments - and even with the grim-title filter the useful fraction (timed entry, road openings) is thin. Turn on a park in the season it matters, with its own id."
+    },
+    {
+      "id": "visitvalencia",
+      "name": "Visit València — agenda",
+      "kind": "rss",
+      "url": "https://www.visitvalencia.com/rss.xml",
+      "authority": "official-dmo",
+      "pillars": [
+        "inCity",
+        "conditions"
+      ],
+      "lang": "es",
+      "enabled": false,
+      "note": "Probed 2026-09-18: 200, 25 items in five days, Spanish, pages ~2,600 chars. An events agenda: World Paella Day and a Moros y Cristianos parade beside a dozen arena concerts. Usable once the scorer can tell a festival from a concert listing; until then it would spend draft budget on Servando y Florentino."
+    },
+    {
+      "id": "visitberlin-blog",
+      "name": "visitBerlin — blog",
+      "kind": "rss",
+      "url": "https://www.visitberlin.de/en/blog/feed",
+      "authority": "official-dmo",
+      "pillars": [
+        "inCity",
+        "day"
+      ],
+      "lang": "de",
+      "enabled": false,
+      "note": "Probed 2026-09-18: 200, 10 items - but the /en/ feed links to /de/ articles, and half the items are 2018 posts re-dated on edit. German-language pages the model can read, and a good source for Berlin, once an English feed or a stable date is found."
+    },
+    {
+      "id": "visitmaldives-experience",
+      "name": "Visit Maldives — experiences",
+      "kind": "rss",
+      "url": "https://visitmaldives.com/en/feeds/experience",
+      "authority": "official-dmo",
+      "pillars": [
+        "day",
+        "timing"
+      ],
+      "lang": "en",
+      "enabled": false,
+      "note": "Probed 2026-09-18: 200, 10 items, pages ~2,700 chars. The /news feed is all MoUs and award ceremonies; this one is resort marketing written by the resorts. Neither is a fact a reader can act on. Off until the DMO publishes something about the islands rather than the hotels."
+    },
+    {
+      "id": "visitcyprus",
+      "name": "Visit Cyprus — Deputy Ministry of Tourism",
+      "kind": "rss",
+      "url": "https://www.visitcyprus.com/feed/",
+      "authority": "government",
+      "pillars": [
+        "inCity",
+        "day"
+      ],
+      "lang": "en",
+      "enabled": false,
+      "note": "Probed 2026-09-18: 200, 10 items - directory entries (a restaurant name, a luna park, a PDF map) with 50-200 char summaries and pages under the thin floor. The one real item, a mountain village page, was 1,668 chars. Off until the feed carries articles."
+    },
+    {
+      "id": "royalparks",
+      "name": "The Royal Parks — London",
+      "kind": "rss",
+      "url": "https://www.royalparks.org.uk/rss.xml",
+      "authority": "official-dmo",
+      "pillars": [
+        "day",
+        "timing"
+      ],
+      "lang": "en",
+      "enabled": false,
+      "note": "Probed 2026-09-18: 200, 10 items - three seasonal walks (Regent's Park, Hyde Park, Richmond) and seven FAQ entries. The walk links 404 at the URL the feed gives, so nothing can be fetched and verified. Worth re-probing: an autumn walk in Richmond Park is exactly the post this channel wants."
     }
   ]
 }

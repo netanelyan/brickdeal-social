@@ -106,9 +106,13 @@ export function approvalMessage(cand) {
 
   // Which of the three permitted origins this image came from — or that there
   // is no image at all, which for a text-led card is the expected answer.
+  //
+  // The search term is printed too. It is the one input to the photograph that
+  // the drafting step chose, and when a card arrives with the wrong picture the
+  // first question is whether the search was wrong or the library was.
   lines.push(
     cand.image
-      ? `🖼️ תמונה: ${provenanceHe(cand.image.provenance)}${cand.image.credit ? ` · ${cand.image.credit}` : ''}`
+      ? `🖼️ תמונה: ${provenanceHe(cand.image.provenance)}${cand.image.credit ? ` · ${cand.image.credit}` : ''}${cand.image.query ? ` · חיפוש: "${cand.image.query}"` : ''}`
       : '🖼️ תמונה: אין — כרטיס טקסט בלבד'
   );
 

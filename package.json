@@ -13,6 +13,7 @@
     "run-once": "node scripts/run-once.js",
     "preview": "node scripts/preview.js",
     "check-sources": "node scripts/check-sources.js",
+    "eval-feed": "node scripts/eval-feed.js",
     "check-cards": "node scripts/check-cards.js",
     "ig-token": "node scripts/ig-token.js",
     "backfill-ig": "node scripts/backfill-instagram.js",

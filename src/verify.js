@@ -299,6 +299,79 @@ export function noRepeatedWord(draft) {
   return null;
 }
 
+// --- the shape of the copy -------------------------------------------------
+//
+// The brief asks for a 4-9 word headline and a two-or-three sentence caption,
+// and the post that set the standard has six words and two sentences. These
+// are the outer bounds, not the targets: wide enough that a good post never
+// trips them, tight enough that a headline which is really a sentence with a
+// subordinate clause, or a caption which is really the article, is sent back
+// for another draft rather than published.
+
+const HEADLINE_WORDS = { min: 3, max: 11 };
+const CAPTION_LIMITS = { sentences: 4, chars: 420 };
+
+const wordsOf = (text) =>
+  String(text || '')
+    .replace(/[^\p{L}\p{N}\s'"-]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+export function headlineLength(draft) {
+  const n = wordsOf(draft?.headline).length;
+  if (n && n < HEADLINE_WORDS.min) return `${n} words - too short to name anything`;
+  if (n > HEADLINE_WORDS.max) return `${n} words - a headline, not a sentence`;
+  return null;
+}
+
+// The caption without its hashtags, which are not prose and do not count.
+const captionProse = (caption) =>
+  String(caption || '')
+    .replace(/#[\p{L}\p{N}_]+/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+export function captionLength(draft) {
+  const prose = captionProse(draft?.caption);
+  if (prose.length > CAPTION_LIMITS.chars) return `${prose.length} chars - this is an article`;
+  const sentences = prose.split(/[.!?]+(?:\s|$)/).filter((x) => x.trim()).length;
+  if (sentences > CAPTION_LIMITS.sentences) return `${sentences} sentences - say the useful thing and stop`;
+  return null;
+}
+
+// The adjectives that carry no information. The prompt lists them, and a model
+// under pressure from a genuinely spectacular source reaches for them anyway.
+// Stems rather than whole words, with an optional Hebrew prefix, so "המדהימה"
+// and "ומרהיבים" are caught along with the bare forms.
+const FILLER =
+  /(?:^|[^\p{L}])[והבלכמש]{0,2}(?:מדהי[םמ]|מרהיב|קסו[םמ]|חלומי|מהמ[םמ]|עוצר(?:ת)? נשימה|בלתי נשכח|פנטסטי|מושל[םמ])/u;
+
+export function fillerAdjective(draft) {
+  for (const [field, text] of [
+    ['headline', draft?.headline],
+    ['subhead', draft?.subhead],
+    ['caption', draft?.caption],
+  ]) {
+    const m = FILLER.exec(String(text || ''));
+    if (m) return `${field}: "${m[0].trim()}" - say the specific thing instead`;
+  }
+  return null;
+}
+
+// The three openings the brief forbids: a rhetorical question, "did you
+// know", and announcing the post. Checked on the headline and on the first
+// sentence of the caption, which is where they land.
+const ANNOUNCE = /^(?:ידעתם|האם ידעתם|היום נדבר|אז מה|בואו נדבר|שאלה:|מה חשוב לדעת)/u;
+
+export function rhetoricalOpening(draft) {
+  const headline = String(draft?.headline || '').trim();
+  if (/\?$/.test(headline)) return 'headline ends with a question mark';
+  const first = captionProse(draft?.caption).split(/(?<=[.!?])\s/)[0] || '';
+  if (ANNOUNCE.test(first)) return `caption opens with "${first.slice(0, 20)}"`;
+  if (/\?$/.test(first.trim())) return 'caption opens with a rhetorical question';
+  return null;
+}
+
 /** Stage 3 — run over the finished Hebrew copy, right before staging. */
 export function verifyDraftText(draft) {
   const blob = [draft?.headline, draft?.subhead, draft?.caption, ...(draft?.bullets || [])]
@@ -320,6 +393,19 @@ export function verifyDraftText(draft) {
   if (!draft?.caption || String(draft.caption).trim().length < 20) {
     throw new RejectedError('empty_caption');
   }
+
+  const length = headlineLength(draft);
+  if (length) throw new RejectedError('headline_length', length);
+
+  const long = captionLength(draft);
+  if (long) throw new RejectedError('caption_too_long', long);
+
+  const filler = fillerAdjective(draft);
+  if (filler) throw new RejectedError('filler_adjective', filler);
+
+  const opening = rhetoricalOpening(draft);
+  if (opening) throw new RejectedError('rhetorical_opening', opening);
+
   return true;
 }
 
@@ -335,6 +421,10 @@ const REASON_HE = {
   flight_price_out_of_scope: 'מחיר טיסה — מחוץ לתחום בגרסה הזו',
   unrounded_number: 'מספר עשרוני בכותרת - צריך לעגל',
   repeated_word: 'מילה חוזרת בכותרת',
+  headline_length: 'הכותרת ארוכה או קצרה מדי',
+  caption_too_long: 'הטקסט ארוך מדי - זה כבר כתבה',
+  filler_adjective: 'תואר ריק (מדהים, מרהיב...) במקום פרט',
+  rhetorical_opening: 'פתיחה בשאלה או ב"ידעתם ש"',
   empty_headline: 'כותרת ריקה',
   empty_caption: 'טקסט ריק',
   draft_failed: 'שלב הכתיבה נכשל',
