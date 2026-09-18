@@ -80,6 +80,85 @@ export const instagramCaption = (cand) => publishedDescription(cand, 2200); // I
 export const tiktokCaption = (cand) => publishedDescription(cand, 4000); // TikTok description limit
 
 /**
+ * The caption under a published deck.
+ *
+ * The cover slide already carries the title, so the caption opens with the
+ * angle — the reason to watch — and then lists the places in order. The list is
+ * the part that survives being read without the images, which is what a caption
+ * is for, and it is also what someone searching for one of those places will
+ * match on.
+ */
+export function deckCaption(deck) {
+  const places = (deck.slides || []).map((s, i) => `${i + 1}. ${s.nameHe}`);
+  const parts = [String(deck.idea?.angleHe || '').trim(), places.join('\n')].filter(Boolean);
+  return [parts.join('\n\n'), '', SIGNATURE].join('\n').trim().slice(0, 2200);
+}
+
+/**
+ * The approval message for a deck.
+ *
+ * Longer than a card's, because there is more that can be wrong and all of it
+ * is invisible in the images: which slides were dropped and why, how thin the
+ * region was, and which domain each fact was quoted from. The album arrives
+ * above this message, so the pictures and this text are read together.
+ */
+export function deckApprovalMessage(cand) {
+  const deck = cand.deck || cand;
+  const lines = [];
+
+  lines.push(`🎞️ מצגת · ${deck.category} · ${deck.where}`);
+  lines.push('');
+  lines.push(`🖼️ על השער: ${clean(deck.titleHe)}`);
+  if (deck.idea?.angleHe) lines.push(`   ${clean(deck.idea.angleHe)}`);
+  lines.push('');
+
+  lines.push(`📑 ${deck.slides.length + 1} שקופיות (שער + ${deck.slides.length} מקומות):`);
+  for (const [i, s] of deck.slides.entries()) {
+    lines.push(`   ${i + 2}. ${s.nameHe} — ${s.lines.length} עובדות · ${s.sourceHost}`);
+  }
+  lines.push('');
+
+  // The shortfall, stated. A deck that asked for five and built three looks
+  // exactly like a deck that meant to be three, and the difference is whether
+  // the region is thin or the search is broken.
+  if (deck.short) {
+    lines.push(`⚠️ ביקשנו ${deck.counts.asked} מקומות, נבנו ${deck.counts.built}`);
+  }
+  lines.push(
+    `🔎 ${deck.counts.found} מקומות באזור · ${deck.counts.withAuthority} עם גוף מוסמך · ${deck.counts.built} נכנסו`
+  );
+
+  // Why each candidate fell out. Capped, because a thin region can drop a dozen
+  // and the useful signal is the first few reasons, not the list.
+  for (const d of (deck.dropped || []).slice(0, 4)) {
+    lines.push(`   ✗ ${d.place}: ${String(d.why).slice(0, 80)}`);
+  }
+  if ((deck.dropped || []).length > 4) lines.push(`   ✗ ועוד ${deck.dropped.length - 4}`);
+
+  const missing = deck.slides.filter((s) => s.imageMiss).length;
+  if (missing) lines.push(`⚠️ ${missing} שקופיות בלי צילום`);
+
+  const targets = cand.publishTargets?.length ? cand.publishTargets : [];
+  lines.push('');
+  lines.push(targets.length ? `📤 יפורסם ל${targetsHe(targets)}` : '⛔ אין יעד פרסום מוגדר');
+
+  if (targets.includes('tiktok')) {
+    if (cand.tiktok?.error) {
+      lines.push(`⚠️ טיקטוק: לא ניתן לקרוא את הגדרות החשבון — ${cand.tiktok.error}`);
+    } else if (cand.tiktok?.privacy) {
+      const who = cand.tiktok.username ? ` · @${cand.tiktok.username}` : '';
+      lines.push(`🔒 פרטיות בטיקטוק: ${privacyHe(cand.tiktok.privacy)}${who}`);
+    }
+  }
+
+  lines.push('');
+  lines.push('🔗 מקורות:');
+  for (const s of deck.slides) lines.push(`   ${s.nameHe}: ${s.sourceUrl}`);
+
+  return lines.join('\n');
+}
+
+/**
  * The staging card.
  *
  * No parse_mode is used for this message anywhere in the bot — a headline or a
@@ -89,6 +168,9 @@ export const tiktokCaption = (cand) => publishedDescription(cand, 4000); // TikT
  * for Markdown in the first place is simpler and can't fail.
  */
 export function approvalMessage(cand) {
+  // A deck has a different failure surface and therefore a different message.
+  if (cand.kind === 'deck') return deckApprovalMessage(cand);
+
   const lines = [];
 
   lines.push(`${LAYOUT_HE[cand.layout] || cand.layout} · ${pillarHe(cand.pillar)}`);
@@ -180,6 +262,17 @@ export function decidedMessage(statusLine, cand) {
 
 /** The evidence itself, on demand — `/why` shows counts, this shows the quotes. */
 export function evidenceReport(cand) {
+  // A deck's evidence is per slide, and which slide a quote belongs to is the
+  // thing you need in order to check it — a flat list of quotes from six
+  // different websites is unreadable.
+  if (cand.kind === 'deck') {
+    const blocks = (cand.deck?.slides || []).map((s, i) => {
+      const quotes = s.lines.map((l) => `   ${l.text}\n   « ${String(l.quote).slice(0, 240)} »`);
+      return [`${i + 2}. ${s.nameHe}`, `   ${s.sourceUrl}`, ...quotes].join('\n');
+    });
+    return blocks.length ? `📎 הציטוטים, שקופית אחר שקופית:\n\n${blocks.join('\n\n')}` : 'אין ציטוטים שמורים למצגת הזו';
+  }
+
   if (!cand.evidence?.length) return 'אין ציטוטים שמורים לפריט הזה';
   const lines = cand.evidence.map(
     (e, i) => `${i + 1}. ${e.claim}\n   « ${String(e.quote).slice(0, 300)} »`

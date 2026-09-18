@@ -13,10 +13,15 @@ import * as store from '../src/store.js';
 import { candidateId, tripGap } from '../src/candidate.js';
 import { renderHtml, LAYOUTS, PHOTO_LAYOUTS, isPhotoLayout } from '../src/render/templates.js';
 import { assertGenericAiPrompt, ImagePolicyError, imageQueries } from '../src/images.js';
-import { approvalMessage, instagramCaption, tiktokCaption } from '../src/format.js';
+import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, evidenceReport } from '../src/format.js';
+import { renderSlideHtml, SIZES } from '../src/render/deckTemplates.js';
+import { deckId } from '../src/deck/candidate.js';
+import { normaliseIdea } from '../src/deck/ideas.js';
+import { sameSite } from '../src/search.js';
+import { authorityDomains } from '../src/sources/places.js';
 import { quietAlert } from '../src/notify.js';
 import { describeError, InstagramError } from '../src/publish/instagram.js';
-import { publishTargets } from '../src/publish/targets.js';
+import { publishTargets, targetsForKind, allowedForKind } from '../src/publish/targets.js';
 import {
   defaultPrivacy,
   nextPrivacy,
@@ -1158,6 +1163,133 @@ ok(
 // approve, and the approval message only ever shows you one.
 const bothCand = { headline: 'כותרת', subhead: 'תת כותרת', caption: 'גוף הטקסט.', sourceUrl: 'https://gov.uk/x' };
 eq('the TikTok description is the same text as the Instagram one', tiktokCaption(bothCand), instagramCaption(bothCand));
+
+/* -------------------------------------------------------------------------- */
+group('decks - a slideshow is not a card, and goes somewhere else');
+
+// The editorial rule, in code: a news card is written for a feed and never
+// reaches TikTok; a deck is written for a scroll and reaches both.
+withEnv({ ...IG, CHANNEL_ID: '@c' }, () => {
+  ok('a card never goes to TikTok', !targetsForKind('card').includes('tiktok'));
+  eq('a card goes to the channel and Instagram', targetsForKind('card').join(','), 'telegram,instagram');
+  ok('a deck is permitted to reach TikTok', allowedForKind('deck').includes('tiktok'));
+  ok('a card is not, whatever is configured', !allowedForKind('card').includes('tiktok'));
+});
+
+const deckFixture = {
+  kind: 'deck',
+  id: 'abc123',
+  publishTargets: ['instagram', 'tiktok'],
+  tiktok: { privacy: 'SELF_ONLY', username: 'tiyulplus', options: ['SELF_ONLY'] },
+  deck: {
+    titleHe: 'המוזיאונים של פראג',
+    where: 'Prague',
+    category: 'museum',
+    idea: { angleHe: 'מה פתוח ביום שני ומה שווה את הכרטיס' },
+    counts: { found: 75, withWikidata: 75, withAuthority: 52, asked: 5, built: 3 },
+    short: true,
+    dropped: [{ place: 'Kafka Museum', why: 'fetch failed: HTTP 403' }],
+    slides: [
+      {
+        nameHe: 'המוזיאון הלאומי',
+        nameEn: 'National Museum',
+        sourceHost: 'nm.cz',
+        sourceUrl: 'https://www.nm.cz/en/visit',
+        lines: [
+          { emoji: '🕘', text: 'שעות: 10:00-18:00', quote: 'Open daily 10:00-18:00' },
+          { emoji: '🎟️', text: 'כניסה: 250 קרונות', quote: 'Admission 250 CZK' },
+        ],
+      },
+      {
+        nameHe: 'הגלריה הלאומית',
+        nameEn: 'National Gallery',
+        sourceHost: 'ngprague.cz',
+        sourceUrl: 'https://www.ngprague.cz/en/visit',
+        lines: [{ emoji: '🕘', text: 'סגור בימי שני', quote: 'Closed on Mondays' }],
+      },
+    ],
+  },
+};
+
+const deckMsg = approvalMessage(deckFixture);
+ok('a deck gets the deck approval message', deckMsg.includes('מצגת'));
+ok('which lists every slide', deckMsg.includes('המוזיאון הלאומי') && deckMsg.includes('הגלריה הלאומית'));
+ok('and the domain each fact was quoted from', deckMsg.includes('nm.cz') && deckMsg.includes('ngprague.cz'));
+// A deck that came up short and a deck that meant to be short look identical
+// afterwards, so the shortfall is stated at the moment it can still be rejected.
+ok('says when it came up short of what was asked', deckMsg.includes('ביקשנו 5'));
+ok('reports how thin the region was', deckMsg.includes('75') && deckMsg.includes('52'));
+ok('names what was dropped and why', deckMsg.includes('Kafka Museum') && deckMsg.includes('403'));
+ok('carries the TikTok privacy level, same as a card', deckMsg.includes(privacyHe('SELF_ONLY')));
+ok('every source URL is in the message', deckMsg.includes('https://www.nm.cz/en/visit'));
+
+const deckEv = evidenceReport(deckFixture);
+ok('evidence is grouped per slide, not flattened', deckEv.includes('המוזיאון הלאומי') && deckEv.includes('Open daily'));
+ok('with the page each quote came from', deckEv.includes('ngprague.cz'));
+
+const dcap = deckCaption(deckFixture.deck);
+ok('the caption opens with the angle, not the title', dcap.startsWith('מה פתוח'));
+ok('and lists the places in order', dcap.indexOf('1. המוזיאון') < dcap.indexOf('2. הגלריה'));
+ok('the title is not repeated - the cover slide already carries it', !dcap.includes('המוזיאונים של פראג'));
+
+// Slide rendering is where a verified fact can still be lost, so the template
+// is checked for the two ways that happens: a dropped line, and text that
+// silently overflows the image.
+const slideHtml = renderSlideHtml(deckFixture.deck.slides[0], { index: 2, total: 3, size: 'tiktok' });
+ok('every verified line reaches the slide', slideHtml.includes('שעות: 10:00-18:00') && slideHtml.includes('כניסה: 250 קרונות'));
+ok('an overlong line renders smaller rather than being dropped', renderSlideHtml(
+  { ...deckFixture.deck.slides[0], lines: [{ emoji: '🕘', text: 'x'.repeat(60), quote: 'q', overlong: true }] },
+  { index: 2, total: 3, size: 'tiktok' }
+).includes('line long'));
+ok('the slide carries the source host', slideHtml.includes('nm.cz'));
+ok('and the counter reads like the platform’s own', slideHtml.includes('2/3'));
+eq('TikTok slides are 9:16', `${SIZES.tiktok.w}x${SIZES.tiktok.h}`, '1080x1920');
+eq('Instagram slides are 4:5, because the feed crops anything taller', `${SIZES.instagram.w}x${SIZES.instagram.h}`, '1080x1350');
+ok('a slide with no photograph still renders', renderSlideHtml({ nameHe: 'x', lines: [] }, { index: 2, total: 3 }).includes('linear-gradient'));
+ok('HTML in a place name cannot break out of the template', renderSlideHtml(
+  { nameHe: '<script>alert(1)</script>', lines: [], sourceHost: 'x.cz' },
+  { index: 2, total: 3 }
+).includes('&lt;script&gt;'));
+
+// The deck id has to be stable across re-runs or the same five museums stage
+// twice, and has to change when the places do.
+const idA = deckId(deckFixture.deck);
+eq('the same places give the same id', idA, deckId({ ...deckFixture.deck, titleHe: 'a different title' }));
+ok(
+  'different places give a different id',
+  idA !== deckId({ ...deckFixture.deck, slides: [{ ...deckFixture.deck.slides[0], qid: 'Q999' }] })
+);
+
+// Site restriction is an allowlist check, not a convenience: the same
+// label-boundary rule the source allowlist uses.
+ok('a subdomain of the site matches', sameSite('https://en.nm.cz/visit', 'nm.cz'));
+ok('the bare site matches', sameSite('https://www.nm.cz/visit', 'nm.cz'));
+ok('a lookalike domain does not', !sameSite('https://evil-nm.cz/visit', 'nm.cz'));
+ok('nor does a suffixed one', !sameSite('https://nm.cz.attacker.com/visit', 'nm.cz'));
+
+// Authority order is meaning: the place's own site outranks whoever runs it,
+// which outranks whatever contains it.
+eq(
+  'authority domains come back closest-to-the-horse first',
+  authorityDomains({
+    officialUrl: 'https://www.nm.cz/en',
+    operatorUrl: 'https://www.mkcr.cz',
+    withinUrl: 'https://www.praha.eu',
+    osmTags: {},
+  }).join(','),
+  'nm.cz,mkcr.cz,praha.eu'
+);
+eq('a place with nothing has no authority', authorityDomains({ osmTags: {} }).length, 0);
+
+// The model is asked for 5-7 and will occasionally ask for eleven; that is a
+// misunderstanding of the format rather than a richer list.
+eq('slide count is clamped, not trusted', normaliseIdea({ title_he: 'x', where: 'Prague', kind: 'museum', want: 11 }).want, 7);
+eq('and clamped upwards too', normaliseIdea({ title_he: 'x', where: 'Prague', kind: 'museum', want: 2 }).want, 5);
+eq('an idea in an unknown category is dropped', normaliseIdea({ title_he: 'x', where: 'p', kind: 'nightclub', want: 5 }), null);
+ok(
+  'em dashes are stripped from an idea title like everywhere else',
+  !normaliseIdea({ title_he: 'פראג — מוזיאונים', where: 'Prague', kind: 'museum', want: 5 }).titleHe.includes('—')
+);
 
 /* -------------------------------------------------------------------------- */
 group('copy style - hyphens only, never em or en dashes');

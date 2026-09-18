@@ -222,6 +222,68 @@ async function waitForContainer(creationId, { timeoutMs = 60_000, intervalMs = 3
  * between the two steps — a half-completed publish is the one state with no
  * clean recovery.
  */
+/**
+ * Publish a deck as a carousel.
+ *
+ * Three steps rather than two, and the extra one is where it goes wrong: each
+ * slide gets its own container created with `is_carousel_item=true`, then a
+ * CAROUSEL container is created with those ids in order, then that is
+ * published. The child containers are NOT published individually — doing so
+ * posts every slide as its own separate post, which is unrecoverable.
+ *
+ * Order is preserved because `children` is a comma-separated list and Instagram
+ * honours its order; the ids are collected in slide order and never sorted.
+ */
+async function publishInstagramCarousel(cand, images) {
+  const igUser = process.env.IG_USER_ID;
+
+  if (images.length < 2 || images.length > 10) {
+    // Instagram's own bounds. A one-slide deck is a single image post and a
+    // caller that lands here with one has a bug worth seeing.
+    throw new InstagramError(`a carousel takes 2-10 images (got ${images.length})`, { step: 'config' });
+  }
+
+  const children = [];
+  for (const [i, imageUrl] of images.entries()) {
+    const child = await graph(`${igUser}/media`, {
+      method: 'POST',
+      params: { image_url: imageUrl, is_carousel_item: 'true' },
+      step: `carousel_child_${i + 1}`,
+    });
+    if (!child.id) throw new InstagramError(`slide ${i + 1} returned no container id`, { step: 'carousel_child' });
+    children.push(child.id);
+  }
+
+  // Each child is fetched and processed by Instagram independently, so all of
+  // them have to be finished before the parent can be created.
+  for (const [i, id] of children.entries()) {
+    await waitForContainer(id).catch((e) => {
+      throw new InstagramError(`slide ${i + 1}: ${e.message}`, { step: 'carousel_child_status' });
+    });
+  }
+
+  const parent = await graph(`${igUser}/media`, {
+    method: 'POST',
+    params: {
+      media_type: 'CAROUSEL',
+      children: children.join(','),
+      caption: cand.instagramCaption || '',
+    },
+    step: 'carousel_container',
+  });
+  if (!parent.id) throw new InstagramError('no carousel container id returned', { step: 'carousel_container' });
+
+  await waitForContainer(parent.id);
+
+  const published = await graph(`${igUser}/media_publish`, {
+    method: 'POST',
+    params: { creation_id: parent.id },
+    step: 'publish',
+  });
+
+  return { mediaId: published.id, creationId: parent.id, slides: images.length, images };
+}
+
 export async function publishInstagram(cand) {
   if (!instagramConfigured()) {
     throw new InstagramError(
@@ -229,7 +291,17 @@ export async function publishInstagram(cand) {
       { step: 'config' }
     );
   }
-  const imageUrl = cand.card?.url;
+  // A deck arrives here with its Instagram-sized slides already rendered, and
+  // takes the carousel path. Everything else is one image, as before.
+  const deckImages = cand.deck?.urls?.instagram || [];
+  if (deckImages.length > 1) {
+    if (deckImages.some((u) => !u?.startsWith('https://'))) {
+      throw new InstagramError('every slide URL must be https', { step: 'config' });
+    }
+    return publishInstagramCarousel(cand, deckImages.slice(0, 10));
+  }
+
+  const imageUrl = cand.card?.url || deckImages[0];
   if (!imageUrl) {
     throw new InstagramError('no public card URL — Instagram fetches the image itself', { step: 'config' });
   }

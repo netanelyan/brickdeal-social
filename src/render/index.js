@@ -99,10 +99,28 @@ export function cardPublicUrl(filename) {
  * CARD_PUBLIC_BASE_URL is set — Telegram publishing works without it.
  */
 export async function renderCard(draft, { id, data = null, image = null, outDir = cardOutputDir() } = {}) {
-  const html = renderHtml(draft, { data, image });
+  return renderToJpeg(renderHtml(draft, { data, image }), {
+    stem: id,
+    width: CARD_W,
+    height: CARD_H,
+    outDir,
+  });
+}
+
+/**
+ * Any HTML, at any size, to a JPEG on disk.
+ *
+ * Extracted from renderCard when slideshows arrived at 1080x1920 and the same
+ * deck had to be re-rendered at 1080x1350 for Instagram. The font guard below
+ * is the reason this is shared rather than copied: it is the check that stops a
+ * card of tofu boxes being published, it is subtle enough to get wrong, and a
+ * second renderer without it would fail silently in exactly the way the first
+ * one used to.
+ */
+export async function renderToJpeg(html, { stem, width = CARD_W, height = CARD_H, outDir = cardOutputDir() } = {}) {
   const browser = await getBrowser();
   const context = await browser.newContext({
-    viewport: { width: CARD_W, height: CARD_H },
+    viewport: { width, height },
     deviceScaleFactor: 1,
     // Explicit, so a VPS with a different system locale can't change how the
     // page lays out or which fallback font Chromium reaches for.
@@ -157,7 +175,7 @@ export async function renderCard(draft, { id, data = null, image = null, outDir 
     const buf = await page.screenshot({ type: 'jpeg', quality: 92 });
 
     mkdirSync(outDir, { recursive: true });
-    const filename = `${safeStem(id)}.jpg`;
+    const filename = `${safeStem(stem)}.jpg`;
     const file = path.join(outDir, filename);
     // Atomic, same as the store: Instagram may fetch this URL moments after we
     // hand it over, and a half-written JPEG would be served as a broken image.

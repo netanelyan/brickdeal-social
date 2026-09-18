@@ -10,7 +10,11 @@ import { toCandidate, RejectedError } from './src/candidate.js';
 import { primaryAuthority, enabledSources, registry } from './src/sources/index.js';
 import { approvalMessage, decidedMessage, evidenceReport, channelCaption, instagramCaption, tiktokCaption } from './src/format.js';
 import { renderCard, closeBrowser } from './src/render/index.js';
-import { publishTelegram, sendForApproval } from './src/publish/telegram.js';
+import { publishTelegram, publishTelegramDeck, sendForApproval } from './src/publish/telegram.js';
+import { proposeIdeas } from './src/deck/ideas.js';
+import { buildDeck } from './src/deck/build.js';
+import { toDeckCandidate } from './src/deck/candidate.js';
+import { searchConfigured, remaining as searchRemaining, dailyBudget as searchBudget } from './src/search.js';
 import { publishInstagram, instagramConfigured, remainingQuota, refreshToken, tokenDaysLeft, authMode, describeError } from './src/publish/instagram.js';
 import {
   publishTikTok,
@@ -112,8 +116,15 @@ bot.use(async (ctx, next) => {
 function stagingButtons(key, cand) {
   const rows = [
     [Markup.button.callback('✅ אשר ופרסם', `ok:${key}`), Markup.button.callback('❌ דחה', `no:${key}`)],
-    [Markup.button.callback('✏️ ערוך כותרת', `edit:${key}`), Markup.button.callback('📎 ציטוטים', `ev:${key}`)],
   ];
+  // Editing a headline re-renders one card. On a deck it would re-render every
+  // slide at both sizes, and the title lives on the cover alone — so a deck is
+  // approved or rejected as a whole, and a wrong title is a re-run.
+  rows.push(
+    cand?.kind === 'deck'
+      ? [Markup.button.callback('📎 ציטוטים', `ev:${key}`)]
+      : [Markup.button.callback('✏️ ערוך כותרת', `edit:${key}`), Markup.button.callback('📎 ציטוטים', `ev:${key}`)]
+  );
   // Only when there is a real choice to make. With one privacy level available
   // — the unaudited case, where TikTok offers SELF_ONLY and nothing else — a
   // button that cycles back to the same value is a button that lies about
@@ -405,7 +416,10 @@ async function publishNext() {
   const failed = [];
 
   const publishers = {
-    telegram: () => publishTelegram(bot.telegram, CHANNEL_ID, cand),
+    telegram: () =>
+      cand.kind === 'deck'
+        ? publishTelegramDeck(bot.telegram, CHANNEL_ID, cand)
+        : publishTelegram(bot.telegram, CHANNEL_ID, cand),
     instagram: () => publishInstagram(cand),
     tiktok: () => publishTikTok(cand),
   };
@@ -775,6 +789,79 @@ bot.command('igquota', async (ctx) => {
   }
 });
 
+/**
+ * Build one slideshow.
+ *
+ * `/deck` lets the model choose what to make; `/deck Prague museum` names it
+ * outright, which is what you want when you are testing a change or when the
+ * channel needs a specific destination this week.
+ *
+ * Deliberately on demand rather than on the daily timer. A deck costs an idea
+ * call, a search per place and a drafting call per place, and the failure modes
+ * (a thin region, an exhausted search budget) are ones you want to read about
+ * while you are sitting there, not discover in a digest.
+ */
+bot.command('deck', async (ctx) => {
+  const arg = (ctx.message.text || '').replace(/^\/deck(@\S+)?\s*/, '').trim();
+
+  if (!searchConfigured()) {
+    await ctx.reply(
+      '⚠️ חיפוש לא מוגדר (GOOGLE_CSE_KEY, GOOGLE_CSE_CX) — נשתמש רק בעמוד הראשי של כל מקום, מה שבדרך כלל לא מספיק לעובדות'
+    );
+  }
+
+  let idea;
+  try {
+    if (arg) {
+      // "Prague museum" — the region is everything but the last word, so
+      // "Amalfi Coast beach" works too.
+      const parts = arg.split(/\s+/);
+      const kind = parts.pop();
+      idea = {
+        titleHe: `${parts.join(' ')} · ${kind}`,
+        where: parts.join(' '),
+        kind,
+        want: 5,
+        angleHe: '',
+        whyNow: 'asked for directly',
+        searchTerms: ['visit'],
+      };
+      await ctx.reply(`⏳ בונה מצגת: ${idea.where} / ${idea.kind}...`);
+    } else {
+      await ctx.reply('⏳ חושב על רעיונות...');
+      const recent = store.recentPublished().map((p) => p.headline || p.id).filter(Boolean).slice(0, 12);
+      const ideas = await proposeIdeas({ count: 3, recent });
+      if (!ideas.length) return ctx.reply('❌ לא חזרו רעיונות');
+      idea = ideas[0];
+      await ctx.reply(
+        [`💡 ${idea.titleHe}`, idea.angleHe, `📍 ${idea.where} · ${idea.kind} · ${idea.want} מקומות`, `⏳ מחפש מקורות...`]
+          .filter(Boolean)
+          .join('\n')
+      );
+    }
+
+    const built = await buildDeck(idea);
+    const cand = await toDeckCandidate(built);
+
+    if (store.hasPublished(cand.id)) {
+      return ctx.reply(`⏭️ המצגת הזו כבר פורסמה (${cand.id}) — /deck שוב לרעיון אחר`);
+    }
+
+    await stage(cand);
+    await ctx.reply(
+      `✅ ${built.slides.length} שקופיות · ${searchConfigured() ? `${searchRemaining()}/${searchBudget()} חיפושים נותרו היום` : 'בלי חיפוש'}`
+    );
+  } catch (e) {
+    console.error('deck failed:', e);
+    // The dropped list is the useful part of a failure here: "nothing had an
+    // official page" and "the search budget ran out" look identical otherwise.
+    const why = e.deck?.dropped?.length
+      ? ['', ...e.deck.dropped.slice(0, 5).map((d) => `   ✗ ${d.place}: ${String(d.why).slice(0, 90)}`)].join('\n')
+      : '';
+    await ctx.reply(`❌ בניית המצגת נכשלה: ${e.message}${why}`);
+  }
+});
+
 bot.command('tiktok', async (ctx) => {
   if (!tiktokConfigured()) {
     return ctx.reply(
@@ -829,6 +916,8 @@ bot.command('help', (ctx) =>
       '/mix — תמהיל הנושאים שפורסמו',
       '/sources — רשימת המקורות',
       '/igquota — מכסת אינסטגרם',
+      '/deck — בונה מצגת לטיקטוק (רעיון, מקורות, שקופיות)',
+      '/deck <מקום> <קטגוריה> — מצגת מוזמנת, למשל: /deck Prague museum',
       '/tiktok — חיבור טיקטוק, טוקנים ורמות פרטיות',
       '/clear_pending',
       '',

@@ -354,12 +354,21 @@ export async function publishTikTok(cand) {
     );
   }
 
-  const imageUrl = cand.card?.url;
-  if (!imageUrl) {
-    throw new TikTokError('no public card URL — TikTok fetches the image itself', { step: 'config' });
+  // A deck publishes its slides in order; a single card publishes as a
+  // one-image photo post. Both are the same API call — `photo_images` is an
+  // array either way — which is why there is no separate publishDeck().
+  const images = cand.deck?.urls?.tiktok?.length ? cand.deck.urls.tiktok : [cand.card?.url];
+
+  if (!images.length || images.some((u) => !u)) {
+    throw new TikTokError('no public image URL — TikTok fetches the images itself', { step: 'config' });
   }
-  if (!imageUrl.startsWith('https://')) {
-    throw new TikTokError(`card URL must be https (got ${imageUrl})`, { step: 'config' });
+  if (images.some((u) => !u.startsWith('https://'))) {
+    throw new TikTokError(`every image URL must be https (got ${images.find((u) => !u.startsWith('https://'))})`, {
+      step: 'config',
+    });
+  }
+  if (images.length > 35) {
+    throw new TikTokError(`a photo post takes at most 35 images (got ${images.length})`, { step: 'config' });
   }
 
   const privacy = cand.tiktok?.privacy;
@@ -385,7 +394,7 @@ export async function publishTikTok(cand) {
       source_info: {
         source: 'PULL_FROM_URL',
         photo_cover_index: 0,
-        photo_images: [imageUrl],
+        photo_images: images,
       },
     },
   });
@@ -394,5 +403,5 @@ export async function publishTikTok(cand) {
 
   await waitForPublish(d.publish_id, t);
 
-  return { publishId: d.publish_id, imageUrl, privacy };
+  return { publishId: d.publish_id, images, slides: images.length, privacy };
 }

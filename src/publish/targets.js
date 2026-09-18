@@ -12,6 +12,34 @@ import { tiktokConfigured } from './tiktok.js';
 
 export const TARGET_HE = { telegram: 'טלגרם', instagram: 'אינסטגרם', tiktok: 'טיקטוק' };
 
+/**
+ * Where each kind of post is allowed to go.
+ *
+ * Not a config value, an editorial rule: a news card is written for a feed and
+ * a deck is written for a scroll, and posting either one in the other's place
+ * is what makes a channel look automated. A card never goes to TikTok. A deck
+ * goes to both, because the same slides read correctly in a carousel.
+ */
+const ALLOWED_BY_KIND = {
+  card: ['telegram', 'instagram'],
+  deck: ['telegram', 'instagram', 'tiktok'],
+};
+
+/**
+ * Where this kind of post is permitted, regardless of what is configured.
+ *
+ * Separate from targetsForKind() so the editorial rule can be asserted on its
+ * own: whether a card may reach TikTok is a decision, and it should not become
+ * untestable just because no TikTok token happens to be present.
+ */
+export const allowedForKind = (kind = 'card') => [...(ALLOWED_BY_KIND[kind] || ALLOWED_BY_KIND.card)];
+
+/** Configured destinations for one kind of post, in publish order. */
+export function targetsForKind(kind = 'card', env = process.env) {
+  const allowed = allowedForKind(kind);
+  return publishTargets(env).filter((t) => allowed.includes(t));
+}
+
 /** Currently-configured destinations, in publish order. */
 export function publishTargets(env = process.env) {
   const targets = [];

@@ -43,6 +43,39 @@ sources → rank → draft (Claude) → verify → render → Telegram → you t
    drips out every four hours; a destination that fails is retried on its own,
    without re-posting to the one that worked.
 
+## Two kinds of post
+
+A **card** is one verified claim from one source, 1080×1350, and it goes to
+Instagram and the Telegram channel. That is the loop above.
+
+A **deck** is a slideshow — a cover and five to seven places, each with two to
+four facts — and it goes to TikTok and Instagram. It is built the other way
+round: Claude proposes what would be worth watching, and only then does the
+pipeline go looking for whether it can be sourced.
+
+```
+idea (Claude) → places (OpenStreetMap + Wikidata) → an authority per place
+   → find its page (Google CSE, site-restricted) → fetch → quote → slide
+   → render 1080×1920 and 1080×1350 → Telegram album → you tap ✅ → TikTok + Instagram
+```
+
+**OpenStreetMap chooses the places; it never states a fact.** The map and
+Wikidata are good at enumerating what exists and how well known it is, and they
+are not the publisher of anything. So a place's tags select it and rank it by
+how many language Wikipedias write about it, and then every number on the slide
+is quoted from the official site of the place, of the body that runs it, or of
+the body that contains it — checked character-for-character, exactly like a
+card.
+
+The consequence is that some decks cannot be made. Museums, temples, castles and
+markets publish their own opening hours; waterfalls and hiking routes mostly do
+not. A probe of seven themes found 52 of 75 Prague museums quotable and 1 of 74
+Icelandic waterfalls. A deck that wanted five places and sourced three says so
+on the approval card, with the name and the reason for each place it dropped.
+
+`/deck` builds one from an idea of the model's choosing; `/deck Prague museum`
+builds the one you asked for.
+
 ## What makes it different from "an AI wrote a post"
 
 **A claim without a quote does not ship.** The drafting step returns

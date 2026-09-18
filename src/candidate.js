@@ -6,7 +6,7 @@ import { findImage, imageQueries, imagesEnabled } from './images.js';
 import { renderCard } from './render/index.js';
 import { isPhotoLayout, PHOTO_FALLBACK } from './render/templates.js';
 import { channelCaption, instagramCaption, tiktokCaption } from './format.js';
-import { publishTargets } from './publish/targets.js';
+import { targetsForKind } from './publish/targets.js';
 import { recordWasted } from './usage.js';
 
 // One source item all the way to a stageable candidate.
@@ -173,7 +173,9 @@ async function build(item, { render = true } = {}) {
     imageMiss: photoDowngrade ? imageMiss : null,
     photoDowngrade,
     createdAt: new Date().toISOString(),
-    publishTargets: publishTargets(),
+    // A news card is written for a feed, not a scroll: it never goes to TikTok.
+    kind: 'card',
+    publishTargets: targetsForKind('card'),
   };
 
   // 6. Render last — it is the only step that costs a browser.
