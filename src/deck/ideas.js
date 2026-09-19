@@ -175,6 +175,62 @@ const TITLE_SCHEMA = {
 };
 
 /**
+ * The cover, written after the deck exists.
+ *
+ * The first version wrote the title first and gathered the places afterwards,
+ * so a deck asked for as "Prague attraction" came back with a cover promising
+ * five museums. Nothing downstream could catch that: the title was a prediction
+ * about places that had not been chosen yet, and predictions are wrong.
+ *
+ * Writing it last makes the mismatch impossible — the model is shown the five
+ * places that are actually in the deck and titles those.
+ */
+export async function coverForDeck({ where, kind, slides = [], hint = '' }) {
+  if (!hasApiKey()) throw new Error('ANTHROPIC_API_KEY is not set');
+
+  const res = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 4000,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: TITLE_SCHEMA } },
+    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+    messages: [
+      {
+        role: 'user',
+        content: [
+          `A deck about ${where} is finished. These are the slides, in order:`,
+          '',
+          ...slides.map((s, i) => `${i + 1}. ${s.nameHe} - ${s.hook?.text || ''}`),
+          '',
+          hint ? `The working title was: ${hint}` : null,
+          '',
+          'Write its cover. The title must describe THESE places and nothing else -',
+          'if they are castles and squares, it is not a deck about museums. Count them',
+          'correctly if you name a number.',
+          '',
+          'The angle is one line, and it is NOT a list of what the slides contain and',
+          'NOT logistics. No opening hours, no prices, no "how long each one takes".',
+          'It is the reason to watch: what someone gets from these five in particular.',
+        ]
+          .filter((l) => l !== null)
+          .join('\n'),
+      },
+    ],
+  });
+
+  recordUsage(res.usage, MODEL);
+  const text = res.content.find((b) => b.type === 'text')?.text;
+  if (!text) throw new Error('cover generation returned no text');
+
+  const parsed = JSON.parse(text);
+  const clean = (s) => String(s || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+  return {
+    titleHe: clean(parsed.title_he),
+    eyebrowHe: clean(parsed.eyebrow_he),
+    angleHe: clean(parsed.angle_he),
+  };
+}
+
+/**
  * A cover for a deck somebody asked for by name.
  *
  * `/deck Prague museum` used to title itself "Prague · museum", which is a

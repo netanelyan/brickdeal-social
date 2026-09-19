@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { scoreEmoji } from './emoji.js';
 
 // The score on the corner of a slide.
 //
@@ -43,5 +44,7 @@ export function scoreFor(placeId, { top = false } = {}) {
   return SCORES[((h[0] << 8) | h[3]) % SCORES.length];
 }
 
-/** How the score reads on a slide. Ours, and never presented as anyone else's. */
-export const scoreLine = (score) => `הדירוג שלנו: ${score}`;
+
+/** The score as it reads on a slide: the number and an emoji, no label. */
+export const scoreLine = (score) => `${score} ${scoreEmoji(score)}`;
+export { scoreEmoji };

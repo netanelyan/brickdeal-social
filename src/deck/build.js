@@ -7,6 +7,8 @@ import { verifyEvidence, RejectedError } from '../verify.js';
 import { findImage } from '../images.js';
 import { destinationPlaces, pick } from '../sources/tiyulplus.js';
 import { scoreFor } from './rating.js';
+import { coverForDeck } from './ideas.js';
+import { vocabForPrompt } from './emoji.js';
 
 // An idea becomes a deck, or it doesn't.
 //
@@ -123,8 +125,20 @@ fabricated claim published under our name.
 FORM
 
 Hebrew. Under 42 characters for the what-it-is line, under 24 for the practical
-one. Hyphens, never em dashes. One emoji on the practical line only, chosen for
-the fact rather than for decoration, never a national flag.`;
+one. Hyphens, never em dashes.
+
+THE EMOJI
+
+One, on the practical line, and it goes AFTER the text - never before it.
+
+It is a reaction, not a label. The channel's voice is this set:
+
+  ${vocabForPrompt()}
+
+Faces and hands doing the reacting. 🥱 next to a long queue, 🫠 next to a
+closing day, 💪 next to a climb, 🫣 next to a price. A clock beside an hour and
+a train beside a train journey is what a timetable does - pick the pictogram
+only when nothing in the set above says it better. Never a national flag.`;
 
 const SLIDE_SYSTEM = `You write one slide of a Hebrew travel slideshow for tiyul+.
 
@@ -457,10 +471,21 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
 
   if (wantImages) await imagesForSlides(slides, idea.where);
 
+  // The cover is written now, from the slides that exist, rather than from the
+  // idea that asked for them. A title is a promise about contents and it should
+  // not be made before the contents are known.
+  const cover = slides.length
+    ? await coverForDeck({ where: idea.where, kind: idea.kind, slides, hint: idea.titleHe }).catch((e) => {
+        console.error(`deck: cover generation failed, keeping the working title — ${e.message}`);
+        return null;
+      })
+    : null;
+  const titled = cover ? { ...idea, ...cover } : idea;
+
   return {
     kind: 'deck',
-    idea,
-    titleHe: idea.titleHe,
+    idea: titled,
+    titleHe: titled.titleHe,
     where: idea.where,
     category: idea.kind,
     via: 'tiyulplus',

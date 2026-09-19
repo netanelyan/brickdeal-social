@@ -1,4 +1,5 @@
 import { palette, heeboDataUri, tiktokSansDataUri, escapeHtml, siteMark } from './theme.js';
+import { scoreEmoji } from '../deck/emoji.js';
 
 // Slideshow slides. A different animal from the news card, on purpose.
 //
@@ -22,6 +23,12 @@ export const SIZES = {
   tiktok: { w: 1080, h: 1920, bottomSafe: 420 },
   instagram: { w: 1080, h: 1350, bottomSafe: 120 },
 };
+
+// The two colours the whole slide is made of, taken off the reference posts:
+// a pale butter cream with a bronze outline. Warmer than white, and it is the
+// warmth that stops it reading as a caption burned in by software.
+const CREAM = '#F7DC8E';
+const BRONZE = 'rgba(92,58,16,0.95)';
 
 const css = ({ w, h, bottomSafe }) => `
 @font-face {
@@ -72,7 +79,7 @@ body {
    blown-out sky so white type has something to sit against. */
 .scrim {
   background:
-    linear-gradient(to bottom, rgba(6,14,13,0.34) 0%, rgba(6,14,13,0.06) 26%, rgba(6,14,13,0.10) 62%, rgba(6,14,13,0.58) 100%);
+    linear-gradient(to bottom, rgba(6,14,13,0.26) 0%, rgba(6,14,13,0.04) 28%, rgba(6,14,13,0.08) 64%, rgba(6,14,13,0.46) 100%);
 }
 
 /* The app's own text tool, not an imitation of one.
@@ -90,29 +97,35 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: ${Math.round(h * 0.009)}px;
+  gap: ${Math.round(h * 0.004)}px;
   max-width: 94%;
 }
 .slab {
   display: inline;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  background: rgba(10,10,12,0.56);
-  border-radius: ${Math.round(h * 0.009)}px;
-  padding: ${Math.round(h * 0.007)}px ${Math.round(h * 0.011)}px;
-  /* A little air between wrapped lines, or the slabs touch and read as a box. */
-  line-height: 1.55;
+  /* Cream fill, bronze outline, straight on the photograph — the treatment on
+     the reference posts. Not a dark slab behind the words, and not the heavy
+     black stroke tried before it: that one was thick enough to read as an
+     external editor's doing. ~5px at this size is what the reference carries.
+     paint-order keeps the stroke behind the fill, or it eats the letterforms
+     from the inside. */
+  color: ${CREAM};
+  paint-order: stroke fill;
+  -webkit-text-stroke: ${Math.round(h * 0.0028)}px ${BRONZE};
+  text-shadow: 0 ${Math.round(h * 0.0025)}px ${Math.round(h * 0.008)}px rgba(0,0,0,0.5);
+  line-height: 1.34;
 }
 
-/* Text sits low. Not centred, not high.
-   Centred lands on the subject of the photograph. High leaves the lower half
-   empty, which is where the viewer's eye and thumb already are. Low - just
-   above the app's own caption and buttons - is where the posts that work put
-   it, and it leaves the picture doing the selling above it. */
+/* The block sits in the middle of the frame, as one group.
+   Not pinned high, not pinned low: the lines stay together and the group is
+   centred between the top of the image and the app's own furniture at the
+   bottom, so a two-line slide and a five-line slide both look deliberate
+   rather than like the same layout with a gap in it. */
 .content {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  justify-content: center;
   align-items: center;
   padding: ${Math.round(h * 0.1)}px ${Math.round(w * 0.065)}px ${bottomSafe}px;
   gap: ${Math.round(h * 0.016)}px;
@@ -125,7 +138,6 @@ body {
   font-weight: 900;
   line-height: 1.34;
   letter-spacing: -0.5px;
-  color: #FFFFFF;
 }
 /* Set at full size, a title of any length wraps to four lines and becomes the
    entire slide - the photograph stops existing and the promise stops reading as
@@ -139,7 +151,6 @@ body {
   font-size: ${Math.round(h * 0.026)}px;
   font-weight: 800;
   letter-spacing: 3px;
-  color: rgba(255,233,168,0.9);
   margin-bottom: ${Math.round(h * 0.004)}px;
 }
 /* The format's own convention. A slideshow that does not say it is a slideshow
@@ -150,14 +161,12 @@ body {
   bottom: ${Math.round(bottomSafe * 0.72)}px;
   font-size: ${Math.round(h * 0.024)}px;
   font-weight: 800;
-  color: rgba(255,248,230,0.92);
   letter-spacing: 1px;
 }
 .cover-angle {
   font-size: ${Math.round(h * 0.028)}px;
   font-weight: 600;
   line-height: 1.35;
-  color: rgba(255,248,230,0.92);
   text-shadow: 0 2px 16px rgba(0,0,0,0.8);
   max-width: 82%;
   margin-top: ${Math.round(h * 0.012)}px;
@@ -166,8 +175,7 @@ body {
 .place {
   font-size: ${Math.round(h * 0.042)}px;
   font-weight: 900;
-  line-height: 1.5;
-  color: #FFFFFF;
+  line-height: 1.32;
 }
 
 /* Ours, and it has to read as an opinion rather than a measurement. Warm,
@@ -176,8 +184,7 @@ body {
 .score {
   font-size: ${Math.round(h * 0.03)}px;
   font-weight: 900;
-  color: #FFD84D;
-  line-height: 1.5;
+  line-height: 1.32;
 }
 
 /* The one line that has to make somebody want to go. Bigger than the practical
@@ -186,8 +193,7 @@ body {
 .hook {
   font-size: ${Math.round(h * 0.0325)}px;
   font-weight: 800;
-  line-height: 1.5;
-  color: #FFFFFF;
+  line-height: 1.32;
   max-width: 94%;
 }
 .hook.long { font-size: ${Math.round(h * 0.0285)}px; }
@@ -201,7 +207,6 @@ body {
   font-size: ${Math.round(h * 0.0295)}px;
   font-weight: 700;
   line-height: 1.25;
-  color: #FFFFFF;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -266,7 +271,7 @@ export function renderSlideHtml(slide, { index, total, size = 'tiktok', cover = 
     .slice(0, 2)
     .map(
       (l) =>
-        `<div class="line${l.overlong ? ' long' : ''}"><span class="slab"><span class="em">${escapeHtml(l.emoji)}</span> ${escapeHtml(l.text)}</span></div>`
+        `<div class="line${l.overlong ? ' long' : ''}"><span class="slab">${escapeHtml(l.text)} <span class="em">${escapeHtml(l.emoji)}</span></span></div>`
     )
     .join('');
 
@@ -287,9 +292,10 @@ export function renderSlideHtml(slide, { index, total, size = 'tiktok', cover = 
       slab('place', slide.nameHe) +
       (slide.hook ? slab(`hook${slide.hook.overlong ? ' long' : ''}`, slide.hook.text) : '') +
       (lines ? `<div class="lines">${lines}</div>` : '') +
-      // Last, under the sourced lines, so the eye reads what the place is
-      // before it reads what we thought of it.
-      (slide.score ? slab('score', `הדירוג שלנו: ${slide.score}`) : '') +
+      // The number alone, with an emoji. Labelling it "הדירוג שלנו" was the
+      // tutorial voice again: on a real page the score is just there, and
+      // everyone already knows whose opinion it is.
+      (slide.score ? slab('score', `${slide.score} ${scoreEmoji(slide.score)}`) : '') +
       `</div>`;
 
   // Nothing at the bottom of a fact slide. A URL burned into a photograph is
