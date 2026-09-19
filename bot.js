@@ -88,10 +88,51 @@ if (!STAGING_CHAT_ID) {
   process.exit(1);
 }
 
-const bot = new Telegraf(TG_BOT_TOKEN);
+// Telegraf times a handler out at 90 seconds by default, and the timeout does
+// not merely abandon the handler: it rejects, the rejection reaches
+// bot.launch()'s promise, and the catch there exits the process. So a slow
+// command was killing the bot.
+//
+// Every long command now answers immediately and does its work detached (see
+// detach below), which is the actual fix. This raises the ceiling anyway,
+// because the next long thing somebody adds should degrade into a late reply
+// rather than a restart.
+const bot = new Telegraf(TG_BOT_TOKEN, {
+  handlerTimeout: Number(process.env.HANDLER_TIMEOUT_MS || 600_000),
+});
+
+/**
+ * Run something slow without holding the update open.
+ *
+ * A gather takes minutes and a deck takes longer. Awaiting that inside a
+ * command handler is what produced "Promise timed out after 90000
+ * milliseconds" followed by a restart — mid-gather, so the run was lost and the
+ * approval it was about to send never arrived.
+ *
+ * Errors are reported to the chat rather than thrown, because there is no
+ * longer an update to attach them to by the time they happen.
+ */
+function detach(label, work, chatId = staging) {
+  Promise.resolve()
+    .then(work)
+    .catch(async (e) => {
+      console.error(`${label} failed:`, e?.stack || e);
+      await notify.send(bot.telegram, chatId, `❌ ${label} נכשל: ${e?.message || e}`).catch(() => {});
+    });
+}
 const staging = STAGING_CHAT_ID;
 const intervalMs = Math.max(1, Number(POST_INTERVAL_MINUTES)) * 60_000;
 const gatherIntervalMs = Math.max(0.25, Number(GATHER_EVERY_HOURS)) * 3_600_000;
+
+// Without this, an error thrown anywhere in a handler propagates out of
+// Telegraf's update loop, rejects the promise bot.launch() returned, and the
+// catch on that call exits the process. So a stale callback query — "query is
+// too old", which happens whenever you tap a button on a card from before the
+// last restart — was enough to restart the bot, which produced more stale
+// buttons. Handled here, they stay what they are: one failed tap.
+bot.catch((err, ctx) => {
+  console.error(`handler error on ${ctx?.updateType || 'update'}:`, err?.stack || err);
+});
 
 // String comparison sidesteps float-precision edge cases with large Telegram ids.
 const isOwner = (ctx) => String(ctx.from?.id) === String(OWNER_ID);
@@ -637,7 +678,7 @@ async function doRun({ announce = true, target } = {}) {
 bot.command('run', async (ctx) => {
   if (running) return ctx.reply('⏳ כבר רץ סבב איסוף');
   await ctx.reply(`⏳ מריץ סבב — עד ${dailyTarget()} פריטים`);
-  await doRun();
+  detach('סבב איסוף', () => doRun(), ctx.chat.id);
 });
 
 // Re-run the same sources from scratch.
@@ -655,7 +696,7 @@ bot.command('redo', async (ctx) => {
     `🔄 שכחתי ${forgotten} פריטים שכבר נראו${cleared ? ` וניקיתי ${cleared} ממתינים` : ''} — מריץ מחדש` +
       `\n(${store.publishedCount()} פוסטים שכבר פורסמו לא יחזרו)`
   );
-  await doRun();
+  detach('סבב איסוף', () => doRun(), ctx.chat.id);
 });
 
 bot.command('pending', (ctx) => ctx.reply(`⏳ ${store.stagingSize()} ממתינים לאישור`));
@@ -810,6 +851,15 @@ bot.command('deck', async (ctx) => {
     );
   }
 
+  // A deck is minutes of work: an idea call, a search and a drafting call per
+  // place, then twelve renders. Held inside the handler it overran Telegraf's
+  // timeout and took the process down with it.
+  detach('בניית מצגת', () => buildAndStageDeck(arg, ctx.chat.id), ctx.chat.id);
+});
+
+async function buildAndStageDeck(arg, chatId) {
+  const say = (text) => notify.send(bot.telegram, chatId, text).catch(() => {});
+
   let idea;
   try {
     if (arg) {
@@ -826,12 +876,12 @@ bot.command('deck', async (ctx) => {
         whyNow: 'asked for directly',
         searchTerms: ['visit'],
       };
-      await ctx.reply(`⏳ בונה מצגת: ${idea.where} / ${idea.kind}...`);
+      await say(`⏳ בונה מצגת: ${idea.where} / ${idea.kind}...`);
     } else {
-      await ctx.reply('⏳ חושב על רעיונות...');
+      await say('⏳ חושב על רעיונות...');
       const recent = store.recentPublished().map((p) => p.headline || p.id).filter(Boolean).slice(0, 12);
       const ideas = await proposeIdeas({ count: 3, recent });
-      if (!ideas.length) return ctx.reply('❌ לא חזרו רעיונות');
+      if (!ideas.length) return say('❌ לא חזרו רעיונות');
       idea = ideas[0];
       await ctx.reply(
         [`💡 ${idea.titleHe}`, idea.angleHe, `📍 ${idea.where} · ${idea.kind} · ${idea.want} מקומות`, `⏳ מחפש מקורות...`]
@@ -844,11 +894,11 @@ bot.command('deck', async (ctx) => {
     const cand = await toDeckCandidate(built);
 
     if (store.hasPublished(cand.id)) {
-      return ctx.reply(`⏭️ המצגת הזו כבר פורסמה (${cand.id}) — /deck שוב לרעיון אחר`);
+      return say(`⏭️ המצגת הזו כבר פורסמה (${cand.id}) — /deck שוב לרעיון אחר`);
     }
 
     await stage(cand);
-    await ctx.reply(
+    await say(
       `✅ ${built.slides.length} שקופיות · ${searchConfigured() ? `${searchRemaining()}/${searchBudget()} חיפושים נותרו היום` : 'בלי חיפוש'}`
     );
   } catch (e) {
@@ -858,9 +908,9 @@ bot.command('deck', async (ctx) => {
     const why = e.deck?.dropped?.length
       ? ['', ...e.deck.dropped.slice(0, 5).map((d) => `   ✗ ${d.place}: ${String(d.why).slice(0, 90)}`)].join('\n')
       : '';
-    await ctx.reply(`❌ בניית המצגת נכשלה: ${e.message}${why}`);
+    await say(`❌ בניית המצגת נכשלה: ${e.message}${why}`);
   }
-});
+}
 
 bot.command('tiktok', async (ctx) => {
   if (!tiktokConfigured()) {
