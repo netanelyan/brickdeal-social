@@ -448,19 +448,24 @@ async function cinematicImage({ nameEn, where, used, label }) {
 
       let chosen = null;
       try {
-        chosen = await pickCinematic(
-          fresh.map((c) => c.thumb),
-          { place: label || nameEn, where }
-        );
+        chosen = await pickCinematic(fresh.map((c) => c.thumb), {
+          place: label,
+          placeEn: nameEn,
+          where,
+          types: fresh.map((c) => c.thumbType),
+        });
       } catch (e) {
-        // A failed judgement must not cost the slide its photograph: fall back
-        // to the library's own ranking, which is what we used to trust anyway.
-        console.error(`images: curation failed, taking the library's pick — ${e.message}`);
-        chosen = { index: 0, why: 'curation unavailable' };
+        // No falling back to the library's own top hit. That fallback is what
+        // put a photograph of a different baroque garden under a slide named
+        // Strahov: the library cannot know what the place looks like, and a
+        // mislabelled slide costs more than a missing one.
+        console.error(`images: curation failed — ${e.message}`);
+        chosen = null;
       }
 
-      // 0 means "none of these is good enough" — a real answer, and the reason
-      // the query list has more than one entry.
+      // Null covers both "none of these is good enough" and "I am not sure any
+      // of these is the place". Both are real answers, and both mean: try the
+      // next query, then give up on this place.
       if (!chosen) continue;
 
       const pick = fresh[chosen.index];
@@ -468,7 +473,15 @@ async function cinematicImage({ nameEn, where, used, label }) {
       if (!got?.src) continue;
 
       used.add(pick.key);
-      return { ...got, why: chosen.why, chosenFrom: fresh.length, viaQuery: q };
+      return {
+        ...got,
+        why: chosen.why,
+        // Where the words go on this particular photograph.
+        band: chosen.band,
+        side: chosen.side,
+        chosenFrom: fresh.length,
+        viaQuery: q,
+      };
     }
   }
   return null;
@@ -494,9 +507,9 @@ export async function imagesForSlides(slides, where, { cover = null } = {}) {
       label: slide.nameHe,
     });
     slide.image = picked;
-    // "None of these was good enough" is a real answer here, not a failure to
-    // find anything — the curator refuses a snapshot on purpose.
-    if (!picked) slide.imageMiss = `no photograph good enough for "${slide.nameEn}"`;
+    // "None of these was good enough, or none of them was this place" is a
+    // real answer, and the caller drops the place on it.
+    if (!picked) slide.imageMiss = `no photograph of "${slide.nameEn}" that is both this place and worth looking at`;
   }
   return slides;
 }
@@ -662,7 +675,21 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
   }
 
   const coverSlot = {};
-  if (wantImages) await imagesForSlides(slides, idea.where, { cover: coverSlot });
+  if (wantImages) {
+    await imagesForSlides(slides, idea.where, { cover: coverSlot });
+
+    // A place whose photograph could not be found — or could not be trusted to
+    // be that place — leaves the deck rather than appearing over somebody
+    // else's garden. Renumbered afterwards so the list still counts 1..n.
+    for (let i = slides.length - 1; i >= 0; i--) {
+      if (slides[i].image) continue;
+      dropped.push({ place: slides[i].nameHe, why: slides[i].imageMiss || 'no photograph', url });
+      slides.splice(i, 1);
+    }
+    slides.forEach((s, i) => {
+      s.n = i + 1;
+    });
+  }
 
   // The cover is written now, from the slides that exist, rather than from the
   // idea that asked for them. A title is a promise about contents and it should

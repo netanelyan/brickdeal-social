@@ -132,6 +132,9 @@ export async function candidates(query, { n = 6, timeoutMs = 15_000 } = {}) {
       library: 'unsplash',
       photo,
       thumb: bytes.buf,
+      // The library serves PNG for some thumbnails, and declaring the wrong
+      // media type to a vision call is a 400 rather than a soft failure.
+      thumbType: bytes.type && bytes.type.startsWith("image/") ? bytes.type.split(";")[0] : "image/jpeg",
       credit: photo.user?.name ? `Unsplash / ${photo.user.name}` : 'Unsplash',
       key: photo.id,
       query: q,

@@ -27,11 +27,28 @@ const SCHEMA = {
   properties: {
     pick: {
       type: 'integer',
-      description: 'The 1-based number of the best photograph, or 0 if none of them is good enough',
+      description:
+        'The 1-based number of the best photograph, or 0 if none of them both SHOWS THIS PLACE and is good enough.',
+    },
+    shows_place: {
+      type: 'boolean',
+      description:
+        'True only if the chosen photograph actually depicts the named place - not merely the same city or region.',
+    },
+    band: {
+      type: 'string',
+      enum: ['top', 'middle', 'bottom'],
+      description:
+        'Which horizontal third of the CHOSEN photograph is emptiest - open sky, water, grass, snow - and can hold text without covering the subject.',
+    },
+    side: {
+      type: 'string',
+      enum: ['right', 'center', 'left'],
+      description: 'Which side of that band is emptiest. "center" when the whole band is open.',
     },
     why: { type: 'string', description: 'Six words at most, English, on what decided it' },
   },
-  required: ['pick', 'why'],
+  required: ['pick', 'shows_place', 'band', 'side', 'why'],
   additionalProperties: false,
 };
 
@@ -69,8 +86,27 @@ A person walking away from camera, small in a landscape, is GOOD - it gives
 scale and it is what the best travel posts do. A person facing the camera is a
 portrait, and this is not a portrait.
 
-If every candidate is a plain snapshot, say 0. A slide with a weak photograph is
-worse than one that falls back, and the caller handles 0 properly.`;
+IT MUST BE THIS PLACE
+
+The slide names a place, and the photograph has to show THAT place - not another
+building in the same city, not a nice view of the same country. A slide reading
+"Strahov Monastery" over a photograph of a different baroque garden is the one
+mistake that costs a travel page its credibility, and a viewer who has been
+there spots it instantly.
+
+If you are not confident the picture shows the named place, say 0. Being unsure
+is itself the answer: a deck that drops a place is fine, a deck that mislabels
+one is not.
+
+WHERE THE TEXT WILL GO
+
+Also say which third of the chosen picture is emptiest, and which side of it -
+open sky, still water, a field of snow, a lawn. The words are placed there, so
+this is not a note about composition; it decides whether the text lands on the
+mountain or beside it.
+
+If nothing here both shows the place and is worth looking at, say 0. The caller
+tries another search and then drops the place, which is the correct outcome.`;
 
 /**
  * Pick the most cinematic of several candidates.
@@ -79,17 +115,18 @@ worse than one that falls back, and the caller handles 0 properly.`;
  * a 0-based index, or null when none of them is good enough — which the caller
  * treats as "try another query", not as an error.
  */
-export async function pickCinematic(thumbs, { place = '', where = '' } = {}) {
+export async function pickCinematic(thumbs, { place = '', where = '', placeEn = '', types = [] } = {}) {
   if (!thumbs.length) return null;
-  if (thumbs.length === 1) return 0;
 
   const content = [
     {
       type: 'text',
       text: [
-        `PLACE: ${place || 'unknown'}${where ? `, ${where}` : ''}`,
-        `${thumbs.length} candidates follow, numbered from 1.`,
-        'Pick the one that would stop a thumb. It must also plausibly show this place.',
+        `PLACE: ${place || placeEn || 'unknown'}${placeEn && place !== placeEn ? ` (${placeEn})` : ''}${
+          where ? `, ${where}` : ''
+        }`,
+        `${thumbs.length} candidate${thumbs.length === 1 ? '' : 's'} follow${thumbs.length === 1 ? 's' : ''}, numbered from 1.`,
+        'Pick the one that shows THIS PLACE and would stop a thumb, and say where its empty space is.',
       ].join('\n'),
     },
   ];
@@ -98,7 +135,7 @@ export async function pickCinematic(thumbs, { place = '', where = '' } = {}) {
     content.push({ type: 'text', text: `${i + 1}:` });
     content.push({
       type: 'image',
-      source: { type: 'base64', media_type: 'image/jpeg', data: buf.toString('base64') },
+      source: { type: 'base64', media_type: types[i] || 'image/jpeg', data: buf.toString('base64') },
     });
   }
 
@@ -117,7 +154,18 @@ export async function pickCinematic(thumbs, { place = '', where = '' } = {}) {
   const parsed = JSON.parse(text);
   const pick = Number(parsed.pick);
   if (!Number.isInteger(pick) || pick < 1 || pick > thumbs.length) return null;
-  return { index: pick - 1, why: String(parsed.why || '').slice(0, 60) };
+
+  // A picture it is not sure about is a picture we do not use. The deck can
+  // afford to be one place shorter; it cannot afford to name a place and show
+  // somewhere else.
+  if (parsed.shows_place === false) return null;
+
+  return {
+    index: pick - 1,
+    why: String(parsed.why || '').slice(0, 60),
+    band: ['top', 'middle', 'bottom'].includes(parsed.band) ? parsed.band : 'bottom',
+    side: ['right', 'center', 'left'].includes(parsed.side) ? parsed.side : 'center',
+  };
 }
 
 // Words that turn a library search from "a picture of X" into "a picture worth

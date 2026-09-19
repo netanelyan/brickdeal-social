@@ -133,9 +133,9 @@ body {
      external editor's doing. ~5px at this size is what the reference carries.
      paint-order keeps the stroke behind the fill, or it eats the letterforms
      from the inside. */
-  color: ${CREAM};
+  color: #FFFFFF;
   paint-order: stroke fill;
-  -webkit-text-stroke: ${Math.round(h * 0.0028)}px ${BRONZE};
+  -webkit-text-stroke: ${Math.round(h * 0.0012)}px rgba(0,0,0,0.5);
   /* Two shadows doing different jobs. The tight one is a contact shadow: it
      sits right under each letter and is what separates one line from the line
      beneath it, which is the thing that was missing - the lines ran together
@@ -147,24 +147,30 @@ body {
   line-height: 1.34;
 }
 
-/* The block sits in the middle of the frame, as one group.
-   Not pinned high, not pinned low: the lines stay together and the group is
-   centred between the top of the image and the app's own furniture at the
-   bottom, so a two-line slide and a five-line slide both look deliberate
-   rather than like the same layout with a gap in it. */
+/* The words go where the photograph is empty.
+   Which third that is comes from the same vision pass that chose the picture,
+   so it differs per slide: sky on one, still water on the next, a lawn on the
+   third. A fixed position is what put the text across the middle of a garden. */
 .content {
   display: flex;
   flex-direction: column;
-  justify-content: center;
   align-items: center;
-  padding: ${Math.round(h * 0.1)}px ${Math.round(w * 0.065)}px ${bottomSafe}px;
-  gap: ${Math.round(h * 0.016)}px;
+  padding: ${Math.round(h * 0.07)}px ${Math.round(w * 0.06)}px ${bottomSafe}px;
+  gap: ${Math.round(h * 0.014)}px;
 }
+.content.band-top { justify-content: flex-start; }
+.content.band-middle { justify-content: center; }
+.content.band-bottom { justify-content: flex-end; }
+/* Horizontal too: a mountain on the left leaves the right open, and a block of
+   text centred over it would sit on the mountain anyway. */
+.content.side-right { align-items: flex-start; text-align: right; }
+.content.side-left { align-items: flex-end; text-align: left; }
+.content.side-right .plate, .content.side-left .plate { max-width: 74%; }
 
 /* The cover carries the whole promise of the deck, so it gets the biggest type
    on any slide and nothing else competes with it. */
 .cover-title {
-  font-size: ${Math.round(h * 0.062)}px;
+  font-size: ${Math.round(h * 0.05)}px;
   font-weight: 900;
   line-height: 1.34;
   letter-spacing: -0.5px;
@@ -172,8 +178,8 @@ body {
 /* Set at full size, a title of any length wraps to four lines and becomes the
    entire slide - the photograph stops existing and the promise stops reading as
    a promise. Two steps down by length keeps it to two or three lines. */
-.cover-title.mid { font-size: ${Math.round(h * 0.06)}px; }
-.cover-title.long { font-size: ${Math.round(h * 0.05)}px; }
+.cover-title.mid { font-size: ${Math.round(h * 0.045)}px; }
+.cover-title.long { font-size: ${Math.round(h * 0.039)}px; }
 /* The city, small and above the title. A cover that opens with "פראג" tells a
    scroller in one word whether this is for them, before they have read
    anything else. */
@@ -204,12 +210,12 @@ body {
 
 /* The one word set louder on the cover. Hebrew has no capitals, so colour and
    nothing else does what "WYOMING" does in the reference. */
-.emph { color: #FFD84D; }
+.emph { color: #FFE9A8; }
 
 /* A field line: icon, label, value. Same four every slide in a deck that has
    them, which is what makes them scan rather than read. */
 .field {
-  font-size: ${Math.round(h * 0.03)}px;
+  font-size: ${Math.round(h * 0.025)}px;
   font-weight: 800;
   line-height: 1.32;
   unicode-bidi: isolate;
@@ -217,11 +223,11 @@ body {
 
 /* The name IS the slide, so it takes the weight that the hook used to. */
 .place {
-  font-size: ${Math.round(h * 0.046)}px;
+  font-size: ${Math.round(h * 0.036)}px;
   font-weight: 900;
   line-height: 1.32;
 }
-.place.long { font-size: ${Math.round(h * 0.038)}px; }
+.place.long { font-size: ${Math.round(h * 0.03)}px; }
 
 /* Ours, and it has to read as an opinion rather than a measurement. Warm,
    loud, and set apart from the sourced lines above it - 11/10 is the format's
@@ -377,7 +383,9 @@ export function renderSlideHtml(slide, { index, total, size = 'tiktok', cover = 
     )
     .join('');
 
-  const name = [slide.n ? `${slide.n}. ` : '', slide.nameHe, slide.countryHe ? `, ${slide.countryHe}` : '']
+  // No number. lucyysarchive does not count them, and the count is already on
+  // the cover and in TikTok's own slide indicator.
+  const name = [slide.nameHe, slide.countryHe ? `, ${slide.countryHe}` : '']
     .join('')
     .trim();
 
@@ -394,12 +402,14 @@ export function renderSlideHtml(slide, { index, total, size = 'tiktok', cover = 
   // the single most reliable sign that a post was made by a company rather
   // than a person, and the sources have not gone anywhere: every slide's URL
   // is in the approval message, and the caption carries the site.
-  const foot = cover ? `<span class="site">${escapeHtml(siteMark())}</span>` : '';
+  // No branding anywhere, cover included. Not one reference post carries a
+  // domain; the account name is already under every post in the app.
+  const foot = '';
 
   return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><style>${css(s)}</style></head><body>
 ${photo(slide.image, s)}
 <div class="scrim"></div>
-<div class="content">${body}</div>
+<div class="content band-${slide.image?.band || (cover ? 'middle' : 'bottom')} side-${slide.image?.side || 'center'}">${body}</div>
 ${foot ? `<div class="foot">${foot}</div>` : ''}
 </body></html>`;
 }

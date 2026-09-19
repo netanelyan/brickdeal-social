@@ -1237,12 +1237,12 @@ ok('the title is not repeated - the cover slide already carries it', !dcap.inclu
 // Never a sentence: prose on a slide is what made these read like a guidebook,
 // and it survived every typographic fix because it was never typographic.
 const slideHtml = renderSlideHtml(deckFixture.deck.slides[0], { index: 2, total: 3, size: 'tiktok' });
-ok('the name is numbered, the way a list counts down', slideHtml.includes('1. המוזיאון הלאומי'));
+ok('the name stands alone, unnumbered', slideHtml.includes('המוזיאון הלאומי') && !slideHtml.includes('1. המוזיאון'));
 ok('a field renders as icon, label, value', slideHtml.includes('מרחק: 5.3'));
 ok('no score on a slide - it belongs in the cover line', !slideHtml.includes('class="score"'));
 
 const bare = renderSlideHtml({ n: 3, nameHe: 'גשר קרל', fields: [] }, { index: 4, total: 6 });
-ok('a name-only slide is just the name', bare.includes('3. גשר קרל'));
+ok('a name-only slide is just the name', bare.includes('גשר קרל'));
 ok('and carries nothing else at all', !bare.includes('class="field"'));
 
 // The country is named only when the deck spans countries; in a one-city deck
@@ -1305,10 +1305,20 @@ ok('no counter of our own', !slideHtml.includes('class="counter"'));
 // Nor our own domain on a fact slide. The source stays; branding on every
 // slide is what an advertisement looks like.
 ok('the brand is not on every slide', !slideHtml.includes('tiyulplus'));
-ok('but it is on the cover', renderSlideHtml({ titleHe: 'x' }, { index: 1, total: 3, cover: true }).includes('tiyulplus'));
+// Not one reference post carries a domain, cover included.
+ok('nor on the cover', !renderSlideHtml({ titleHe: 'x' }, { index: 1, total: 3, cover: true }).includes('tiyulplus'));
 // Legibility the way the app's own text tool does it: each line on its own
 // rounded slab. A heavy outline read as a badly edited image and a single
 // panel behind the block read as an advertisement.
+// Placement is per photograph now: the vision pass says which third is empty,
+// and a fixed centre is what put the text across the middle of a garden.
+ok(
+  'the text is placed in the empty band of that photograph',
+  renderSlideHtml({ nameHe: 'x', fields: [], image: { band: 'top', side: 'left' } }, { index: 2, total: 3 }).includes(
+    'band-top side-left'
+  )
+);
+ok('and falls to the bottom when nothing said otherwise', renderSlideHtml({ nameHe: 'x', fields: [] }, { index: 2, total: 3 }).includes('band-bottom'));
 ok('a wrapped line does not break into two ragged pieces', slideHtml.includes('box-decoration-break: clone'));
 // TikTok Sans has no Hebrew, so it can only ever carry Latin and digits; the
 // Hebrew falls through to Rubik, a display face, rather than to Heebo, which is
