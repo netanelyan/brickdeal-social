@@ -14,6 +14,7 @@ import { publishTelegram, publishTelegramDeck, sendForApproval } from './src/pub
 import { proposeIdeas, titleForRequest } from './src/deck/ideas.js';
 import { buildDeck } from './src/deck/build.js';
 import { toDeckCandidate } from './src/deck/candidate.js';
+import { canonicalKind } from './src/sources/tiyulplus.js';
 import { searchConfigured, remaining as searchRemaining, dailyBudget as searchBudget } from './src/search.js';
 import { publishInstagram, instagramConfigured, remainingQuota, refreshToken, tokenDaysLeft, authMode, describeError } from './src/publish/instagram.js';
 import {
@@ -866,7 +867,8 @@ async function buildAndStageDeck(arg, chatId) {
       // "Prague museum" — the region is everything but the last word, so
       // "Amalfi Coast beach" works too.
       const parts = arg.split(/\s+/);
-      const kind = parts.pop();
+      // "/deck Italy mountains" - plural is what people type.
+      const kind = canonicalKind(parts.pop());
       const where = parts.join(' ');
       await say(`⏳ בונה מצגת: ${where} / ${kind}...`);
       // A requested deck gets a written cover too. Naming it "Prague · museum"

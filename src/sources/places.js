@@ -20,7 +20,21 @@
 // Open-Meteo is queried, not subscribed to, and it earns its place by answering
 // a question no feed can. Same here.
 
-const OVERPASS = process.env.OVERPASS_URL || 'https://overpass-api.de/api/interpreter';
+// Mirrors, not one endpoint.
+//
+// The main instance is free, popular and rate-limited, and "429 Too Many
+// Requests" arrives often enough that retrying the same host is not a strategy
+// — it is the host telling you to go somewhere else. These run the same data
+// and the same query language, so falling through costs nothing but a second.
+const OVERPASS_MIRRORS = (process.env.OVERPASS_URL || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+  .concat([
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://overpass.osm.ch/api/interpreter',
+  ]);
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 const WIKIDATA = 'https://www.wikidata.org/w/api.php';
 
@@ -76,6 +90,15 @@ export const KINDS = {
       `nwr["amenity"="marketplace"]["name"]["wikidata"](${bbox});` +
       `nwr["shop"="deli"]["name"]["wikidata"](${bbox});` +
       `nwr["amenity"="restaurant"]["name"]["wikidata"](${bbox});`,
+  },
+  mountain: {
+    he: 'הרים',
+    // Peaks, and the ranges themselves. A deck about "mountains in Italy" wants
+    // the Dolomites as much as it wants any single summit, and OSM files a
+    // range as a natural=ridge or a place=region rather than a peak.
+    q: (bbox) =>
+      `nwr["natural"="peak"]["name"]["wikidata"](${bbox});` +
+      `nwr["natural"="ridge"]["name"]["wikidata"](${bbox});`,
   },
   waterfall: {
     he: 'מפלים',
@@ -156,12 +179,27 @@ export async function osmPlaces(bbox, kind) {
   if (!spec) throw new PlacesError(`unknown kind: ${kind}`, { step: 'overpass' });
 
   const ql = `[out:json][timeout:60];(${spec.q(bbox)});out tags center ${Number(process.env.PLACES_MAX || 200)};`;
-  const data = await json(OVERPASS, {
-    step: 'overpass',
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ data: ql }),
-  });
+
+  // Each mirror gets one attempt rather than three: a busy instance stays busy
+  // for minutes, and the next host is a better bet than the next retry.
+  let data = null;
+  let last = null;
+  for (const host of OVERPASS_MIRRORS) {
+    try {
+      data = await json(host, {
+        step: 'overpass',
+        attempts: 1,
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ data: ql }),
+      });
+      break;
+    } catch (e) {
+      last = e;
+      console.error(`places: ${new URL(host).hostname} — ${e.message}`);
+    }
+  }
+  if (!data) throw last || new PlacesError('every Overpass mirror refused', { step: 'overpass' });
 
   const seen = new Set();
   const out = [];

@@ -20,9 +20,18 @@ import { emojiHtml } from './emojiArt.js';
 // with the height, and the safe area at the bottom is deeper on the TikTok
 // version, where the app's own caption and buttons sit over the image.
 
+// Both ends of a TikTok frame belong to the app, not to us.
+//
+// The bottom is the caption, the handle and the button rail. The TOP is the
+// search bar and the slide counter, and text put up there is simply unreadable
+// behind them — which is what "band: top" produced before this existed. So the
+// usable area is the middle, and `topSafe` is what keeps the highest band below
+// the app's own furniture rather than under it.
+//
+// Instagram has almost none of this in the feed, hence the much smaller numbers.
 export const SIZES = {
-  tiktok: { w: 1080, h: 1920, bottomSafe: 420 },
-  instagram: { w: 1080, h: 1350, bottomSafe: 120 },
+  tiktok: { w: 1080, h: 1920, topSafe: 380, bottomSafe: 420 },
+  instagram: { w: 1080, h: 1350, topSafe: 90, bottomSafe: 120 },
 };
 
 // The two colours the whole slide is made of, taken off the reference posts:
@@ -31,7 +40,7 @@ export const SIZES = {
 const CREAM = '#F7DC8E';
 const BRONZE = 'rgba(92,58,16,0.95)';
 
-const css = ({ w, h, bottomSafe }) => `
+const css = ({ w, h, topSafe, bottomSafe }) => `
 @font-face {
   font-family: 'Heebo';
   src: url('${heeboDataUri()}') format('truetype');
@@ -155,7 +164,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: ${Math.round(h * 0.07)}px ${Math.round(w * 0.06)}px ${bottomSafe}px;
+  padding: ${topSafe}px ${Math.round(w * 0.06)}px ${bottomSafe}px;
   gap: ${Math.round(h * 0.014)}px;
 }
 .content.band-top { justify-content: flex-start; }
@@ -219,6 +228,13 @@ body {
   font-weight: 800;
   line-height: 1.32;
   unicode-bidi: isolate;
+}
+
+/* Under the name, and clearly subordinate to it. */
+.bullet {
+  font-size: ${Math.round(h * 0.023)}px;
+  font-weight: 700;
+  line-height: 1.34;
 }
 
 /* The name IS the slide, so it takes the weight that the hook used to. */
@@ -383,6 +399,15 @@ export function renderSlideHtml(slide, { index, total, size = 'tiktok', cover = 
     )
     .join('');
 
+  // One or two short lines under the name, and only on decks whose shape asked
+  // for them. Smaller than the name deliberately: the name is what the slide
+  // IS, and these only answer "and what is that" for a place whose photograph
+  // cannot say it. A mountain gets none.
+  const bullets = (slide.bullets || [])
+    .slice(0, 2)
+    .map((b) => `<div class="bullet"><span class="slab">${escapeHtml(b.text)}</span></div>`)
+    .join('');
+
   // No number. lucyysarchive does not count them, and the count is already on
   // the cover and in TikTok's own slide indicator.
   const name = [slide.nameHe, slide.countryHe ? `, ${slide.countryHe}` : '']
@@ -396,6 +421,7 @@ export function renderSlideHtml(slide, { index, total, size = 'tiktok', cover = 
         slide.flag ? ` ${emojiHtml(slide.flag)}` : ''
       }</span></div>` +
       (fields ? `<div class="lines">${fields}</div>` : '') +
+      (bullets ? `<div class="lines">${bullets}</div>` : '') +
       `</div>`;
 
   // Nothing at the bottom of a fact slide. A URL burned into a photograph is

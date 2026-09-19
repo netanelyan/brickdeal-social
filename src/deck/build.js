@@ -11,6 +11,7 @@ import { pickCinematic, cinematicQueries } from '../images/curate.js';
 import { destinationPlaces, pick } from '../sources/tiyulplus.js';
 import { coverForDeck } from './ideas.js';
 import { fieldsFor, hasFields } from './fields.js';
+import { decideShape } from './shape.js';
 import { vocabForPrompt } from './emoji.js';
 
 // An idea becomes a deck, or it doesn't.
@@ -222,6 +223,97 @@ const SLIDE_SCHEMA_V2 = {
   required: ['usable', 'reject_reason', 'what_it_is', 'what_quote', 'practical', 'practical_quote', 'practical_emoji'],
   additionalProperties: false,
 };
+
+const BULLETS_SCHEMA = {
+  type: 'object',
+  properties: {
+    usable: { type: 'boolean', description: 'false when the page says nothing worth a line' },
+    bullets: {
+      type: 'array',
+      description: 'One or two short Hebrew lines. Two at the very most, and one is usually better.',
+      items: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'The line itself, under 30 Hebrew characters' },
+          quote: {
+            type: 'string',
+            description: 'The sentence in the PAGE TEXT that says it, character for character',
+          },
+        },
+        required: ['text', 'quote'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['usable', 'bullets'],
+  additionalProperties: false,
+};
+
+const BULLETS_SYSTEM = `You write one or two short lines under a place name on a travel slide.
+
+The photograph shows a handsome building; the viewer does not know what it is.
+Your lines answer that, and nothing else.
+
+WHAT EARNS A LINE
+
+What is inside, what happened there, what it is the oldest or only one of, what
+you actually do there. The thing someone would repeat to a friend.
+
+  הספרייה הבארוקית שנראית כמו סט של סרט
+  כאן קרתה מהפכת הקטיפה
+  בית הקפה שבו ישבו קפקא ואיינשטיין
+
+WHAT DOES NOT
+
+Opening hours. Ticket prices. How long to allow. Accessibility. The address.
+The founding date on its own. The architect. Anything a viewer would look up
+later rather than be interested in now. A line that could sit under any place
+of its type is not a line, it is filler.
+
+FORM
+
+Hebrew, under 30 characters, no full stop. Two lines at most and one is usually
+better. Every line needs a quote that appears in the PAGE TEXT character for
+character - copy it, do not tidy it. A line you cannot quote does not go on the
+slide, and a slide with one good line beats one with two where the second was
+invented.`;
+
+/** One or two lines under a name, for decks whose shape asked for them. */
+export async function draftBulletsFromEntry(place, pageText) {
+  const res = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 3000,
+    output_config: { effort: EFFORT, format: { type: 'json_schema', schema: BULLETS_SCHEMA } },
+    system: [{ type: 'text', text: BULLETS_SYSTEM, cache_control: { type: 'ephemeral' } }],
+    messages: [
+      {
+        role: 'user',
+        content: [`PLACE: ${place.nameHe}`, '', 'PAGE TEXT:', '---', pageText, '---'].join('\n'),
+      },
+    ],
+  });
+
+  recordUsage(res.usage, MODEL);
+  const text = res.content.find((b) => b.type === 'text')?.text;
+  if (!text) return [];
+
+  const parsed = JSON.parse(text);
+  if (!parsed.usable) return [];
+
+  const clean = (s) => String(s || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+  const bullets = (parsed.bullets || [])
+    .map((b) => ({ text: clean(b.text), quote: String(b.quote || '').trim() }))
+    .filter((b) => b.text && b.quote)
+    .slice(0, 2);
+
+  if (!bullets.length) return [];
+
+  // Same gate as everything else. A bullet is shorter than a sentence and just
+  // as capable of being wrong.
+  verifyEvidence({ evidence: bullets.map((b) => ({ claim: b.text, quote: b.quote })) }, pageText);
+
+  return bullets;
+}
 
 const FIELDS_SCHEMA = {
   type: 'object',
@@ -642,6 +734,16 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
 
   const withFields = hasFields(idea.kind);
 
+  // Asked once per deck, and applied to every slide in it. A mountain deck
+  // comes back "no" and costs nothing further; a city deck comes back "yes"
+  // and pays for one drafting call per place.
+  const shape = withFields
+    ? { bullets: false, why: 'this kind carries fixed fields instead' }
+    : await decideShape({ where: idea.where, kind: idea.kind, places: picked.slice(0, idea.want) }).catch((e) => {
+        console.error(`deck: shape decision failed, name only — ${e.message}`);
+        return { bullets: false, why: 'decision failed' };
+      });
+
   for (const place of picked) {
     if (slides.length >= idea.want) break;
 
@@ -650,11 +752,22 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
     // place's name is not a claim about it — which is the whole reason the
     // reference posts can carry seven slides without a word of prose.
     if (!withFields) {
+      // Bullets are best-effort: a place the page says nothing quotable about
+      // still gets its slide, with its name alone. Losing the place over a
+      // missing line would be the wrong trade.
+      const bullets = shape.bullets
+        ? await draftBulletsFromEntry(place, place.description).catch((e) => {
+            console.error(`deck: bullets for ${place.nameHe} failed — ${e.message}`);
+            return [];
+          })
+        : [];
+
       slides.push({
         n: slides.length + 1,
         nameHe: place.nameHe,
         nameEn: place.nameEn,
         fields: [],
+        bullets,
         sourceUrl: place.sourceUrl,
         sourceHost: 'tiyulplus.com',
         qid: place.id,
@@ -709,6 +822,9 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
     where: idea.where,
     category: idea.kind,
     via: 'tiyulplus',
+    // Reported so the approval message can say why a deck has lines under its
+    // names and the previous one did not.
+    shape,
     counts: {
       found: places.length,
       withWikidata: places.length,
@@ -739,12 +855,39 @@ export async function buildDeck(idea, { wantImages = true } = {}) {
   const slides = [];
   const dropped = [];
 
+  // Name only, always, on this route.
+  //
+  // It used to hunt an authority page per place and draft prose from it, which
+  // is why "mountains in Italy" came back with nothing: a peak has no official
+  // website, and the search landed on a cantonal news index. A mountain slide
+  // carries its name — there is no claim to source, so there is nothing to
+  // fail. The fields path stays for kinds that declare fields, and those still
+  // quote an authority.
+  const withFields = hasFields(idea.kind);
+
   for (const place of pool.places) {
     if (slides.length >= idea.want) break;
 
+    const nameHe = place.labelHe || place.labelEn || place.name;
+    const nameEn = place.labelEn || place.name;
+
+    if (!withFields) {
+      slides.push({
+        n: slides.length + 1,
+        nameHe,
+        nameEn,
+        fields: [],
+        bullets: [],
+        qid: place.qid,
+        sourceUrl: place.officialUrl || null,
+        sourceHost: place.officialUrl ? new URL(place.officialUrl).hostname.replace(/^www\./, '') : 'wikidata',
+      });
+      continue;
+    }
+
     const found = await findPage(place, idea.searchTerms);
     if (!found.url) {
-      dropped.push({ place: place.labelEn || place.name, why: found.why });
+      dropped.push({ place: nameEn, why: found.why });
       continue;
     }
 
@@ -752,34 +895,44 @@ export async function buildDeck(idea, { wantImages = true } = {}) {
     try {
       pageText = (await fetchReadable(found.url)).text || '';
     } catch (e) {
-      dropped.push({ place: place.labelEn || place.name, why: `fetch failed: ${e.message}`, url: found.url });
+      dropped.push({ place: nameEn, why: `fetch failed: ${e.message}`, url: found.url });
       continue;
     }
 
-    let slide;
     try {
-      slide = await draftSlide(place, pageText, { url: found.url });
+      const slide = await draftFieldsFromEntry({ ...place, nameHe, nameEn }, pageText, idea.kind);
+      slides.push({ ...slide, n: slides.length + 1, sourceUrl: found.url, via: found.via, domain: found.domain });
     } catch (e) {
       dropped.push({
-        place: place.labelEn || place.name,
+        place: nameEn,
         why: e instanceof RejectedError ? `${e.reason}: ${String(e.detail || '').slice(0, 120)}` : e.message,
         url: found.url,
       });
-      continue;
     }
+  }
 
-    if (wantImages) {
-      // Stock and catalogue only. The AI provider is excluded by policy rather
-      // than by preference: a generated image may never name a real place, and
-      // every slide here is about one.
-      slide.image = await findImage(
-        { imageQuery: `${slide.nameEn} ${idea.where}`, placeEn: slide.nameEn, countryEn: idea.where },
-        { order: ['catalogue', 'stock'] }
-      ).catch(() => null);
-      if (!slide.image) slide.imageMiss = `no photograph for "${slide.nameEn}"`;
+  // Same curation and the same drop rule as the other route: a place whose
+  // photograph cannot be found, or cannot be trusted to be that place, leaves.
+  if (wantImages) {
+    const coverSlot = {};
+    await imagesForSlides(slides, idea.where, { cover: coverSlot });
+    for (let i = slides.length - 1; i >= 0; i--) {
+      if (slides[i].image) continue;
+      dropped.push({ place: slides[i].nameEn, why: slides[i].imageMiss || 'no photograph' });
+      slides.splice(i, 1);
     }
+    slides.forEach((s, i) => {
+      s.n = i + 1;
+    });
+    pool.coverImage = coverSlot.image || null;
+  }
 
-    slides.push({ ...slide, via: found.via, domain: found.domain });
+  // Written last, from the places that survived, exactly as on the other route.
+  const cover = slides.length
+    ? await coverForDeck({ where: idea.where, kind: idea.kind, slides, hint: idea.titleHe }).catch(() => null)
+    : null;
+  if (cover) {
+    idea = { ...idea, ...cover };
   }
 
   return {
@@ -790,6 +943,8 @@ export async function buildDeck(idea, { wantImages = true } = {}) {
     category: idea.kind,
     counts: { ...pool.counts, asked: idea.want, built: slides.length },
     area: pool.area,
+    coverImage: pool.coverImage || null,
+    shape: { bullets: false, why: 'map route carries names only' },
     slides,
     dropped,
     // A deck that came up short is still publishable — five is a target, not a

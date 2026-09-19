@@ -140,13 +140,44 @@ export const CATEGORY_HE = {
   attraction: ['אתר היסטורי', 'אטרקציה', 'תצפית'],
   food: ['אוכל', 'בית קפה', 'מסעדה', 'אוכל כשר', 'שוק'],
   nature: ['טבע', 'פארק', 'גן'],
+  mountain: ['טבע', 'תצפית'],
   view: ['תצפית'],
   shopping: ['קניות', 'שוק'],
 };
 
+// What people actually type. "/deck Italy mountains" should not fail because
+// the registry spells it in the singular, and "attractions" is the natural
+// plural of a category nobody will type as "attraction".
+const SYNONYMS = {
+  mountains: 'mountain',
+  peaks: 'mountain',
+  hikes: 'trail',
+  hiking: 'trail',
+  trails: 'trail',
+  tracks: 'trail',
+  attractions: 'attraction',
+  sights: 'attraction',
+  museums: 'museum',
+  galleries: 'museum',
+  beaches: 'beach',
+  views: 'view',
+  viewpoints: 'view',
+  waterfalls: 'waterfall',
+  restaurants: 'food',
+  markets: 'food',
+  nature: 'nature',
+  parks: 'nature',
+};
+
+/** The registry's name for whatever was typed. */
+export const canonicalKind = (kind) => {
+  const k = String(kind || '').trim().toLowerCase();
+  return SYNONYMS[k] || k;
+};
+
 /** The places for one deck, best-rated first. */
 export function pick(places, { kind, want = 5 }) {
-  const wanted = CATEGORY_HE[kind];
+  const wanted = CATEGORY_HE[canonicalKind(kind)];
   // An unknown kind takes the whole city rather than nothing: a deck of "the
   // best of Prague" is a real deck, and refusing it because the word did not
   // match a category would be pedantry.
