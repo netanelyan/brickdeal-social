@@ -31,11 +31,7 @@ export async function renderDeckSize(deck, { size = 'tiktok', outDir = cardOutpu
   const cover = await renderToJpeg(
     renderSlideHtml({
       titleHe: deck.titleHe,
-      angleHe: deck.idea?.angleHe,
-      // The city, above the title. Falls back to the English region rather than
-      // printing nothing — a cover with no place on it is the one that gets
-      // scrolled past.
-      eyebrow: deck.idea?.eyebrowHe || deck.where,
+      emphasisHe: deck.idea?.emphasisHe,
       // Its own photograph, claimed before the slides took theirs. Opening on
       // the same picture the next slide shows reads as running out of material.
       image: deck.coverImage || deck.slides[0]?.image,

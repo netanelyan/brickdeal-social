@@ -114,26 +114,30 @@ story beats one that narrates it. Hyphens, never em dashes.
 
 HOW A COVER IS ACTUALLY WRITTEN
 
+The cover is ONE line of text. Not a title plus a subtitle, not a city label
+above it - one line. Everything else belongs on the slides or nowhere.
+
+It counts the places and names the destination, and one word in it is set
+louder than the rest. The posts this channel is modelled on use exactly this:
+
+  "7 reasons why you HAVE to visit WYOMING"
+  "10/10 hikes in the Dolomites you HAVE to experience"
+
+In Hebrew:
+
+  5 מקומות בפראג שאסור לפספס
+  טופ 5 מסלולים בדולומיטים
+  7 סיבות לטוס לוויומינג
+
 Hebrew social writes the number as a NUMERAL and borrows "טופ": טופ 5, טופ 3,
-"5 מקומות", "3 דברים". It does not spell it out. "חמישה מוזיאונים" is how a
-newspaper writes, and it is the single clearest tell that a page is not a
-person - write "טופ 5 מוזיאונים" or "5 מוזיאונים".
+"5 מקומות". It does not spell it out - "חמישה מוזיאונים" is how a newspaper
+writes, and it is the clearest tell that a page is not a person.
 
-THE SECOND LINE
+Count correctly. A deck of four places does not say 5.
 
-One short line under the title, and it is a hook, not a summary. Under 34
-characters.
-
-Good:  שמרו לטיול הבא
-       רובם לא יודעים על 3 ו-4
-       המקום האחרון שבר אותי
-Bad:   לראות את העיר מלמעלה, כשכל נקודה מגלה אותה בחוויה אחרת
-       שעות פתיחה, מחירי כניסה וכמה זמן להקצות
-       חמישה מקומות ששווה לבקר בהם בפראג
-
-The bad ones are guidebook sentences: they explain the deck instead of making
-somebody want it, and the second one is a table of contents. If nothing good
-comes to mind, "שמרו לטיול הבא" beats a sentence that explains.`;
+NEVER on a cover: a second explanatory line, a city label above the title, a
+list of what the slides contain, opening hours, prices, or the words
+"שעות פתיחה" in any arrangement whatsoever.`;
 
 export const hasApiKey = () =>
   Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
@@ -184,16 +188,25 @@ export async function proposeIdeas({ count = 4, recent = [], today = new Date() 
 const TITLE_SCHEMA = {
   type: 'object',
   properties: {
-    title_he: { type: 'string', description: 'The cover line, Hebrew, under 40 characters' },
-    eyebrow_he: { type: 'string', description: 'The city or region in Hebrew, one or two words' },
-    angle_he: { type: 'string', description: 'One Hebrew sentence under the title: what the viewer gets' },
+    title_he: {
+      type: 'string',
+      description:
+        'The cover, Hebrew, under 48 characters. Counts the places and names the destination. The ONLY text on the cover.',
+    },
+    emphasis_he: {
+      type: 'string',
+      description:
+        'One word or short phrase copied exactly from title_he, to be set louder than the rest. Usually the destination or the word carrying the urgency.',
+    },
+    eyebrow_he: { type: 'string', description: 'Unused. Return an empty string.' },
+    angle_he: { type: 'string', description: 'Unused. Return an empty string.' },
     search_terms: {
       type: 'array',
       description: 'English words likely to appear in the title of an official page about such a place',
       items: { type: 'string' },
     },
   },
-  required: ['title_he', 'eyebrow_he', 'angle_he', 'search_terms'],
+  required: ['title_he', 'emphasis_he', 'eyebrow_he', 'angle_he', 'search_terms'],
   additionalProperties: false,
 };
 
@@ -220,19 +233,15 @@ export async function coverForDeck({ where, kind, slides = [], hint = '' }) {
       {
         role: 'user',
         content: [
-          `A deck about ${where} is finished. These are the slides, in order:`,
+          `A deck about ${where} is finished. It has ${slides.length} places, in this order:`,
           '',
-          ...slides.map((s, i) => `${i + 1}. ${s.nameHe} - ${s.hook?.text || ''}`),
+          ...slides.map((s, i) => `${i + 1}. ${s.nameHe}`),
           '',
           hint ? `The working title was: ${hint}` : null,
           '',
-          'Write its cover. The title must describe THESE places and nothing else -',
-          'if they are castles and squares, it is not a deck about museums. Count them',
-          'correctly if you name a number.',
-          '',
-          'The angle is one line, and it is NOT a list of what the slides contain and',
-          'NOT logistics. No opening hours, no prices, no "how long each one takes".',
-          'It is the reason to watch: what someone gets from these five in particular.',
+          `Write its cover: ONE line, naming ${slides.length} and the destination, and`,
+          'describing THESE places - if they are castles and squares it is not a deck',
+          'about museums. Then copy one word out of it as the emphasis.',
         ]
           .filter((l) => l !== null)
           .join('\n'),
@@ -248,8 +257,12 @@ export async function coverForDeck({ where, kind, slides = [], hint = '' }) {
   const clean = (s) => String(s || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
   return {
     titleHe: clean(parsed.title_he),
-    eyebrowHe: clean(parsed.eyebrow_he),
-    angleHe: clean(parsed.angle_he),
+    // Copied out of the title rather than invented, so the renderer can find it
+    // in the string and set it louder. A phrase that is not in the title is
+    // dropped rather than appended.
+    emphasisHe: clean(parsed.emphasis_he),
+    eyebrowHe: '',
+    angleHe: '',
   };
 }
 

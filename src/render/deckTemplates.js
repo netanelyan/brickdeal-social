@@ -202,11 +202,26 @@ body {
   margin-top: ${Math.round(h * 0.012)}px;
 }
 
+/* The one word set louder on the cover. Hebrew has no capitals, so colour and
+   nothing else does what "WYOMING" does in the reference. */
+.emph { color: #FFD84D; }
+
+/* A field line: icon, label, value. Same four every slide in a deck that has
+   them, which is what makes them scan rather than read. */
+.field {
+  font-size: ${Math.round(h * 0.03)}px;
+  font-weight: 800;
+  line-height: 1.32;
+  unicode-bidi: isolate;
+}
+
+/* The name IS the slide, so it takes the weight that the hook used to. */
 .place {
-  font-size: ${Math.round(h * 0.042)}px;
+  font-size: ${Math.round(h * 0.046)}px;
   font-weight: 900;
   line-height: 1.32;
 }
+.place.long { font-size: ${Math.round(h * 0.038)}px; }
 
 /* Ours, and it has to read as an opinion rather than a measurement. Warm,
    loud, and set apart from the sourced lines above it - 11/10 is the format's
@@ -282,6 +297,33 @@ body {
 .src { direction: ltr; }
 `;
 
+/**
+ * The cover line, with one word set louder.
+ *
+ * The reference covers shout a single word — "7 reasons why you HAVE to visit
+ * WYOMING" — and Hebrew has no capitals to do it with, so the emphasis is
+ * carried by size and colour instead. The word is matched in the title rather
+ * than appended: a model that returns an emphasis which is not in the line has
+ * misunderstood, and the right response is to set the line plainly, not to
+ * invent a layout for it.
+ */
+export function coverTitle(title, emphasis) {
+  const t = String(title || '');
+  const e = String(emphasis || '').trim();
+  const cls = `cover-title${coverSize(t)}`;
+
+  const at = e ? t.indexOf(e) : -1;
+  if (at < 0) return `<div class="${cls}"><span class="slab">${escapeHtml(t)}</span></div>`;
+
+  return (
+    `<div class="${cls}"><span class="slab">` +
+    escapeHtml(t.slice(0, at)) +
+    `<span class="emph">${escapeHtml(e)}</span>` +
+    escapeHtml(t.slice(at + e.length)) +
+    `</span></div>`
+  );
+}
+
 /** Measured in characters, which for one script at one weight is close enough. */
 export const coverSize = (title) => {
   const n = String(title || '').length;
@@ -322,22 +364,30 @@ export function renderSlideHtml(slide, { index, total, size = 'tiktok', cover = 
   // makes the background hug the words rather than the column.
   const slab = (cls, text) => `<div class="${cls}"><span class="slab">${escapeHtml(text)}</span></div>`;
 
+  // A slide is a NAME, numbered, and then nothing — unless the category has
+  // fields, in which case it is the same fields in the same order every time.
+  // No sentence ever appears on a slide: prose is what made these read like a
+  // guidebook, and no amount of typography fixed it.
+  const fields = (slide.fields || [])
+    .map(
+      (f) =>
+        `<div class="field"><span class="slab"><span class="em">${emojiHtml(f.emoji)}</span> ${escapeHtml(
+          f.labelHe
+        )}: ${escapeHtml(f.value)}</span></div>`
+    )
+    .join('');
+
+  const name = [slide.n ? `${slide.n}. ` : '', slide.nameHe, slide.countryHe ? `, ${slide.countryHe}` : '']
+    .join('')
+    .trim();
+
   const body = cover
-    ? `<div class="plate">` +
-      (slide.eyebrow ? slab('eyebrow', slide.eyebrow) : '') +
-      slab(`cover-title${coverSize(slide.titleHe)}`, slide.titleHe) +
-      (slide.angleHe ? slab('cover-angle', slide.angleHe) : '') +
-      `</div>`
+    ? `<div class="plate">${coverTitle(slide.titleHe, slide.emphasisHe)}</div>`
     : `<div class="plate">` +
-      slab('place', slide.nameHe) +
-      (slide.hook ? slab(`hook${slide.hook.overlong ? ' long' : ''}`, slide.hook.text) : '') +
-      (lines ? `<div class="lines">${lines}</div>` : '') +
-      // The number alone, with an emoji. Labelling it "הדירוג שלנו" was the
-      // tutorial voice again: on a real page the score is just there, and
-      // everyone already knows whose opinion it is.
-      (slide.score
-        ? `<div class="score"><span class="slab">${escapeHtml(slide.score)} ${emojiHtml(scoreEmoji(slide.score))}</span></div>`
-        : '') +
+      `<div class="place${coverSize(name) === ' long' ? ' long' : ''}"><span class="slab">${escapeHtml(name)}${
+        slide.flag ? ` ${emojiHtml(slide.flag)}` : ''
+      }</span></div>` +
+      (fields ? `<div class="lines">${fields}</div>` : '') +
       `</div>`;
 
   // Nothing at the bottom of a fact slide. A URL burned into a photograph is

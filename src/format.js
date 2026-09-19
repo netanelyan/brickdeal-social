@@ -114,9 +114,10 @@ export function deckApprovalMessage(cand) {
 
   lines.push(`📑 ${deck.slides.length + 1} שקופיות (שער + ${deck.slides.length} מקומות):`);
   for (const [i, s] of deck.slides.entries()) {
-    // The hook is what sells the slide, so it is what you read when deciding
-    // whether to approve it — a count of facts tells you nothing about that.
-    lines.push(`   ${i + 2}. ${s.nameHe} — ${s.hook?.text || '(אין וו)'} · ${s.sourceHost}`);
+    // A slide is a name and, where the category has them, a few fields. The
+    // fields are shown because they are the only part that can be wrong.
+    const fields = (s.fields || []).map((f) => `${f.labelHe}: ${f.value}`).join(' · ');
+    lines.push(`   ${i + 2}. ${s.nameHe}${fields ? ` — ${fields}` : ''}`);
   }
   lines.push('');
 
@@ -268,12 +269,18 @@ export function evidenceReport(cand) {
   // thing you need in order to check it — a flat list of quotes from six
   // different websites is unreadable.
   if (cand.kind === 'deck') {
-    const blocks = (cand.deck?.slides || []).map((s, i) => {
-      const all = [...(s.hook ? [{ text: s.hook.text, quote: s.hook.quote }] : []), ...s.lines];
-      const quotes = all.map((l) => `   ${l.text}\n   « ${String(l.quote).slice(0, 240)} »`);
-      return [`${i + 2}. ${s.nameHe}`, `   ${s.sourceUrl}`, ...quotes].join('\n');
+    // A name-only deck has nothing to quote, and saying so is the honest
+    // answer: the only assertion on those slides is that a place is called
+    // what our own page calls it.
+    const withFields = (cand.deck?.slides || []).filter((s) => s.fields?.length);
+    if (!withFields.length) {
+      return 'במצגת הזו אין טענות לצטט - כל שקופית נושאת שם מקום בלבד, מתוך הדף שלנו.';
+    }
+    const blocks = withFields.map((s) => {
+      const quotes = s.fields.map((f) => `   ${f.labelHe}: ${f.value}\n   « ${String(f.quote || '').slice(0, 240)} »`);
+      return [`${s.n}. ${s.nameHe}`, `   ${s.sourceUrl}`, ...quotes].join('\n');
     });
-    return blocks.length ? `📎 הציטוטים, שקופית אחר שקופית:\n\n${blocks.join('\n\n')}` : 'אין ציטוטים שמורים למצגת הזו';
+    return `📎 הציטוטים, שקופית אחר שקופית:\n\n${blocks.join('\n\n')}`;
   }
 
   if (!cand.evidence?.length) return 'אין ציטוטים שמורים לפריט הזה';

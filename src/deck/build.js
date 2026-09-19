@@ -6,8 +6,8 @@ import { fetchReadable } from '../fetchPage.js';
 import { verifyEvidence, RejectedError } from '../verify.js';
 import { findImage } from '../images.js';
 import { destinationPlaces, pick } from '../sources/tiyulplus.js';
-import { scoreFor } from './rating.js';
 import { coverForDeck } from './ideas.js';
+import { fieldsFor, hasFields } from './fields.js';
 import { vocabForPrompt } from './emoji.js';
 
 // An idea becomes a deck, or it doesn't.
@@ -219,6 +219,117 @@ const SLIDE_SCHEMA_V2 = {
   required: ['usable', 'reject_reason', 'what_it_is', 'what_quote', 'practical', 'practical_quote', 'practical_emoji'],
   additionalProperties: false,
 };
+
+const FIELDS_SCHEMA = {
+  type: 'object',
+  properties: {
+    usable: { type: 'boolean', description: 'false when the page does not state these values' },
+    reject_reason: { type: 'string', description: 'English, short, when usable is false' },
+    values: {
+      type: 'array',
+      description: 'One entry per requested field, in the order they were requested.',
+      items: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', description: 'The field key exactly as requested' },
+          value: {
+            type: 'string',
+            description:
+              'The value only, no label and no emoji - "5.3 ק\\"מ", "קל", "שעה וחצי". Empty string when the page does not say.',
+          },
+          quote: {
+            type: 'string',
+            description: 'The sentence in the PAGE TEXT stating it, character for character. Empty when no value.',
+          },
+        },
+        required: ['key', 'value', 'quote'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['usable', 'reject_reason', 'values'],
+  additionalProperties: false,
+};
+
+const FIELDS_SYSTEM = `You fill in a fixed set of fields for one place on a Hebrew travel slideshow.
+
+This is not writing. Every slide in the deck carries the same fields in the same
+order, and your job is to read the page and supply the VALUES - nothing else.
+
+  a value:      "5.3 ק"מ"   "קל"   "שעה וחצי"   "45 דקות ברכבת"
+  not a value:  "מסלול קל של 5.3 ק"מ שלוקח בערך שעה וחצי"
+
+No labels, no emoji, no sentences, no adjectives that are not in the source.
+
+Every value needs a quote that appears in the PAGE TEXT character for
+character. A field the page does not state gets an empty value and an empty
+quote - that is normal and it is far better than a guess. If the page states
+none of them, set usable to false.`;
+
+/** Fill one slide's fields from its entry, quoting every value. */
+export async function draftFieldsFromEntry(place, pageText, kind) {
+  const spec = fieldsFor(kind);
+
+  const res = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 4000,
+    output_config: { effort: EFFORT, format: { type: 'json_schema', schema: FIELDS_SCHEMA } },
+    system: [{ type: 'text', text: FIELDS_SYSTEM, cache_control: { type: 'ephemeral' } }],
+    messages: [
+      {
+        role: 'user',
+        content: [
+          `PLACE: ${place.nameHe}`,
+          '',
+          'FIELDS TO FILL, in order:',
+          ...spec.map((f) => `  ${f.key} — ${f.labelHe}`),
+          '',
+          'PAGE TEXT (the only thing you may draw from):',
+          '---',
+          pageText,
+          '---',
+        ].join('\n'),
+      },
+    ],
+  });
+
+  recordUsage(res.usage, MODEL);
+  if (res.stop_reason === 'refusal') throw new RejectedError('refused', 'field drafting refused');
+
+  const text = res.content.find((b) => b.type === 'text')?.text;
+  if (!text) throw new RejectedError('no_text', 'field drafting returned no text');
+
+  const parsed = JSON.parse(text);
+  if (!parsed.usable) throw new RejectedError('thin_entry', parsed.reject_reason || 'page states none of the fields');
+
+  const clean = (s) => String(s || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+  const byKey = new Map((parsed.values || []).map((v) => [v.key, v]));
+
+  const fields = [];
+  const evidence = [];
+  for (const f of spec) {
+    const got = byKey.get(f.key);
+    const value = clean(got?.value);
+    if (!value) continue;
+    fields.push({ ...f, value, quote: String(got.quote || '').trim() });
+    evidence.push({ claim: `${f.labelHe}: ${value}`, quote: String(got.quote || '').trim() });
+  }
+
+  if (!fields.length) throw new RejectedError('thin_entry', 'no field had a value');
+
+  // Unchanged: the same gate every other post goes through. Fields are shorter
+  // than prose but they are still claims, and a wrong distance is a wrong claim.
+  verifyEvidence({ evidence }, pageText);
+
+  return {
+    nameHe: place.nameHe,
+    nameEn: place.nameEn,
+    fields,
+    sourceUrl: place.sourceUrl,
+    sourceHost: 'tiyulplus.com',
+    qid: place.id,
+  };
+}
 
 /**
  * One slide, written from our own destination page.
@@ -468,12 +579,31 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
   const slides = [];
   const dropped = [];
 
+  const withFields = hasFields(idea.kind);
+
   for (const place of picked) {
     if (slides.length >= idea.want) break;
+
+    // A name-only slide costs nothing and cannot fail. There is no drafting
+    // call because there is nothing to draft, and nothing to verify because a
+    // place's name is not a claim about it — which is the whole reason the
+    // reference posts can carry seven slides without a word of prose.
+    if (!withFields) {
+      slides.push({
+        n: slides.length + 1,
+        nameHe: place.nameHe,
+        nameEn: place.nameEn,
+        fields: [],
+        sourceUrl: place.sourceUrl,
+        sourceHost: 'tiyulplus.com',
+        qid: place.id,
+      });
+      continue;
+    }
+
     try {
-      const slide = await draftSlideFromEntry(place, place.description);
-      slide.score = scoreFor(place.id, { top: slides.length === 0 });
-      slides.push(slide);
+      const slide = await draftFieldsFromEntry(place, place.description, idea.kind);
+      slides.push({ ...slide, n: slides.length + 1 });
     } catch (e) {
       dropped.push({
         place: place.nameHe,
@@ -574,7 +704,7 @@ export async function buildDeck(idea, { wantImages = true } = {}) {
       if (!slide.image) slide.imageMiss = `no photograph for "${slide.nameEn}"`;
     }
 
-    slides.push({ ...slide, via: found.via, domain: found.domain, score: scoreFor(place.qid, { top: slides.length === 0 }) });
+    slides.push({ ...slide, via: found.via, domain: found.domain });
   }
 
   return {

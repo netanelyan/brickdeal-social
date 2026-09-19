@@ -1191,23 +1191,22 @@ const deckFixture = {
     dropped: [{ place: 'Kafka Museum', why: 'fetch failed: HTTP 403' }],
     slides: [
       {
+        n: 1,
         nameHe: 'המוזיאון הלאומי',
         nameEn: 'National Museum',
-        sourceHost: 'nm.cz',
+        sourceHost: 'tiyulplus.com',
         sourceUrl: 'https://www.nm.cz/en/visit',
-        hook: { text: 'כיפת הזכוכית שכולם מצלמים', quote: 'the glass dome visitors photograph most' },
-        lines: [
-          { emoji: '🕘', text: 'סגור בימי שני', quote: 'Closed on Mondays' },
-          { emoji: '🎟️', text: 'כניסה 250 קרונות', quote: 'Admission 250 CZK' },
+        fields: [
+          { key: 'distance', labelHe: 'מרחק', emoji: '📏', value: '5.3 ק\"מ', quote: 'Admission 250 CZK' },
         ],
       },
       {
+        n: 2,
         nameHe: 'הגלריה הלאומית',
         nameEn: 'National Gallery',
-        sourceHost: 'ngprague.cz',
+        sourceHost: 'tiyulplus.com',
         sourceUrl: 'https://www.ngprague.cz/en/visit',
-        hook: { text: 'אוסף המודרניסטים הגדול בצ׳כיה', quote: 'the largest collection of modern art in Czechia' },
-        lines: [{ emoji: '🕘', text: 'סגור בימי שני', quote: 'Closed on Mondays' }],
+        fields: [],
       },
     ],
   },
@@ -1227,44 +1226,74 @@ ok('every source URL is in the message', deckMsg.includes('https://www.nm.cz/en/
 
 const deckEv = evidenceReport(deckFixture);
 ok('evidence is grouped per slide, not flattened', deckEv.includes('המוזיאון הלאומי') && deckEv.includes('Admission 250 CZK'));
-ok('with the page each quote came from', deckEv.includes('ngprague.cz'));
+ok('with the page each quote came from', deckEv.includes('nm.cz'));
 
 const dcap = deckCaption(deckFixture.deck);
 ok('the caption opens with the angle, not the title', dcap.startsWith('מה פתוח'));
 ok('and lists the places in order', dcap.indexOf('1. המוזיאון') < dcap.indexOf('2. הגלריה'));
 ok('the title is not repeated - the cover slide already carries it', !dcap.includes('המוזיאונים של פראג'));
 
-// Slide rendering is where a verified fact can still be lost, so the template
-// is checked for the two ways that happens: a dropped line, and text that
-// silently overflows the image.
+// A slide is a numbered NAME, and fields only where the category has them.
+// Never a sentence: prose on a slide is what made these read like a guidebook,
+// and it survived every typographic fix because it was never typographic.
 const slideHtml = renderSlideHtml(deckFixture.deck.slides[0], { index: 2, total: 3, size: 'tiktok' });
-ok('every verified line reaches the slide', slideHtml.includes('סגור בימי שני') && slideHtml.includes('כניסה 250 קרונות'));
+ok('the name is numbered, the way a list counts down', slideHtml.includes('1. המוזיאון הלאומי'));
+ok('a field renders as icon, label, value', slideHtml.includes('מרחק: 5.3'));
+ok('no score on a slide - it belongs in the cover line', !slideHtml.includes('class="score"'));
 
-// The hook is the only line that has to be interesting, so it is the one the
-// slide cannot ship without and the one the approval message leads with.
-ok('the hook is on the slide', slideHtml.includes('כיפת הזכוכית שכולם מצלמים'));
-ok('the approval message leads each slide with its hook', deckMsg.includes('כיפת הזכוכית שכולם מצלמים'));
-ok('a slide with no hook says so rather than looking complete', deckApprovalMessage({
-  ...deckFixture,
-  deck: { ...deckFixture.deck, slides: [{ ...deckFixture.deck.slides[0], hook: null }] },
-}).includes('אין וו'));
-ok('the hook is quoted like everything else', evidenceReport(deckFixture).includes('the glass dome visitors photograph most'));
+const bare = renderSlideHtml({ n: 3, nameHe: 'גשר קרל', fields: [] }, { index: 4, total: 6 });
+ok('a name-only slide is just the name', bare.includes('3. גשר קרל'));
+ok('and carries nothing else at all', !bare.includes('class="field"'));
+
+// The country is named only when the deck spans countries; in a one-city deck
+// every slide would repeat the same word.
+ok(
+  'a cross-country deck names the country and flies the flag',
+  renderSlideHtml({ n: 1, nameHe: 'דולומיטים', countryHe: 'איטליה', flag: '🇮🇹', fields: [] }, { index: 2, total: 3 }).includes(
+    'דולומיטים, איטליה'
+  )
+);
+
+// The cover is one line with one word louder. Hebrew has no capitals, so the
+// emphasis is colour; a word the model did not take from the title is dropped
+// rather than appended.
+const coverHtml = renderSlideHtml(
+  { titleHe: '5 מקומות בפראג שאסור לפספס', emphasisHe: 'בפראג' },
+  { index: 1, total: 6, cover: true }
+);
+ok('the emphasis is set apart', coverHtml.includes('<span class="emph">בפראג</span>'));
+ok('and the rest of the line survives intact', coverHtml.includes('5 מקומות') && coverHtml.includes('שאסור לפספס'));
+ok(
+  'an emphasis that is not in the title is ignored, not appended',
+  !renderSlideHtml({ titleHe: '5 מקומות בפראג', emphasisHe: 'וויומינג' }, { index: 1, total: 6, cover: true }).includes(
+    'וויומינג'
+  )
+);
+ok('no eyebrow and no second line on a cover', !coverHtml.includes('class="eyebrow"') && !coverHtml.includes('class="cover-angle"'));
+
+// A name is not a claim, so a name-only deck has nothing to quote - and the
+// evidence report says exactly that rather than showing an empty list.
+ok(
+  'a name-only deck reports that there is nothing to quote',
+  evidenceReport({ kind: 'deck', deck: { slides: [{ n: 1, nameHe: 'x', fields: [] }] } }).includes('אין טענות לצטט')
+);
+ok('a field-bearing deck still shows its quotes', evidenceReport(deckFixture).includes('Admission 250 CZK'));
 
 // A cover set at full size wraps to four lines and eats the photograph.
 eq('a short title stays large', coverSize('חמישה מוזיאונים'), '');
 eq('a medium one steps down', coverSize('המוזיאונים של פראג ששווים'), ' mid');
 eq('a long one steps down twice', coverSize('המוזיאונים של פראג ששווים את הכרטיס ועוד'), ' long');
 
-// Practical lines are capped at two. Four of them over a photograph is the wall
-// of small text the first decks produced.
-ok('no more than two practical lines reach a slide', renderSlideHtml(
-  { nameHe: 'x', hook: { text: 'h' }, lines: [1, 2, 3, 4].map((n) => ({ emoji: '•', text: `line${n}` })) },
+// Every line on its own slab was the app-text-tool experiment; the references
+// set cream type straight on the photograph instead, so the slab now carries
+// colour and outline rather than a background. What matters is that each line
+// is separately wrapped, or they run together - which is what you could not
+// read on a phone.
+ok('each line is wrapped separately', (slideHtml.match(/class="slab"/g) || []).length >= 2);
+ok('a long name steps down rather than overflowing', renderSlideHtml(
+  { n: 1, nameHe: 'x'.repeat(40), fields: [] },
   { index: 2, total: 3 }
-).split('class="line').length - 1 <= 4);
-ok('an overlong line renders smaller rather than being dropped', renderSlideHtml(
-  { ...deckFixture.deck.slides[0], lines: [{ emoji: '🕘', text: 'x'.repeat(60), quote: 'q', overlong: true }] },
-  { index: 2, total: 3, size: 'tiktok' }
-).includes('line long'));
+).includes('place long'));
 // A URL burned into a photograph is the clearest sign a post was made by a
 // company. The sourcing did not weaken: every slide's URL is in the approval
 // message, which is where the decision is actually made.
@@ -1280,8 +1309,7 @@ ok('but it is on the cover', renderSlideHtml({ titleHe: 'x' }, { index: 1, total
 // Legibility the way the app's own text tool does it: each line on its own
 // rounded slab. A heavy outline read as a badly edited image and a single
 // panel behind the block read as an advertisement.
-ok('every line sits on its own slab', (slideHtml.match(/class="slab"/g) || []).length >= 3);
-ok('slabs clone across a wrapped line rather than splitting', slideHtml.includes('box-decoration-break: clone'));
+ok('a wrapped line does not break into two ragged pieces', slideHtml.includes('box-decoration-break: clone'));
 // TikTok Sans has no Hebrew, so it can only ever carry Latin and digits; the
 // Hebrew falls through to Rubik, a display face, rather than to Heebo, which is
 // a text face and reads as a caption at this size.

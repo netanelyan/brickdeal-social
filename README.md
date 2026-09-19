@@ -48,10 +48,18 @@ sources → rank → draft (Claude) → verify → render → Telegram → you t
 A **card** is one verified claim from one source, 1080×1350, and it goes to
 Instagram and the Telegram channel. That is the loop above.
 
-A **deck** is a slideshow — a cover and five to seven places, each with two to
-four facts — and it goes to TikTok and Instagram. It is built the other way
-round: Claude proposes what would be worth watching, and only then does the
-pipeline go looking for whether it can be sourced.
+A **deck** is a slideshow — a cover and five to seven places — and it goes to
+TikTok and Instagram. It is built the other way round: Claude proposes what
+would be worth watching, and only then does the pipeline go looking for whether
+it can be sourced.
+
+**A slide carries a numbered place name and nothing else.** That is copied from
+the posts this channel is modelled on, and it was arrived at the hard way: the
+first decks put a sentence under each name, and a sentence on a slide reads as a
+guidebook no matter how it is set. Fields are added only for categories where a
+number decides which one you pick — distance and difficulty choose a hike, and
+opening hours choose nothing — and then the same fields appear in the same order
+on every slide, because consistency is what makes them scan.
 
 ```
 idea (Claude) → places (OpenStreetMap + Wikidata) → an authority per place
