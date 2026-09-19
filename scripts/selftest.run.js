@@ -1282,7 +1282,11 @@ ok('but it is on the cover', renderSlideHtml({ titleHe: 'x' }, { index: 1, total
 // panel behind the block read as an advertisement.
 ok('every line sits on its own slab', (slideHtml.match(/class="slab"/g) || []).length >= 3);
 ok('slabs clone across a wrapped line rather than splitting', slideHtml.includes('box-decoration-break: clone'));
-ok('Latin and digits are set in TikTok Sans', slideHtml.includes("font-family: 'TikTok Sans', 'Heebo'"));
+// TikTok Sans has no Hebrew, so it can only ever carry Latin and digits; the
+// Hebrew falls through to Rubik, a display face, rather than to Heebo, which is
+// a text face and reads as a caption at this size.
+ok('Latin and digits are set in TikTok Sans', slideHtml.includes("font-family: 'TikTok Sans', 'Rubik'"));
+ok('the Hebrew display face is bundled too', slideHtml.includes("font-family: 'Rubik'"));
 eq('TikTok slides are 9:16', `${SIZES.tiktok.w}x${SIZES.tiktok.h}`, '1080x1920');
 eq('Instagram slides are 4:5, because the feed crops anything taller', `${SIZES.instagram.w}x${SIZES.instagram.h}`, '1080x1350');
 ok('a slide with no photograph still renders', renderSlideHtml({ nameHe: 'x', lines: [] }, { index: 2, total: 3 }).includes('linear-gradient'));

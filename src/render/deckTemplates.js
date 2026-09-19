@@ -1,4 +1,4 @@
-import { palette, heeboDataUri, tiktokSansDataUri, escapeHtml, siteMark } from './theme.js';
+import { palette, heeboDataUri, tiktokSansDataUri, rubikDataUri, escapeHtml, siteMark } from './theme.js';
 import { scoreEmoji } from '../deck/emoji.js';
 import { emojiHtml } from './emojiArt.js';
 
@@ -60,14 +60,31 @@ const css = ({ w, h, bottomSafe }) => `
   font-style: normal;
   font-display: block;
 }
+/* Rubik carries the Hebrew here, not Heebo. Heebo is a text face and at this
+   size over a photograph it reads as a caption; Rubik is a display face with
+   real weight at 800/900, and it is what Israeli social graphics are set in. */
+@font-face {
+  font-family: 'Rubik';
+  src: url('${rubikDataUri(800)}') format('truetype');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'Rubik';
+  src: url('${rubikDataUri(900)}') format('truetype');
+  font-weight: 900;
+  font-style: normal;
+  font-display: block;
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: ${w}px; height: ${h}px; overflow: hidden; }
 body {
   direction: rtl;
   text-align: center;
   /* TikTok Sans first so Latin and digits take the platform's letterforms;
-     Hebrew has no coverage there and falls through to Heebo per glyph. */
-  font-family: 'TikTok Sans', 'Heebo', sans-serif;
+     Hebrew has no coverage there and falls through to Rubik per glyph. */
+  font-family: 'TikTok Sans', 'Rubik', 'Heebo', sans-serif;
   -webkit-font-smoothing: antialiased;
   background: ${palette.ink};
   color: #FFF8E6;
@@ -94,13 +111,18 @@ body {
    translucent slab, sized to the words. That is the shape people recognise,
    and it is the reason it is legible over any photograph. box-decoration-break
    is what keeps a wrapped line from breaking into two ragged slabs. */
+/* Real space between lines, not just leading.
+   Every line here is its own thought - a name, what the place is, one fact, a
+   score - and set with the leading alone they read as one paragraph. The gap
+   is what makes them scan as a list. */
 .plate {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: ${Math.round(h * 0.004)}px;
+  gap: ${Math.round(h * 0.018)}px;
   max-width: 94%;
 }
+.lines { gap: ${Math.round(h * 0.014)}px !important; }
 .slab {
   display: inline;
   box-decoration-break: clone;
@@ -114,7 +136,14 @@ body {
   color: ${CREAM};
   paint-order: stroke fill;
   -webkit-text-stroke: ${Math.round(h * 0.0028)}px ${BRONZE};
-  text-shadow: 0 ${Math.round(h * 0.0025)}px ${Math.round(h * 0.008)}px rgba(0,0,0,0.5);
+  /* Two shadows doing different jobs. The tight one is a contact shadow: it
+     sits right under each letter and is what separates one line from the line
+     beneath it, which is the thing that was missing - the lines ran together
+     and you could not see where one ended. The wide one lifts the whole block
+     off a busy photograph. Neither should be visible as a shadow. */
+  text-shadow:
+    0 ${Math.round(h * 0.0018)}px ${Math.round(h * 0.0022)}px rgba(0,0,0,0.78),
+    0 ${Math.round(h * 0.004)}px ${Math.round(h * 0.016)}px rgba(0,0,0,0.42);
   line-height: 1.34;
 }
 

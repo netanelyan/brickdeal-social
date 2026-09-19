@@ -110,7 +110,30 @@ Do not repeat a deck that has already been published; the recent ones are listed
 VOICE
 
 Hebrew, warm, specific, no hype. A cover that names a subject and withholds the
-story beats one that narrates it. Hyphens, never em dashes.`;
+story beats one that narrates it. Hyphens, never em dashes.
+
+HOW A COVER IS ACTUALLY WRITTEN
+
+Hebrew social writes the number as a NUMERAL and borrows "טופ": טופ 5, טופ 3,
+"5 מקומות", "3 דברים". It does not spell it out. "חמישה מוזיאונים" is how a
+newspaper writes, and it is the single clearest tell that a page is not a
+person - write "טופ 5 מוזיאונים" or "5 מוזיאונים".
+
+THE SECOND LINE
+
+One short line under the title, and it is a hook, not a summary. Under 34
+characters.
+
+Good:  שמרו לטיול הבא
+       רובם לא יודעים על 3 ו-4
+       המקום האחרון שבר אותי
+Bad:   לראות את העיר מלמעלה, כשכל נקודה מגלה אותה בחוויה אחרת
+       שעות פתיחה, מחירי כניסה וכמה זמן להקצות
+       חמישה מקומות ששווה לבקר בהם בפראג
+
+The bad ones are guidebook sentences: they explain the deck instead of making
+somebody want it, and the second one is a table of contents. If nothing good
+comes to mind, "שמרו לטיול הבא" beats a sentence that explains.`;
 
 export const hasApiKey = () =>
   Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);

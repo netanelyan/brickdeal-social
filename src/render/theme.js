@@ -67,6 +67,26 @@ export function tiktokSansDataUri(weight = 700) {
   return tiktokCache.get(file);
 }
 
+// Rubik, for the slideshow's Hebrew.
+//
+// Heebo is a text face — it extends Roboto, and it is the right choice for a
+// card that wants to read as a publication. Set at 60px over a photograph it
+// looks like a caption rather than a title: the strokes are too even and the
+// counters too open to hold their own against a picture.
+//
+// Rubik is a display face with real weight at 800 and 900, it is what Israeli
+// social graphics are actually set in, and it holds an outline without the
+// letterforms closing up. The news cards keep Heebo; only decks use this.
+const rubikCache = new Map();
+export function rubikDataUri(weight = 800) {
+  const file = weight >= 900 ? 'Rubik-Black.ttf' : 'Rubik-ExtraBold.ttf';
+  if (!rubikCache.has(file)) {
+    const buf = readFileSync(new URL(`../../assets/fonts/${file}`, import.meta.url));
+    rubikCache.set(file, `data:font/ttf;base64,${buf.toString('base64')}`);
+  }
+  return rubikCache.get(file);
+}
+
 export function siteMark() {
   const raw = process.env.SITE_URL || 'https://tiyulplus.com';
   try {

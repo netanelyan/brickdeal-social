@@ -18,6 +18,7 @@
 // people reach for it (a picture of the place the post is about).
 
 import * as pexels from './images/pexels.js';
+import * as unsplash from './images/unsplash.js';
 
 export const PROVENANCE = {
   stock: 'סטוק ברישיון מסחרי',
@@ -58,17 +59,30 @@ const providers = {
    * came from.
    */
   async stock(draft) {
-    if (!pexels.configured()) return null;
-    // One search failing (a timeout, a 429) is not a reason to skip the rest
-    // of the chain - the next query is a fresh request.
+    // Unsplash first, Pexels second, and the order is an editorial judgement
+    // rather than a technical one: Pexels' travel catalogue leans commissioned
+    // and evenly lit, which on a slideshow reads as an advertisement. Unsplash
+    // is where people put the photograph they actually took. Pexels stays as
+    // the fallback because it needs no attribution and never runs out.
+    const libraries = [
+      ['unsplash', unsplash],
+      ['pexels', pexels],
+    ].filter(([, lib]) => lib.configured());
+    if (!libraries.length) return null;
+
+    // Every query against the first library before falling back, not every
+    // library per query: a specific query on the better library beats a vague
+    // one anywhere.
     let lastError = null;
-    for (const q of imageQueries(draft)) {
-      try {
-        const got = await pexels.search(q);
-        if (got?.src) return got;
-      } catch (e) {
-        lastError = e;
-        console.error(`images: pexels "${q}" failed - ${e.message}`);
+    for (const [name, lib] of libraries) {
+      for (const q of imageQueries(draft)) {
+        try {
+          const got = await lib.search(q, draft.size || {});
+          if (got?.src) return got;
+        } catch (e) {
+          lastError = e;
+          console.error(`images: ${name} "${q}" failed - ${e.message}`);
+        }
       }
     }
     if (lastError) throw lastError;
@@ -125,7 +139,9 @@ export function imageQueries(draft) {
 }
 
 export const imagesEnabled = () =>
-  Boolean(pexels.configured() || process.env.CATALOGUE_DIR || process.env.IMAGE_GEN_API_KEY);
+  Boolean(
+    unsplash.configured() || pexels.configured() || process.env.CATALOGUE_DIR || process.env.IMAGE_GEN_API_KEY
+  );
 
 /**
  * Find an image for a draft, or null.

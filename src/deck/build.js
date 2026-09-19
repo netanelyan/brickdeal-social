@@ -300,8 +300,22 @@ export async function draftSlideFromEntry(place, pageText) {
  * So the query leads with the place's own English name, and anything already
  * used in this deck is refused even if it is the best match for the next one.
  */
-export async function imagesForSlides(slides, where) {
+export async function imagesForSlides(slides, where, { cover = null } = {}) {
   const used = new Set();
+
+  // The cover is claimed first so it cannot end up with slide one's
+  // photograph. A deck that opens on the same picture it shows you next looks
+  // like it ran out of material before it started.
+  if (cover) {
+    const shot = await findImage(
+      { imageQuery: `${where} city view`, placeEn: where, countryEn: where },
+      { order: ['catalogue', 'stock'] }
+    ).catch(() => null);
+    if (shot?.src) {
+      cover.image = shot;
+      used.add(shot.credit || shot.src.slice(-96));
+    }
+  }
 
   for (const slide of slides) {
     let picked = null;
@@ -469,7 +483,8 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
     }
   }
 
-  if (wantImages) await imagesForSlides(slides, idea.where);
+  const coverSlot = {};
+  if (wantImages) await imagesForSlides(slides, idea.where, { cover: coverSlot });
 
   // The cover is written now, from the slides that exist, rather than from the
   // idea that asked for them. A title is a promise about contents and it should
@@ -498,6 +513,7 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
     },
     area: { displayName: idea.where, query: idea.where },
     slides,
+    coverImage: coverSlot.image || null,
     dropped,
     short: slides.length < idea.want,
     createdAt: new Date().toISOString(),
