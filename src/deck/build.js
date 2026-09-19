@@ -5,6 +5,8 @@ import { searchConfigured, findOnAny, remaining as searchRemaining } from '../se
 import { fetchReadable } from '../fetchPage.js';
 import { verifyEvidence, RejectedError } from '../verify.js';
 import { findImage } from '../images.js';
+import { destinationPlaces, pick } from '../sources/tiyulplus.js';
+import { scoreFor } from './rating.js';
 
 // An idea becomes a deck, or it doesn't.
 //
@@ -73,6 +75,57 @@ const SLIDE_SCHEMA = {
   additionalProperties: false,
 };
 
+const SLIDE_SYSTEM_V2 = `You write one slide of a Hebrew travel slideshow for tiyul+.
+
+You are given one place and a page about it. Write the slide: the place's name,
+one line saying what it IS, and one short practical line.
+
+THE VOICE
+
+A travel page run by a person, talking to a friend who is deciding where to go.
+Not a guidebook, not a visitor centre, not a tutorial.
+
+The single biggest tell of a tutorial is the logistics-first slide: opening
+hours, ticket prices, how long to allow. Nobody stops scrolling for opening
+hours. They stop for "a chapel decorated with the bones of forty thousand
+people" and then, having stopped, they want to know roughly what it costs.
+
+THE LINE THAT MATTERS
+
+What is this place, in one line, under 42 characters. The thing that makes
+somebody say "wait, what?" - what it holds, what happened there, what you see,
+what is strange or oldest or only about it.
+
+Good:  כנסייה שמעוטרת בעצמות של 40 אלף אנשים
+       בית הקפה שבו ישבו קפקא ואיינשטיין
+       ספרייה בארוקית שנראית כמו סט של סרט
+Bad:   מוזיאון לאומי שנוסד ב-1818
+       נגיש לכיסאות גלגלים
+       שעות פתיחה: 10:00-18:00
+       מומלץ להקצות כשעתיים
+
+If the page does not say anything a person would repeat to a friend, set usable
+to false.
+
+THE PRACTICAL LINE
+
+At most one, and it is optional. A price, a "free", a "closed Mondays", a "one
+hour by train". Never opening hours as a range of clock times, never "allow N
+hours", never accessibility, never an address.
+
+THE RULE THAT OVERRIDES EVERYTHING
+
+Both lines need a quote that appears in the PAGE TEXT character for character.
+Copy it; do not tidy it, do not translate it, do not join two sentences. One
+line with a quote beats two without. A line whose quote is not in the page is a
+fabricated claim published under our name.
+
+FORM
+
+Hebrew. Under 42 characters for the what-it-is line, under 24 for the practical
+one. Hyphens, never em dashes. One emoji on the practical line only, chosen for
+the fact rather than for decoration, never a national flag.`;
+
 const SLIDE_SYSTEM = `You write one slide of a Hebrew travel slideshow for tiyul+.
 
 You are given one place and the text of a page published by the body that speaks
@@ -129,6 +182,137 @@ noise.
 
 Prices keep the source's currency. Hyphens, never em dashes. One emoji per line,
 chosen for the fact rather than for decoration, never a national flag.`;
+
+const SLIDE_SCHEMA_V2 = {
+  type: 'object',
+  properties: {
+    usable: { type: 'boolean', description: 'false when the page says nothing worth repeating to a friend' },
+    reject_reason: { type: 'string', description: 'English, short, when usable is false' },
+    what_it_is: {
+      type: 'string',
+      description:
+        'One Hebrew line under 42 characters: what this place IS or holds, the bit that makes someone stop scrolling. Not its category, not its founding date.',
+    },
+    what_quote: { type: 'string', description: 'The sentence in the PAGE TEXT that says it, character for character' },
+    practical: {
+      type: 'string',
+      description:
+        'Optional. One Hebrew line under 24 characters - a price, "חינם", a closing day, "שעה ברכבת". Empty string if the page has none worth printing.',
+    },
+    practical_quote: { type: 'string', description: 'Its quote from the PAGE TEXT, or an empty string' },
+    practical_emoji: { type: 'string', description: 'One emoji for the practical line, or an empty string' },
+  },
+  required: ['usable', 'reject_reason', 'what_it_is', 'what_quote', 'practical', 'practical_quote', 'practical_emoji'],
+  additionalProperties: false,
+};
+
+/**
+ * One slide, written from our own destination page.
+ *
+ * The entry on tiyulplus.com is already written for a traveller, so this is a
+ * compression job rather than a research one: the interesting sentence is in
+ * there, and the model's task is to find it and cut it to slide length without
+ * inventing anything on the way.
+ */
+export async function draftSlideFromEntry(place, pageText) {
+  const user = [
+    `PLACE: ${place.nameHe}${place.nameEn && place.nameEn !== place.nameHe ? ` (${place.nameEn})` : ''}`,
+    place.category ? `CATEGORY: ${place.category}` : null,
+    place.price ? `PRICE BAND ON THE PAGE: ${place.price}` : null,
+    place.duration ? `TYPICAL VISIT: ${place.duration}` : null,
+    '',
+    'PAGE TEXT (the only thing you may draw from):',
+    '---',
+    pageText,
+    '---',
+    '',
+    'Write the slide. Copy every quote verbatim from the PAGE TEXT above.',
+  ]
+    .filter((l) => l !== null)
+    .join('\n');
+
+  const res = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 6000,
+    output_config: { effort: EFFORT, format: { type: 'json_schema', schema: SLIDE_SCHEMA_V2 } },
+    system: [{ type: 'text', text: SLIDE_SYSTEM_V2, cache_control: { type: 'ephemeral' } }],
+    messages: [{ role: 'user', content: user }],
+  });
+
+  recordUsage(res.usage, MODEL);
+  if (res.stop_reason === 'refusal') throw new RejectedError('refused', 'slide drafting refused');
+  if (res.stop_reason === 'max_tokens') throw new RejectedError('truncated', 'slide drafting hit max_tokens');
+
+  const text = res.content.find((b) => b.type === 'text')?.text;
+  if (!text) throw new RejectedError('no_text', 'slide drafting returned no text');
+
+  const parsed = JSON.parse(text);
+  if (!parsed.usable) throw new RejectedError('thin_entry', parsed.reject_reason || 'nothing worth repeating');
+
+  const clean = (s) => String(s || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+  const hook = clean(parsed.what_it_is);
+  const hookQuote = String(parsed.what_quote || '').trim();
+  if (!hook || !hookQuote) throw new RejectedError('no_hook', 'no line worth putting on a slide');
+
+  const practical = clean(parsed.practical);
+  const practicalQuote = String(parsed.practical_quote || '').trim();
+  const evidence = [{ claim: hook, quote: hookQuote }];
+  if (practical && practicalQuote) evidence.push({ claim: practical, quote: practicalQuote });
+
+  verifyEvidence({ evidence }, pageText);
+
+  return {
+    nameHe: place.nameHe,
+    nameEn: place.nameEn,
+    hook: { text: hook, quote: hookQuote, overlong: hook.length > 42 },
+    lines:
+      practical && practicalQuote
+        ? [{ emoji: clean(parsed.practical_emoji).slice(0, 4) || '•', text: practical, quote: practicalQuote, overlong: practical.length > 24 }]
+        : [],
+    sourceUrl: place.sourceUrl,
+    sourceHost: 'tiyulplus.com',
+    qid: place.id,
+  };
+}
+
+/**
+ * A photograph for each slide, and never the same one twice.
+ *
+ * The first real deck put one stock photograph of Prague on three different
+ * museums, because the image search falls back to the city when it cannot find
+ * the place — and "Prague" returns the same top result every time. A deck where
+ * half the slides share a picture reads as fake before a word is read.
+ *
+ * So the query leads with the place's own English name, and anything already
+ * used in this deck is refused even if it is the best match for the next one.
+ */
+export async function imagesForSlides(slides, where) {
+  const used = new Set();
+
+  for (const slide of slides) {
+    let picked = null;
+    // Tried in order: the place by name, then the place plus the city, then
+    // the city alone. Only the first two can be specific; the third exists so
+    // a slide is not left blank, and it is the one most likely to collide.
+    const queries = [slide.nameEn, `${slide.nameEn} ${where}`, `${where} travel`].filter(Boolean);
+
+    for (const q of queries) {
+      const got = await findImage({ imageQuery: q, placeEn: slide.nameEn, countryEn: where }, { order: ['catalogue', 'stock'] }).catch(
+        () => null
+      );
+      if (!got?.src) continue;
+      const key = got.credit || got.src.slice(-96);
+      if (used.has(key)) continue;
+      used.add(key);
+      picked = got;
+      break;
+    }
+
+    slide.image = picked;
+    if (!picked) slide.imageMiss = `no unused photograph for "${slide.nameEn}"`;
+  }
+  return slides;
+}
 
 /** Turn one place plus one fetched page into a slide, or explain why not. */
 export async function draftSlide(place, pageText, { url }) {
@@ -235,7 +419,75 @@ export async function findPage(place, searchTerms = []) {
  * asked for, so a deck of five costs five searches and five drafting calls
  * rather than the whole pool's worth.
  */
+/**
+ * A deck from our own destination page.
+ *
+ * Preferred over the map route whenever the city is covered, and it is better
+ * on every axis that shows up on a slide: Hebrew names, descriptions written
+ * for travellers, a curated list, a rating to sort by. One page fetch serves
+ * the whole deck, so it costs one request rather than a search and a fetch per
+ * place.
+ */
+export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
+  const { places, url, covered } = await destinationPlaces(idea.where);
+  if (!covered) return null;
+
+  // The page text every quote is checked against is the page that was fetched.
+  // Concatenating the entries keeps that true while letting one drafting call
+  // see only its own place.
+  const picked = pick(places, { kind: idea.kind, want: idea.want + 3 });
+
+  const slides = [];
+  const dropped = [];
+
+  for (const place of picked) {
+    if (slides.length >= idea.want) break;
+    try {
+      const slide = await draftSlideFromEntry(place, place.description);
+      slide.score = scoreFor(place.id, { top: slides.length === 0 });
+      slides.push(slide);
+    } catch (e) {
+      dropped.push({
+        place: place.nameHe,
+        why: e instanceof RejectedError ? `${e.reason}: ${String(e.detail || '').slice(0, 120)}` : e.message,
+        url,
+      });
+    }
+  }
+
+  if (wantImages) await imagesForSlides(slides, idea.where);
+
+  return {
+    kind: 'deck',
+    idea,
+    titleHe: idea.titleHe,
+    where: idea.where,
+    category: idea.kind,
+    via: 'tiyulplus',
+    counts: {
+      found: places.length,
+      withWikidata: places.length,
+      withAuthority: picked.length,
+      asked: idea.want,
+      built: slides.length,
+    },
+    area: { displayName: idea.where, query: idea.where },
+    slides,
+    dropped,
+    short: slides.length < idea.want,
+    createdAt: new Date().toISOString(),
+  };
+}
+
 export async function buildDeck(idea, { wantImages = true } = {}) {
+  // Our own page first. The map route stays for everywhere it does not cover —
+  // it is slower, thinner and needs a search budget, but it works anywhere.
+  const fromSite = await buildDeckFromSite(idea, { wantImages }).catch((e) => {
+    console.error(`deck: tiyulplus route failed, falling back to the map — ${e.message}`);
+    return null;
+  });
+  if (fromSite?.slides.length) return fromSite;
+
   const pool = await shortlist({ where: idea.where, kind: idea.kind, want: idea.want });
 
   const slides = [];
@@ -281,7 +533,7 @@ export async function buildDeck(idea, { wantImages = true } = {}) {
       if (!slide.image) slide.imageMiss = `no photograph for "${slide.nameEn}"`;
     }
 
-    slides.push({ ...slide, via: found.via, domain: found.domain });
+    slides.push({ ...slide, via: found.via, domain: found.domain, score: scoreFor(place.qid, { top: slides.length === 0 }) });
   }
 
   return {

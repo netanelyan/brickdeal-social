@@ -1265,7 +1265,11 @@ ok('an overlong line renders smaller rather than being dropped', renderSlideHtml
   { ...deckFixture.deck.slides[0], lines: [{ emoji: '🕘', text: 'x'.repeat(60), quote: 'q', overlong: true }] },
   { index: 2, total: 3, size: 'tiktok' }
 ).includes('line long'));
-ok('the slide carries the source host', slideHtml.includes('nm.cz'));
+// A URL burned into a photograph is the clearest sign a post was made by a
+// company. The sourcing did not weaken: every slide's URL is in the approval
+// message, which is where the decision is actually made.
+ok('no URL is burned into a fact slide', !slideHtml.includes('nm.cz'));
+ok('but the approval message still carries every one', deckMsg.includes('https://www.nm.cz/en/visit'));
 // TikTok draws its own slide counter and genuine posts carry no second one, so
 // ours was the tell that this had been made elsewhere and uploaded.
 ok('no counter of our own', !slideHtml.includes('class="counter"'));
@@ -1273,10 +1277,12 @@ ok('no counter of our own', !slideHtml.includes('class="counter"'));
 // slide is what an advertisement looks like.
 ok('the brand is not on every slide', !slideHtml.includes('tiyulplus'));
 ok('but it is on the cover', renderSlideHtml({ titleHe: 'x' }, { index: 1, total: 3, cover: true }).includes('tiyulplus'));
-// Legibility without a panel: the outline is what makes white type work on a
-// sunlit facade, and paint-order is what stops the stroke eating the letters.
-ok('type is outlined rather than plated', slideHtml.includes('paint-order: stroke fill'));
-ok('and the emoji is exempt, or it renders as a black blob', slideHtml.includes('-webkit-text-stroke: 0'));
+// Legibility the way the app's own text tool does it: each line on its own
+// rounded slab. A heavy outline read as a badly edited image and a single
+// panel behind the block read as an advertisement.
+ok('every line sits on its own slab', (slideHtml.match(/class="slab"/g) || []).length >= 3);
+ok('slabs clone across a wrapped line rather than splitting', slideHtml.includes('box-decoration-break: clone'));
+ok('Latin and digits are set in TikTok Sans', slideHtml.includes("font-family: 'TikTok Sans', 'Heebo'"));
 eq('TikTok slides are 9:16', `${SIZES.tiktok.w}x${SIZES.tiktok.h}`, '1080x1920');
 eq('Instagram slides are 4:5, because the feed crops anything taller', `${SIZES.instagram.w}x${SIZES.instagram.h}`, '1080x1350');
 ok('a slide with no photograph still renders', renderSlideHtml({ nameHe: 'x', lines: [] }, { index: 2, total: 3 }).includes('linear-gradient'));

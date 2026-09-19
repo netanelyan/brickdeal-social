@@ -53,6 +53,20 @@ export function heeboDataUri() {
  * from SITE_URL rather than written out again, and stripped back to the bare
  * host — the protocol and the www are noise at 20px.
  */
+// TikTok Sans, bundled the same way and for the same reason as Heebo: a webfont
+// that fails to load does not error, it silently falls back. Two static weights
+// rather than the variable font, because the renderer only ever asks for bold
+// and black and a variable file is three times the bytes to inline.
+const tiktokCache = new Map();
+export function tiktokSansDataUri(weight = 700) {
+  const file = weight >= 900 ? 'TikTokSans-Black.ttf' : 'TikTokSans-Bold.ttf';
+  if (!tiktokCache.has(file)) {
+    const buf = readFileSync(new URL(`../../assets/fonts/${file}`, import.meta.url));
+    tiktokCache.set(file, `data:font/ttf;base64,${buf.toString('base64')}`);
+  }
+  return tiktokCache.get(file);
+}
+
 export function siteMark() {
   const raw = process.env.SITE_URL || 'https://tiyulplus.com';
   try {

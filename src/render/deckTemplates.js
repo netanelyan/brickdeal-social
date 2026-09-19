@@ -1,4 +1,4 @@
-import { palette, heeboDataUri, escapeHtml, siteMark } from './theme.js';
+import { palette, heeboDataUri, tiktokSansDataUri, escapeHtml, siteMark } from './theme.js';
 
 // Slideshow slides. A different animal from the news card, on purpose.
 //
@@ -31,12 +31,35 @@ const css = ({ w, h, bottomSafe }) => `
   font-style: normal;
   font-display: block;
 }
+/* TikTok Sans, the app's own typeface, released by TikTok under the OFL.
+   It has no Hebrew coverage — Latin, Greek and Cyrillic only — so it cannot
+   carry this channel on its own. Listed FIRST anyway: the browser takes each
+   glyph from the first family that has it, so Latin names, prices and the
+   score come out in the platform's own letterforms while every Hebrew glyph
+   falls through to Heebo. That mixed run is what the app itself does with
+   Hebrew text, which is the look we are after. */
+@font-face {
+  font-family: 'TikTok Sans';
+  src: url('${tiktokSansDataUri(700)}') format('truetype');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'TikTok Sans';
+  src: url('${tiktokSansDataUri(900)}') format('truetype');
+  font-weight: 900;
+  font-style: normal;
+  font-display: block;
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: ${w}px; height: ${h}px; overflow: hidden; }
 body {
   direction: rtl;
   text-align: center;
-  font-family: 'Heebo', sans-serif;
+  /* TikTok Sans first so Latin and digits take the platform's letterforms;
+     Hebrew has no coverage there and falls through to Heebo per glyph. */
+  font-family: 'TikTok Sans', 'Heebo', sans-serif;
   -webkit-font-smoothing: antialiased;
   background: ${palette.ink};
   color: #FFF8E6;
@@ -52,48 +75,57 @@ body {
     linear-gradient(to bottom, rgba(6,14,13,0.34) 0%, rgba(6,14,13,0.06) 26%, rgba(6,14,13,0.10) 62%, rgba(6,14,13,0.58) 100%);
 }
 
-/* Legibility comes from the letters themselves, not from a panel behind them.
+/* The app's own text tool, not an imitation of one.
 
-   The first version put the type on a blurred dark plate. It was perfectly
-   readable and it looked like an advertisement: a card floating over a holiday
-   photo is a thing a brand makes, and the format's own convention — white text
-   with a heavy outline, straight on the image — is what everything else in the
-   feed looks like. paint-order is what makes it work: without it the stroke is
-   painted over the fill and eats the letterforms from the inside. */
+   Two earlier attempts were wrong in opposite directions. A blurred panel
+   behind the whole block read as an advertisement. A heavy outline on every
+   letter read as a badly edited image — which is exactly what a thick stroke
+   looks like when it is applied by something that is not the TikTok editor.
+
+   What the editor actually does is put each LINE on its own rounded, slightly
+   translucent slab, sized to the words. That is the shape people recognise,
+   and it is the reason it is legible over any photograph. box-decoration-break
+   is what keeps a wrapped line from breaking into two ragged slabs. */
 .plate {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: ${Math.round(h * 0.014)}px;
+  gap: ${Math.round(h * 0.009)}px;
   max-width: 94%;
 }
-.cover-title, .place, .hook, .line, .eyebrow, .swipe {
-  paint-order: stroke fill;
-  -webkit-text-stroke: ${Math.round(h * 0.0055)}px rgba(0,0,0,0.92);
-  text-shadow: 0 ${Math.round(h * 0.004)}px ${Math.round(h * 0.012)}px rgba(0,0,0,0.55);
+.slab {
+  display: inline;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  background: rgba(10,10,12,0.56);
+  border-radius: ${Math.round(h * 0.009)}px;
+  padding: ${Math.round(h * 0.007)}px ${Math.round(h * 0.011)}px;
+  /* A little air between wrapped lines, or the slabs touch and read as a box. */
+  line-height: 1.55;
 }
 
-/* Text sits above the middle, not in it. Centred type lands on whatever the
-   subject of the photograph is; the upper third clears it, and it clears the
-   app's own furniture at the bottom of the screen too. */
+/* Text sits low. Not centred, not high.
+   Centred lands on the subject of the photograph. High leaves the lower half
+   empty, which is where the viewer's eye and thumb already are. Low - just
+   above the app's own caption and buttons - is where the posts that work put
+   it, and it leaves the picture doing the selling above it. */
 .content {
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  justify-content: flex-end;
   align-items: center;
-  padding: ${Math.round(h * 0.22)}px ${Math.round(w * 0.065)}px ${bottomSafe}px;
-  gap: ${Math.round(h * 0.018)}px;
+  padding: ${Math.round(h * 0.1)}px ${Math.round(w * 0.065)}px ${bottomSafe}px;
+  gap: ${Math.round(h * 0.016)}px;
 }
 
 /* The cover carries the whole promise of the deck, so it gets the biggest type
    on any slide and nothing else competes with it. */
 .cover-title {
-  font-size: ${Math.round(h * 0.072)}px;
+  font-size: ${Math.round(h * 0.062)}px;
   font-weight: 900;
-  line-height: 1.12;
+  line-height: 1.34;
   letter-spacing: -0.5px;
-  color: #FFE9A8;
-  text-shadow: 0 4px 26px rgba(0,0,0,0.75), 0 1px 0 rgba(0,0,0,0.55);
+  color: #FFFFFF;
 }
 /* Set at full size, a title of any length wraps to four lines and becomes the
    entire slide - the photograph stops existing and the promise stops reading as
@@ -132,24 +164,33 @@ body {
 }
 
 .place {
-  font-size: ${Math.round(h * 0.046)}px;
+  font-size: ${Math.round(h * 0.042)}px;
   font-weight: 900;
-  line-height: 1.1;
-  color: #FFE9A8;
-  text-shadow: 0 4px 22px rgba(0,0,0,0.8), 0 1px 0 rgba(0,0,0,0.6);
+  line-height: 1.5;
+  color: #FFFFFF;
+}
+
+/* Ours, and it has to read as an opinion rather than a measurement. Warm,
+   loud, and set apart from the sourced lines above it - 11/10 is the format's
+   way of saying "we loved this", and nobody mistakes it for data. */
+.score {
+  font-size: ${Math.round(h * 0.03)}px;
+  font-weight: 900;
+  color: #FFD84D;
+  line-height: 1.5;
 }
 
 /* The one line that has to make somebody want to go. Bigger than the practical
    lines and set apart from them, because on the slide as on the trip it is the
    reason and they are the logistics. */
 .hook {
-  font-size: ${Math.round(h * 0.0345)}px;
+  font-size: ${Math.round(h * 0.0325)}px;
   font-weight: 800;
-  line-height: 1.26;
+  line-height: 1.5;
   color: #FFFFFF;
   max-width: 94%;
 }
-.hook.long { font-size: ${Math.round(h * 0.0295)}px; }
+.hook.long { font-size: ${Math.round(h * 0.0285)}px; }
 /* No divider. A rule between the hook and the facts is furniture — the gap
    already does that job, and every line of decoration moves this further from
    what the feed looks like. */
@@ -225,43 +266,42 @@ export function renderSlideHtml(slide, { index, total, size = 'tiktok', cover = 
     .slice(0, 2)
     .map(
       (l) =>
-        `<div class="line${l.overlong ? ' long' : ''}"><span class="em">${escapeHtml(l.emoji)}</span><span>${escapeHtml(l.text)}</span></div>`
+        `<div class="line${l.overlong ? ' long' : ''}"><span class="slab"><span class="em">${escapeHtml(l.emoji)}</span> ${escapeHtml(l.text)}</span></div>`
     )
     .join('');
 
   // The cover sells the deck and the item slides deliver it, so they are built
   // differently: a cover is a count and a promise, an item slide is a name, the
   // reason to go, and the logistics under a rule.
+  // Every line is its own slab. `display:inline` on the inner span is what
+  // makes the background hug the words rather than the column.
+  const slab = (cls, text) => `<div class="${cls}"><span class="slab">${escapeHtml(text)}</span></div>`;
+
   const body = cover
     ? `<div class="plate">` +
-      (slide.eyebrow ? `<div class="eyebrow">${escapeHtml(slide.eyebrow)}</div>` : '') +
-      `<div class="cover-title${coverSize(slide.titleHe)}">${escapeHtml(slide.titleHe)}</div>` +
-      (slide.angleHe ? `<div class="cover-angle">${escapeHtml(slide.angleHe)}</div>` : '') +
-      `</div>` +
-      `<div class="swipe">החליקו ←</div>`
+      (slide.eyebrow ? slab('eyebrow', slide.eyebrow) : '') +
+      slab(`cover-title${coverSize(slide.titleHe)}`, slide.titleHe) +
+      (slide.angleHe ? slab('cover-angle', slide.angleHe) : '') +
+      `</div>`
     : `<div class="plate">` +
-      `<div class="place">${escapeHtml(slide.nameHe)}</div>` +
-      (slide.hook
-        ? `<div class="hook${slide.hook.overlong ? ' long' : ''}">${escapeHtml(slide.hook.text)}</div>`
-        : '') +
-      (lines ? `<div class="rule"></div><div class="lines">${lines}</div>` : '') +
+      slab('place', slide.nameHe) +
+      (slide.hook ? slab(`hook${slide.hook.overlong ? ' long' : ''}`, slide.hook.text) : '') +
+      (lines ? `<div class="lines">${lines}</div>` : '') +
+      // Last, under the sourced lines, so the eye reads what the place is
+      // before it reads what we thought of it.
+      (slide.score ? slab('score', `הדירוג שלנו: ${slide.score}`) : '') +
       `</div>`;
 
-  // The source host on a fact slide, the site on the cover, and never both.
-  //
-  // A screenshot travels without its caption, so a slide making a claim has to
-  // say where the claim came from — that rule does not bend for a format. What
-  // changed is the volume: printing our own domain next to the source on every
-  // slide was branding, and branding on every slide is what an advertisement
-  // looks like.
-  const foot = cover
-    ? `<span class="site">${escapeHtml(siteMark())}</span>`
-    : `<span class="src">${escapeHtml(slide.sourceHost || '')}</span>`;
+  // Nothing at the bottom of a fact slide. A URL burned into a photograph is
+  // the single most reliable sign that a post was made by a company rather
+  // than a person, and the sources have not gone anywhere: every slide's URL
+  // is in the approval message, and the caption carries the site.
+  const foot = cover ? `<span class="site">${escapeHtml(siteMark())}</span>` : '';
 
   return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><style>${css(s)}</style></head><body>
 ${photo(slide.image, s)}
 <div class="scrim"></div>
 <div class="content">${body}</div>
-<div class="foot">${foot}</div>
+${foot ? `<div class="foot">${foot}</div>` : ''}
 </body></html>`;
 }
