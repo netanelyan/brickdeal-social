@@ -1,5 +1,6 @@
 import { palette, heeboDataUri, tiktokSansDataUri, escapeHtml, siteMark } from './theme.js';
 import { scoreEmoji } from '../deck/emoji.js';
+import { emojiHtml } from './emojiArt.js';
 
 // Slideshow slides. A different animal from the news card, on purpose.
 //
@@ -216,6 +217,16 @@ body {
   unicode-bidi: isolate;
 }
 .line .em { font-size: 1.05em; -webkit-text-stroke: 0; paint-order: normal; }
+/* The artwork sits ON the line rather than under it. A 1em image aligns to the
+   baseline by default, which next to Hebrew reads as a picture that fell off
+   the text. No stroke or shadow on it either - those are for letterforms, and
+   on a drawing they look like a printing fault. */
+.emoji {
+  display: inline-block;
+  vertical-align: -0.16em;
+  -webkit-text-stroke: 0;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.45));
+}
 /* A line the drafting step made too long still renders, one step smaller,
    rather than wrapping into three lines of mush or being silently dropped —
    the fact was verified, and hiding a verified fact is the worse failure. */
@@ -271,7 +282,7 @@ export function renderSlideHtml(slide, { index, total, size = 'tiktok', cover = 
     .slice(0, 2)
     .map(
       (l) =>
-        `<div class="line${l.overlong ? ' long' : ''}"><span class="slab">${escapeHtml(l.text)} <span class="em">${escapeHtml(l.emoji)}</span></span></div>`
+        `<div class="line${l.overlong ? ' long' : ''}"><span class="slab">${escapeHtml(l.text)} <span class="em">${emojiHtml(l.emoji)}</span></span></div>`
     )
     .join('');
 
@@ -295,7 +306,9 @@ export function renderSlideHtml(slide, { index, total, size = 'tiktok', cover = 
       // The number alone, with an emoji. Labelling it "הדירוג שלנו" was the
       // tutorial voice again: on a real page the score is just there, and
       // everyone already knows whose opinion it is.
-      (slide.score ? slab('score', `${slide.score} ${scoreEmoji(slide.score)}`) : '') +
+      (slide.score
+        ? `<div class="score"><span class="slab">${escapeHtml(slide.score)} ${emojiHtml(scoreEmoji(slide.score))}</span></div>`
+        : '') +
       `</div>`;
 
   // Nothing at the bottom of a fact slide. A URL burned into a photograph is

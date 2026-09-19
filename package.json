@@ -19,7 +19,8 @@
     "tiktok-token": "node scripts/tiktok-token.js",
     "backfill-ig": "node scripts/backfill-instagram.js",
     "render-samples": "node scripts/render-samples.js",
-    "test-url": "node test.js"
+    "test-url": "node test.js",
+    "fetch-emoji": "node scripts/fetch-emoji.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",

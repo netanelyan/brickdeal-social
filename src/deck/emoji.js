@@ -36,3 +36,24 @@ export function scoreEmoji(score) {
 
 /** The line the drafting brief shows the model, so both steps sound alike. */
 export const vocabForPrompt = () => VOCAB.join(' ');
+
+// Everything a slide might reasonably ask for beyond the voice set.
+//
+// The brief tells the model to prefer VOCAB, but a train beside a train journey
+// is sometimes genuinely the better pick, and an emoji with no artwork falls
+// back to the system font — which is the inconsistency this whole set exists to
+// remove. So the common pictograms are fetched too.
+export const ALL_USED = [
+  '🚆', '🚌', '🚶', '🧗', '⛰️', '🏔️', '🌊', '🏖️', '🌅', '🌃',
+  '🎟️', '💸', '💰', '🕘', '📅', '🔒', '🍽️', '☕', '🍺', '🍷',
+  '🛒', '🎨', '🏛️', '⛪', '🕍', '🏰', '📸', '🎧', '✨', '⭐',
+];
+
+/**
+ * Is this string one we have artwork for?
+ *
+ * Used by the renderer to decide between an <img> and the raw character. A
+ * character with no file still renders — it just renders in whatever the
+ * machine has, which is the old behaviour and better than an empty box.
+ */
+export const KNOWN = new Set([...VOCAB, ...ALL_USED]);
