@@ -46,6 +46,22 @@ export async function toDeckCandidate(built, { minSlides = Number(process.env.DE
   const deck = { ...built, id };
   const rendered = await renderDeck(deck);
 
+  // Drop the photographs now that they are baked into the JPEGs.
+  //
+  // images.js hands back each photo as a base64 data URI — a megabyte or two of
+  // string per slide, held so the renderer can put it in an <img>. Once the
+  // slides exist on disk it is dead weight, and not merely wasteful: a staged
+  // candidate lives in data/store.json, and store.js rewrites that whole file
+  // on every save. A six-slide deck awaiting approval would re-serialise ~10MB
+  // of base64 every time anything else marked an item seen.
+  //
+  // Cards deliberately keep theirs: editing a headline re-renders the card, and
+  // that re-render needs the image. A deck has no edit path for exactly this
+  // reason — it is re-run instead.
+  deck.slides = deck.slides.map((s) =>
+    s.image ? { ...s, image: { provenance: s.image.provenance, credit: s.image.credit || null } } : s
+  );
+
   const cand = {
     kind: 'deck',
     id,
