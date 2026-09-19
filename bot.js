@@ -11,7 +11,7 @@ import { primaryAuthority, enabledSources, registry } from './src/sources/index.
 import { approvalMessage, decidedMessage, evidenceReport, channelCaption, instagramCaption, tiktokCaption } from './src/format.js';
 import { renderCard, closeBrowser } from './src/render/index.js';
 import { publishTelegram, publishTelegramDeck, sendForApproval } from './src/publish/telegram.js';
-import { proposeIdeas } from './src/deck/ideas.js';
+import { proposeIdeas, titleForRequest } from './src/deck/ideas.js';
 import { buildDeck } from './src/deck/build.js';
 import { toDeckCandidate } from './src/deck/candidate.js';
 import { searchConfigured, remaining as searchRemaining, dailyBudget as searchBudget } from './src/search.js';
@@ -867,16 +867,12 @@ async function buildAndStageDeck(arg, chatId) {
       // "Amalfi Coast beach" works too.
       const parts = arg.split(/\s+/);
       const kind = parts.pop();
-      idea = {
-        titleHe: `${parts.join(' ')} · ${kind}`,
-        where: parts.join(' '),
-        kind,
-        want: 5,
-        angleHe: '',
-        whyNow: 'asked for directly',
-        searchTerms: ['visit'],
-      };
-      await say(`⏳ בונה מצגת: ${idea.where} / ${idea.kind}...`);
+      const where = parts.join(' ');
+      await say(`⏳ בונה מצגת: ${where} / ${kind}...`);
+      // A requested deck gets a written cover too. Naming it "Prague · museum"
+      // put a filename on the front of a Hebrew slideshow.
+      const cover = await titleForRequest({ where, kind });
+      idea = { ...cover, where, kind, want: 5, whyNow: 'asked for directly' };
     } else {
       await say('⏳ חושב על רעיונות...');
       const recent = store.recentPublished().map((p) => p.headline || p.id).filter(Boolean).slice(0, 12);

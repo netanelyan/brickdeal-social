@@ -40,15 +40,24 @@ const SLIDE_SCHEMA = {
       type: 'string',
       description: 'The place name as Israelis would write it in Hebrew. Transliterate; do not translate.',
     },
+    hook_he: {
+      type: 'string',
+      description:
+        'The one reason a traveller would go, in under 40 Hebrew characters. What they will see or feel, not what the institution is. This is the line that has to earn the slide.',
+    },
+    hook_quote: {
+      type: 'string',
+      description: 'The sentence in the PAGE TEXT that supports the hook, copied character for character.',
+    },
     lines: {
       type: 'array',
       description:
-        'Two to four fact lines for the slide. Each is one short Hebrew phrase, under 34 characters, of the form "label: value" — opening hours, price, how long it takes, how hard it is, what it holds.',
+        'One or two practical lines, and no more. Only what someone standing outside would need: price, opening hours, how long a visit takes, when to come. Never an address, never a floor area, never how many items are in the collection.',
       items: {
         type: 'object',
         properties: {
           emoji: { type: 'string', description: 'One emoji that fits the fact. Never a flag.' },
-          text: { type: 'string', description: 'The Hebrew line itself, under 34 characters' },
+          text: { type: 'string', description: 'The Hebrew line itself, under 26 characters' },
           quote: {
             type: 'string',
             description:
@@ -60,43 +69,66 @@ const SLIDE_SCHEMA = {
       },
     },
   },
-  required: ['usable', 'reject_reason', 'name_he', 'lines'],
+  required: ['usable', 'reject_reason', 'name_he', 'hook_he', 'hook_quote', 'lines'],
   additionalProperties: false,
 };
 
 const SLIDE_SYSTEM = `You write one slide of a Hebrew travel slideshow for tiyul+.
 
-You are given one place and the text of a page published by the body that
-speaks for it. Write the slide: the place's name in Hebrew, and two to four fact
-lines drawn from that page.
+You are given one place and the text of a page published by the body that speaks
+for it. Write the slide: the place's name in Hebrew, one hook, and one or two
+practical lines.
 
-THE ONLY RULE THAT MATTERS
+WHO IS WATCHING
 
-Every line needs a quote, and the quote must appear in the PAGE TEXT character
-for character. Copy it; do not tidy it, do not translate it, do not join two
-sentences. If the page does not state a fact plainly, you have three lines
-instead of four, or you set usable to false. A line without a quote in the page
-is a fabricated claim published under our name.
+Someone deciding where to go on their next trip. They are not a museum person,
+a history person or an architecture person. They are scrolling, and they will
+give this slide about two seconds.
 
-WHAT MAKES A GOOD LINE
+That audience is the whole brief. "2,000 items in the collection" and "1,300
+square metres of exhibition space" are facts about an institution's own sense of
+importance. "The ceiling everyone photographs" and "free after 16:00" are facts
+about a trip. Write the second kind.
 
-Concrete and actionable: opening hours, closing day, ticket price, how long a
-visit takes, how far the walk is, how steep, what the collection holds, what it
-is the oldest or largest of. A number beats an adjective every time.
+THE HOOK
 
-Not: "one of the most beautiful museums in Europe", "a must-see", "an
-unforgettable experience". Not the founding date unless it is genuinely the
-point of the place.
+One line, under 40 characters, and it is the only line that has to be
+interesting. What will they see, stand in front of, taste, climb? What is the
+thing worth crossing a city for?
+
+Good: "התקרה המצוירת שכולם מצלמים", "הנוף מהמרפסת על כל העיר העתיקה",
+"אוסף הזכוכית הגדול באירופה".
+Bad: "מוזיאון לאומי שנוסד ב-1818", "2,000 פריטים באוסף", "מבנה ניאו-רנסאנס".
+
+If the page gives you nothing a traveller would cross a street for, set usable
+to false. A slide with no reason to go is a slide worth dropping.
+
+THE PRACTICAL LINES
+
+One or two. Only what someone standing outside needs to know: price, opening
+hours, how long it takes, the day it is closed, when it is free.
+
+NEVER: a street address, a floor area, how many items are in a collection, when
+it was founded, who the architect was, the names of departments, an exhibition's
+full formal title.
+
+THE RULE THAT OVERRIDES EVERYTHING
+
+Every line, the hook included, needs a quote that appears in the PAGE TEXT
+character for character. Copy it; do not tidy it, do not translate it, do not
+join two sentences. One line with a quote beats three without. A line whose
+quote is not in the page is a fabricated claim published under our name.
 
 FORM
 
-Hebrew. Under 34 characters a line, because it is rendered over a photograph and
-a longer line wraps into mush. "label: value" reads best - שעות פתיחה: 9:00-17:00,
-כניסה: 250 קרונות, זמן ביקור: שעה וחצי.
+Hebrew. Under 26 characters for a practical line, under 40 for the hook - these
+are rendered over a photograph and a longer line wraps into mush. Practical
+lines read best as "label: value": כניסה 250 קרונות, סגור בימי שני,
+ביקור: שעה וחצי. Drop the word if it is obvious - "שעות: " before a time is
+noise.
 
-Prices keep the source's currency. Times keep the source's format. Hyphens,
-never em dashes. One emoji per line, chosen for the fact rather than for
-decoration, and never a national flag.`;
+Prices keep the source's currency. Hyphens, never em dashes. One emoji per line,
+chosen for the fact rather than for decoration, never a national flag.`;
 
 /** Turn one place plus one fetched page into a slide, or explain why not. */
 export async function draftSlide(place, pageText, { url }) {
@@ -135,24 +167,36 @@ export async function draftSlide(place, pageText, { url }) {
   if (!parsed.usable) throw new RejectedError('thin_page', parsed.reject_reason || 'page says nothing concrete');
 
   const clean = (s) => String(s || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+
+  const hook = clean(parsed.hook_he);
+  const hookQuote = String(parsed.hook_quote || '').trim();
+  if (!hook || !hookQuote) throw new RejectedError('no_hook', 'nothing on the page a traveller would go for');
+
+  // Two lines at most. The earlier version allowed four and the decks it made
+  // were unreadable at a glance: a wall of small text over a photograph, which
+  // is the one thing a slide cannot be. Fewer, larger, better.
   const lines = (parsed.lines || [])
     .map((l) => ({ emoji: clean(l.emoji).slice(0, 4), text: clean(l.text), quote: String(l.quote || '').trim() }))
-    .filter((l) => l.text && l.quote);
-
-  if (lines.length < 2) throw new RejectedError('thin_page', `only ${lines.length} usable line(s)`);
+    .filter((l) => l.text && l.quote)
+    .slice(0, 2);
 
   // The same gate every other post goes through, on the same text that was
-  // fetched. Nothing about a slideshow earns it a softer check.
-  verifyEvidence({ evidence: lines.map((l) => ({ claim: l.text, quote: l.quote })) }, pageText);
+  // fetched. The hook is checked with the rest: it is the most interesting
+  // claim on the slide, which makes it the one most worth inventing.
+  verifyEvidence(
+    { evidence: [{ claim: hook, quote: hookQuote }, ...lines.map((l) => ({ claim: l.text, quote: l.quote }))] },
+    pageText
+  );
 
-  // Lines are capped AFTER verification: the quote is what was checked, the
+  // Length is measured AFTER verification: the quote is what was checked, the
   // text is what is drawn, and a line too long for the slide is a rendering
-  // problem rather than grounds to throw the verified fact away.
-  const TOO_LONG = Number(process.env.DECK_LINE_MAX || 34);
+  // problem rather than grounds to throw a verified fact away.
+  const TOO_LONG = Number(process.env.DECK_LINE_MAX || 26);
   return {
     nameHe: clean(parsed.name_he) || place.labelEn || place.name,
     nameEn: place.labelEn || place.name,
-    lines: lines.slice(0, 4).map((l) => ({ ...l, overlong: l.text.length > TOO_LONG })),
+    hook: { text: hook, quote: hookQuote, overlong: hook.length > 40 },
+    lines: lines.map((l) => ({ ...l, overlong: l.text.length > TOO_LONG })),
     sourceUrl: url,
     sourceHost: new URL(url).hostname.replace(/^www\./, ''),
     qid: place.qid,

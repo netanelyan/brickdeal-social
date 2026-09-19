@@ -158,6 +158,65 @@ export async function proposeIdeas({ count = 4, recent = [], today = new Date() 
   return (parsed.ideas || []).map(normaliseIdea).filter(Boolean);
 }
 
+const TITLE_SCHEMA = {
+  type: 'object',
+  properties: {
+    title_he: { type: 'string', description: 'The cover line, Hebrew, under 40 characters' },
+    eyebrow_he: { type: 'string', description: 'The city or region in Hebrew, one or two words' },
+    angle_he: { type: 'string', description: 'One Hebrew sentence under the title: what the viewer gets' },
+    search_terms: {
+      type: 'array',
+      description: 'English words likely to appear in the title of an official page about such a place',
+      items: { type: 'string' },
+    },
+  },
+  required: ['title_he', 'eyebrow_he', 'angle_he', 'search_terms'],
+  additionalProperties: false,
+};
+
+/**
+ * A cover for a deck somebody asked for by name.
+ *
+ * `/deck Prague museum` used to title itself "Prague · museum", which is a
+ * filename rather than a cover — English, in a Hebrew channel, naming a
+ * category instead of promising anything. A deck the model chose gets a written
+ * title; one you chose deserves the same.
+ */
+export async function titleForRequest({ where, kind, count = 5, today = new Date() }) {
+  if (!hasApiKey()) throw new Error('ANTHROPIC_API_KEY is not set');
+
+  const res = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 4000,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: TITLE_SCHEMA } },
+    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+    messages: [
+      {
+        role: 'user',
+        content: [
+          `TODAY: ${today.toISOString().slice(0, 10)}`,
+          `A deck of ${count} ${KINDS[kind]?.he || kind} in ${where} has been requested by name.`,
+          'Write its cover: the title line, the city in Hebrew, and the one-sentence angle.',
+          'The title names the subject and withholds the story. It is not a question and it does not begin with "ידעתם".',
+        ].join('\n'),
+      },
+    ],
+  });
+
+  recordUsage(res.usage, MODEL);
+  const text = res.content.find((b) => b.type === 'text')?.text;
+  if (!text) throw new Error('title generation returned no text');
+
+  const parsed = JSON.parse(text);
+  const clean = (s) => String(s || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+  return {
+    titleHe: clean(parsed.title_he),
+    eyebrowHe: clean(parsed.eyebrow_he),
+    angleHe: clean(parsed.angle_he),
+    searchTerms: (parsed.search_terms || []).map(clean).filter(Boolean).slice(0, 4),
+  };
+}
+
 /**
  * Everything the schema cannot state.
  *

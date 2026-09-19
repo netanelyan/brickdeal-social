@@ -13,8 +13,8 @@ import * as store from '../src/store.js';
 import { candidateId, tripGap } from '../src/candidate.js';
 import { renderHtml, LAYOUTS, PHOTO_LAYOUTS, isPhotoLayout } from '../src/render/templates.js';
 import { assertGenericAiPrompt, ImagePolicyError, imageQueries } from '../src/images.js';
-import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, evidenceReport } from '../src/format.js';
-import { renderSlideHtml, SIZES } from '../src/render/deckTemplates.js';
+import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, evidenceReport, deckApprovalMessage } from '../src/format.js';
+import { renderSlideHtml, SIZES, coverSize } from '../src/render/deckTemplates.js';
 import { deckId } from '../src/deck/candidate.js';
 import { normaliseIdea } from '../src/deck/ideas.js';
 import { sameSite } from '../src/search.js';
@@ -1195,9 +1195,10 @@ const deckFixture = {
         nameEn: 'National Museum',
         sourceHost: 'nm.cz',
         sourceUrl: 'https://www.nm.cz/en/visit',
+        hook: { text: 'כיפת הזכוכית שכולם מצלמים', quote: 'the glass dome visitors photograph most' },
         lines: [
-          { emoji: '🕘', text: 'שעות: 10:00-18:00', quote: 'Open daily 10:00-18:00' },
-          { emoji: '🎟️', text: 'כניסה: 250 קרונות', quote: 'Admission 250 CZK' },
+          { emoji: '🕘', text: 'סגור בימי שני', quote: 'Closed on Mondays' },
+          { emoji: '🎟️', text: 'כניסה 250 קרונות', quote: 'Admission 250 CZK' },
         ],
       },
       {
@@ -1205,6 +1206,7 @@ const deckFixture = {
         nameEn: 'National Gallery',
         sourceHost: 'ngprague.cz',
         sourceUrl: 'https://www.ngprague.cz/en/visit',
+        hook: { text: 'אוסף המודרניסטים הגדול בצ׳כיה', quote: 'the largest collection of modern art in Czechia' },
         lines: [{ emoji: '🕘', text: 'סגור בימי שני', quote: 'Closed on Mondays' }],
       },
     ],
@@ -1224,7 +1226,7 @@ ok('carries the TikTok privacy level, same as a card', deckMsg.includes(privacyH
 ok('every source URL is in the message', deckMsg.includes('https://www.nm.cz/en/visit'));
 
 const deckEv = evidenceReport(deckFixture);
-ok('evidence is grouped per slide, not flattened', deckEv.includes('המוזיאון הלאומי') && deckEv.includes('Open daily'));
+ok('evidence is grouped per slide, not flattened', deckEv.includes('המוזיאון הלאומי') && deckEv.includes('Admission 250 CZK'));
 ok('with the page each quote came from', deckEv.includes('ngprague.cz'));
 
 const dcap = deckCaption(deckFixture.deck);
@@ -1236,7 +1238,29 @@ ok('the title is not repeated - the cover slide already carries it', !dcap.inclu
 // is checked for the two ways that happens: a dropped line, and text that
 // silently overflows the image.
 const slideHtml = renderSlideHtml(deckFixture.deck.slides[0], { index: 2, total: 3, size: 'tiktok' });
-ok('every verified line reaches the slide', slideHtml.includes('שעות: 10:00-18:00') && slideHtml.includes('כניסה: 250 קרונות'));
+ok('every verified line reaches the slide', slideHtml.includes('סגור בימי שני') && slideHtml.includes('כניסה 250 קרונות'));
+
+// The hook is the only line that has to be interesting, so it is the one the
+// slide cannot ship without and the one the approval message leads with.
+ok('the hook is on the slide', slideHtml.includes('כיפת הזכוכית שכולם מצלמים'));
+ok('the approval message leads each slide with its hook', deckMsg.includes('כיפת הזכוכית שכולם מצלמים'));
+ok('a slide with no hook says so rather than looking complete', deckApprovalMessage({
+  ...deckFixture,
+  deck: { ...deckFixture.deck, slides: [{ ...deckFixture.deck.slides[0], hook: null }] },
+}).includes('אין וו'));
+ok('the hook is quoted like everything else', evidenceReport(deckFixture).includes('the glass dome visitors photograph most'));
+
+// A cover set at full size wraps to four lines and eats the photograph.
+eq('a short title stays large', coverSize('חמישה מוזיאונים'), '');
+eq('a medium one steps down', coverSize('המוזיאונים של פראג ששווים'), ' mid');
+eq('a long one steps down twice', coverSize('המוזיאונים של פראג ששווים את הכרטיס ועוד'), ' long');
+
+// Practical lines are capped at two. Four of them over a photograph is the wall
+// of small text the first decks produced.
+ok('no more than two practical lines reach a slide', renderSlideHtml(
+  { nameHe: 'x', hook: { text: 'h' }, lines: [1, 2, 3, 4].map((n) => ({ emoji: '•', text: `line${n}` })) },
+  { index: 2, total: 3 }
+).split('class="line').length - 1 <= 4);
 ok('an overlong line renders smaller rather than being dropped', renderSlideHtml(
   { ...deckFixture.deck.slides[0], lines: [{ emoji: '🕘', text: 'x'.repeat(60), quote: 'q', overlong: true }] },
   { index: 2, total: 3, size: 'tiktok' }

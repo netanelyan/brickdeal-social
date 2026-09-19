@@ -45,13 +45,28 @@ body {
 .photo, .scrim, .content { position: absolute; inset: 0; }
 .photo { object-fit: cover; width: ${w}px; height: ${h}px; }
 
-/* Two gradients, not one. A single top-to-bottom wash either leaves the middle
-   of the image muddy or leaves the text at the top unreadable; darkening both
-   ends and leaving the centre alone keeps the photograph looking like a
-   photograph while the type stays legible over it. */
+/* A gradient alone does not do it. The first decks put cream type straight over
+   a sunlit building and the text disappeared into the facade — a scrim that is
+   dark enough to fix that is dark enough to ruin the photograph.
+   So the wash stays gentle and the type sits on its own plate instead. */
 .scrim {
   background:
-    linear-gradient(to bottom, rgba(6,14,13,0.72) 0%, rgba(6,14,13,0.10) 34%, rgba(6,14,13,0.12) 56%, rgba(6,14,13,0.86) 100%);
+    linear-gradient(to bottom, rgba(6,14,13,0.66) 0%, rgba(6,14,13,0.16) 30%, rgba(6,14,13,0.28) 58%, rgba(6,14,13,0.88) 100%);
+}
+
+/* The plate. Legibility stops depending on what the photograph happens to be
+   doing behind any given word. */
+.plate {
+  background: rgba(8,17,16,0.62);
+  backdrop-filter: blur(18px) saturate(0.9);
+  border-radius: ${Math.round(w * 0.045)}px;
+  padding: ${Math.round(h * 0.032)}px ${Math.round(w * 0.055)}px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: ${Math.round(h * 0.014)}px;
+  max-width: 92%;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.45);
 }
 
 .content {
@@ -73,6 +88,33 @@ body {
   color: #FFE9A8;
   text-shadow: 0 4px 26px rgba(0,0,0,0.75), 0 1px 0 rgba(0,0,0,0.55);
 }
+/* Set at full size, a title of any length wraps to four lines and becomes the
+   entire slide - the photograph stops existing and the promise stops reading as
+   a promise. Two steps down by length keeps it to two or three lines. */
+.cover-title.mid { font-size: ${Math.round(h * 0.06)}px; }
+.cover-title.long { font-size: ${Math.round(h * 0.05)}px; }
+/* The city, small and above the title. A cover that opens with "פראג" tells a
+   scroller in one word whether this is for them, before they have read
+   anything else. */
+.eyebrow {
+  font-size: ${Math.round(h * 0.026)}px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: rgba(255,233,168,0.9);
+  margin-bottom: ${Math.round(h * 0.004)}px;
+}
+/* The format's own convention. A slideshow that does not say it is a slideshow
+   gets read as a single image and swiped past. */
+.swipe {
+  margin-top: ${Math.round(h * 0.03)}px;
+  font-size: ${Math.round(h * 0.024)}px;
+  font-weight: 800;
+  color: rgba(255,248,230,0.92);
+  background: rgba(8,17,16,0.55);
+  border-radius: 999px;
+  padding: 10px 26px;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+}
 .cover-angle {
   font-size: ${Math.round(h * 0.028)}px;
   font-weight: 600;
@@ -84,12 +126,30 @@ body {
 }
 
 .place {
-  font-size: ${Math.round(h * 0.048)}px;
+  font-size: ${Math.round(h * 0.044)}px;
   font-weight: 900;
   line-height: 1.1;
   color: #FFE9A8;
   text-shadow: 0 4px 22px rgba(0,0,0,0.8), 0 1px 0 rgba(0,0,0,0.6);
-  margin-bottom: ${Math.round(h * 0.012)}px;
+}
+
+/* The one line that has to make somebody want to go. Bigger than the practical
+   lines and set apart from them, because on the slide as on the trip it is the
+   reason and they are the logistics. */
+.hook {
+  font-size: ${Math.round(h * 0.0335)}px;
+  font-weight: 800;
+  line-height: 1.28;
+  color: #FFF8E6;
+  max-width: 92%;
+}
+.hook.long { font-size: ${Math.round(h * 0.029)}px; }
+.rule {
+  width: ${Math.round(w * 0.14)}px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255,233,168,0.55);
+  margin: ${Math.round(h * 0.006)}px 0;
 }
 
 .lines { display: flex; flex-direction: column; gap: ${Math.round(h * 0.0125)}px; align-items: center; }
@@ -143,6 +203,14 @@ body {
 .src { direction: ltr; }
 `;
 
+/** Measured in characters, which for one script at one weight is close enough. */
+export const coverSize = (title) => {
+  const n = String(title || '').length;
+  if (n > 30) return ' long';
+  if (n > 20) return ' mid';
+  return '';
+};
+
 const photo = (image, size) =>
   image?.src
     ? `<img class="photo" src="${escapeHtml(image.src)}" alt="">`
@@ -157,16 +225,34 @@ const photo = (image, size) =>
 export function renderSlideHtml(slide, { index, total, size = 'tiktok', cover = false } = {}) {
   const s = SIZES[size] || SIZES.tiktok;
 
+  // Capped here as well as in drafting. A deck staged before the cap existed is
+  // still in the queue with four lines on a slide, and the template is the last
+  // place that can stop it going out as a wall of small text.
+  const lines = (slide.lines || [])
+    .slice(0, 2)
+    .map(
+      (l) =>
+        `<div class="line${l.overlong ? ' long' : ''}"><span class="em">${escapeHtml(l.emoji)}</span><span>${escapeHtml(l.text)}</span></div>`
+    )
+    .join('');
+
+  // The cover sells the deck and the item slides deliver it, so they are built
+  // differently: a cover is a count and a promise, an item slide is a name, the
+  // reason to go, and the logistics under a rule.
   const body = cover
-    ? `<div class="cover-title">${escapeHtml(slide.titleHe)}</div>` +
-      (slide.angleHe ? `<div class="cover-angle">${escapeHtml(slide.angleHe)}</div>` : '')
-    : `<div class="place">${escapeHtml(slide.nameHe)}</div>` +
-      `<div class="lines">${(slide.lines || [])
-        .map(
-          (l) =>
-            `<div class="line${l.overlong ? ' long' : ''}"><span class="em">${escapeHtml(l.emoji)}</span><span>${escapeHtml(l.text)}</span></div>`
-        )
-        .join('')}</div>`;
+    ? `<div class="plate">` +
+      (slide.eyebrow ? `<div class="eyebrow">${escapeHtml(slide.eyebrow)}</div>` : '') +
+      `<div class="cover-title${coverSize(slide.titleHe)}">${escapeHtml(slide.titleHe)}</div>` +
+      (slide.angleHe ? `<div class="cover-angle">${escapeHtml(slide.angleHe)}</div>` : '') +
+      `</div>` +
+      `<div class="swipe">החליקו ←</div>`
+    : `<div class="plate">` +
+      `<div class="place">${escapeHtml(slide.nameHe)}</div>` +
+      (slide.hook
+        ? `<div class="hook${slide.hook.overlong ? ' long' : ''}">${escapeHtml(slide.hook.text)}</div>`
+        : '') +
+      (lines ? `<div class="rule"></div><div class="lines">${lines}</div>` : '') +
+      `</div>`;
 
   // The source host is printed on every fact-bearing slide. A screenshot
   // travels without its caption, so a slide that makes a claim has to carry

@@ -114,7 +114,9 @@ export function deckApprovalMessage(cand) {
 
   lines.push(`📑 ${deck.slides.length + 1} שקופיות (שער + ${deck.slides.length} מקומות):`);
   for (const [i, s] of deck.slides.entries()) {
-    lines.push(`   ${i + 2}. ${s.nameHe} — ${s.lines.length} עובדות · ${s.sourceHost}`);
+    // The hook is what sells the slide, so it is what you read when deciding
+    // whether to approve it — a count of facts tells you nothing about that.
+    lines.push(`   ${i + 2}. ${s.nameHe} — ${s.hook?.text || '(אין וו)'} · ${s.sourceHost}`);
   }
   lines.push('');
 
@@ -267,7 +269,8 @@ export function evidenceReport(cand) {
   // different websites is unreadable.
   if (cand.kind === 'deck') {
     const blocks = (cand.deck?.slides || []).map((s, i) => {
-      const quotes = s.lines.map((l) => `   ${l.text}\n   « ${String(l.quote).slice(0, 240)} »`);
+      const all = [...(s.hook ? [{ text: s.hook.text, quote: s.hook.quote }] : []), ...s.lines];
+      const quotes = all.map((l) => `   ${l.text}\n   « ${String(l.quote).slice(0, 240)} »`);
       return [`${i + 2}. ${s.nameHe}`, `   ${s.sourceUrl}`, ...quotes].join('\n');
     });
     return blocks.length ? `📎 הציטוטים, שקופית אחר שקופית:\n\n${blocks.join('\n\n')}` : 'אין ציטוטים שמורים למצגת הזו';

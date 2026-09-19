@@ -29,7 +29,15 @@ export async function renderDeckSize(deck, { size = 'tiktok', outDir = cardOutpu
   const out = [];
 
   const cover = await renderToJpeg(
-    renderSlideHtml({ titleHe: deck.titleHe, angleHe: deck.idea?.angleHe, image: deck.slides[0]?.image }, {
+    renderSlideHtml({
+      titleHe: deck.titleHe,
+      angleHe: deck.idea?.angleHe,
+      // The city, above the title. Falls back to the English region rather than
+      // printing nothing — a cover with no place on it is the one that gets
+      // scrolled past.
+      eyebrow: deck.idea?.eyebrowHe || deck.where,
+      image: deck.slides[0]?.image,
+    }, {
       index: 1,
       total,
       size,
