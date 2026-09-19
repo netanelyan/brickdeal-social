@@ -5,6 +5,9 @@ import { searchConfigured, findOnAny, remaining as searchRemaining } from '../se
 import { fetchReadable } from '../fetchPage.js';
 import { verifyEvidence, RejectedError } from '../verify.js';
 import { findImage } from '../images.js';
+import * as unsplash from '../images/unsplash.js';
+import * as pexels from '../images/pexels.js';
+import { pickCinematic, cinematicQueries } from '../images/curate.js';
 import { destinationPlaces, pick } from '../sources/tiyulplus.js';
 import { coverForDeck } from './ideas.js';
 import { fieldsFor, hasFields } from './fields.js';
@@ -411,6 +414,66 @@ export async function draftSlideFromEntry(place, pageText) {
  * So the query leads with the place's own English name, and anything already
  * used in this deck is refused even if it is the best match for the next one.
  */
+/**
+ * One photograph, chosen by looking at several.
+ *
+ * Every earlier version asked a library for "Mala Strana Prague" and took what
+ * came back, which is how a deck ended up with a tram wire across one slide and
+ * something over the lens on the cover. Neither is visible in metadata, so the
+ * only fix is to look.
+ *
+ * Two changes do the work. The queries now ask for the photograph rather than
+ * the place — "Mala Strana Prague aerial view" finds a different kind of
+ * picture from "Mala Strana Prague". And the shortlist is judged on the
+ * thumbnails before anything is downloaded at size.
+ *
+ * `used` is shared across a deck so the same photograph cannot appear twice.
+ */
+async function cinematicImage({ nameEn, where, used, label }) {
+  const libraries = [unsplash, pexels].filter((lib) => lib.configured());
+  if (!libraries.length) return null;
+
+  for (const lib of libraries) {
+    for (const q of cinematicQueries(nameEn, where)) {
+      let pool = [];
+      try {
+        pool = await lib.candidates(q, { n: 6 });
+      } catch (e) {
+        console.error(`images: candidates "${q}" failed — ${e.message}`);
+        continue;
+      }
+
+      const fresh = pool.filter((c) => !used.has(c.key));
+      if (!fresh.length) continue;
+
+      let chosen = null;
+      try {
+        chosen = await pickCinematic(
+          fresh.map((c) => c.thumb),
+          { place: label || nameEn, where }
+        );
+      } catch (e) {
+        // A failed judgement must not cost the slide its photograph: fall back
+        // to the library's own ranking, which is what we used to trust anyway.
+        console.error(`images: curation failed, taking the library's pick — ${e.message}`);
+        chosen = { index: 0, why: 'curation unavailable' };
+      }
+
+      // 0 means "none of these is good enough" — a real answer, and the reason
+      // the query list has more than one entry.
+      if (!chosen) continue;
+
+      const pick = fresh[chosen.index];
+      const got = await lib.fetchChosen(pick).catch(() => null);
+      if (!got?.src) continue;
+
+      used.add(pick.key);
+      return { ...got, why: chosen.why, chosenFrom: fresh.length, viaQuery: q };
+    }
+  }
+  return null;
+}
+
 export async function imagesForSlides(slides, where, { cover = null } = {}) {
   const used = new Set();
 
@@ -418,37 +481,22 @@ export async function imagesForSlides(slides, where, { cover = null } = {}) {
   // photograph. A deck that opens on the same picture it shows you next looks
   // like it ran out of material before it started.
   if (cover) {
-    const shot = await findImage(
-      { imageQuery: `${where} city view`, placeEn: where, countryEn: where },
-      { order: ['catalogue', 'stock'] }
-    ).catch(() => null);
-    if (shot?.src) {
-      cover.image = shot;
-      used.add(shot.credit || shot.src.slice(-96));
-    }
+    const shot = await cinematicImage({ nameEn: where, where, used, label: where });
+    if (shot) cover.image = shot;
   }
 
+
   for (const slide of slides) {
-    let picked = null;
-    // Tried in order: the place by name, then the place plus the city, then
-    // the city alone. Only the first two can be specific; the third exists so
-    // a slide is not left blank, and it is the one most likely to collide.
-    const queries = [slide.nameEn, `${slide.nameEn} ${where}`, `${where} travel`].filter(Boolean);
-
-    for (const q of queries) {
-      const got = await findImage({ imageQuery: q, placeEn: slide.nameEn, countryEn: where }, { order: ['catalogue', 'stock'] }).catch(
-        () => null
-      );
-      if (!got?.src) continue;
-      const key = got.credit || got.src.slice(-96);
-      if (used.has(key)) continue;
-      used.add(key);
-      picked = got;
-      break;
-    }
-
+    const picked = await cinematicImage({
+      nameEn: slide.nameEn,
+      where,
+      used,
+      label: slide.nameHe,
+    });
     slide.image = picked;
-    if (!picked) slide.imageMiss = `no unused photograph for "${slide.nameEn}"`;
+    // "None of these was good enough" is a real answer here, not a failure to
+    // find anything — the curator refuses a snapshot on purpose.
+    if (!picked) slide.imageMiss = `no photograph good enough for "${slide.nameEn}"`;
   }
   return slides;
 }

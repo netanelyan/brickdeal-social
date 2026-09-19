@@ -61,6 +61,72 @@ export async function search(query, { timeoutMs = 15_000 } = {}) {
   };
 }
 
+/**
+ * A shortlist with thumbnails, for a caller that wants to look before choosing.
+ *
+ * Same contract as the Unsplash provider's. scorePhoto() still does the first
+ * cut — it is good at refusing product shots and portraits from the alt text —
+ * and what it cannot see (a cable across the frame, flat grey light) is what
+ * the caller's own eyes are for.
+ */
+export async function candidates(query, { n = 6, timeoutMs = 15_000 } = {}) {
+  const q = String(query || '').trim();
+  if (!q) return [];
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let json;
+  try {
+    const res = await fetch(`${API}?${new URLSearchParams({ query: q, per_page: '30' })}`, {
+      headers: { Authorization: process.env.PEXELS_API_KEY },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`Pexels search failed: HTTP ${res.status}`);
+    json = await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const ranked = (json.photos || [])
+    .map((photo) => ({ photo, score: scorePhoto(photo, q) }))
+    .filter((r) => Number.isFinite(r.score))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, n);
+
+  const out = [];
+  for (const { photo } of ranked) {
+    const thumbUrl = photo?.src?.medium || photo?.src?.small;
+    if (!thumbUrl) continue;
+    const bytes = await download(thumbUrl, timeoutMs);
+    if (!bytes) continue;
+    out.push({
+      library: 'pexels',
+      photo,
+      thumb: bytes.buf,
+      credit: photo.photographer ? `Pexels / ${photo.photographer}` : 'Pexels',
+      key: String(photo.id),
+      query: q,
+    });
+  }
+  return out;
+}
+
+/** Download one candidate at card size, once it has been chosen. */
+export async function fetchChosen(candidate, { timeoutMs = 15_000 } = {}) {
+  const href = cropUrl(candidate.photo);
+  if (!href) return null;
+  const bytes = await download(href, timeoutMs);
+  if (!bytes) return null;
+  return {
+    src: `data:${bytes.type};base64,${bytes.buf.toString('base64')}`,
+    provenance: 'stock',
+    credit: candidate.credit,
+    sourceUrl: candidate.photo.url || null,
+    alt: candidate.photo.alt || '',
+    query: candidate.query,
+  };
+}
+
 async function bestOf(q, { orientation, timeoutMs }) {
   const params = { query: q, per_page: '30' };
   if (orientation) params.orientation = orientation;

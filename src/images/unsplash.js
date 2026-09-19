@@ -95,6 +95,71 @@ async function bestOf(query, { orientation, timeoutMs }) {
   return usable.sort((a, b) => (b.likes || 0) - (a.likes || 0))[0];
 }
 
+/**
+ * Several candidates with thumbnails, for a caller that wants to LOOK before
+ * choosing.
+ *
+ * The ranking this module can do on its own is popularity and resolution, and
+ * neither knows whether a cable crosses the frame. So the expensive judgement
+ * is handed upwards: this returns a shortlist with 200px thumbs, and
+ * images/curate.js decides.
+ */
+export async function candidates(query, { n = 6, timeoutMs = 15_000 } = {}) {
+  const q = String(query || '').trim();
+  if (!q) return [];
+
+  const params = new URLSearchParams({ query: q, per_page: '24', content_filter: 'high' });
+  let json;
+  try {
+    const res = await fetch(`${API}?${params}`, { headers: auth(), signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    json = await res.json();
+  } catch (e) {
+    throw new Error(`unsplash search failed: ${e.message}`);
+  }
+
+  const usable = (json.results || [])
+    .filter((p) => (p.width || 0) >= MIN_WIDTH)
+    .sort((a, b) => (b.likes || 0) - (a.likes || 0))
+    .slice(0, n);
+
+  const out = [];
+  for (const photo of usable) {
+    const thumbUrl = cropUrl(photo, { w: 440, h: 780 });
+    const bytes = await download(thumbUrl, timeoutMs);
+    if (!bytes) continue;
+    out.push({
+      library: 'unsplash',
+      photo,
+      thumb: bytes.buf,
+      credit: photo.user?.name ? `Unsplash / ${photo.user.name}` : 'Unsplash',
+      key: photo.id,
+      query: q,
+    });
+  }
+  return out;
+}
+
+/** Download one candidate at card size, once it has been chosen. */
+export async function fetchChosen(candidate, { w = CARD_W, h = CARD_H, timeoutMs = 15_000 } = {}) {
+  const href = cropUrl(candidate.photo, { w, h });
+  if (!href) return null;
+  const bytes = await download(href, timeoutMs);
+  if (!bytes) return null;
+
+  trackDownload(candidate.photo);
+
+  return {
+    src: `data:${bytes.type};base64,${bytes.buf.toString('base64')}`,
+    provenance: 'stock',
+    credit: candidate.credit,
+    creditUrl: candidate.photo.user?.links?.html || null,
+    sourceUrl: candidate.photo.links?.html || null,
+    alt: candidate.photo.alt_description || '',
+    query: candidate.query,
+  };
+}
+
 /** Same contract as the Pexels provider: { src, provenance, credit } or null. */
 export async function search(query, { timeoutMs = 15_000, w = CARD_W, h = CARD_H } = {}) {
   const q = String(query || '').trim();
