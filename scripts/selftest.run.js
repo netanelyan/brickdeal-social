@@ -1266,7 +1266,17 @@ ok('an overlong line renders smaller rather than being dropped', renderSlideHtml
   { index: 2, total: 3, size: 'tiktok' }
 ).includes('line long'));
 ok('the slide carries the source host', slideHtml.includes('nm.cz'));
-ok('and the counter reads like the platform’s own', slideHtml.includes('2/3'));
+// TikTok draws its own slide counter and genuine posts carry no second one, so
+// ours was the tell that this had been made elsewhere and uploaded.
+ok('no counter of our own', !slideHtml.includes('class="counter"'));
+// Nor our own domain on a fact slide. The source stays; branding on every
+// slide is what an advertisement looks like.
+ok('the brand is not on every slide', !slideHtml.includes('tiyulplus'));
+ok('but it is on the cover', renderSlideHtml({ titleHe: 'x' }, { index: 1, total: 3, cover: true }).includes('tiyulplus'));
+// Legibility without a panel: the outline is what makes white type work on a
+// sunlit facade, and paint-order is what stops the stroke eating the letters.
+ok('type is outlined rather than plated', slideHtml.includes('paint-order: stroke fill'));
+ok('and the emoji is exempt, or it renders as a black blob', slideHtml.includes('-webkit-text-stroke: 0'));
 eq('TikTok slides are 9:16', `${SIZES.tiktok.w}x${SIZES.tiktok.h}`, '1080x1920');
 eq('Instagram slides are 4:5, because the feed crops anything taller', `${SIZES.instagram.w}x${SIZES.instagram.h}`, '1080x1350');
 ok('a slide with no photograph still renders', renderSlideHtml({ nameHe: 'x', lines: [] }, { index: 2, total: 3 }).includes('linear-gradient'));

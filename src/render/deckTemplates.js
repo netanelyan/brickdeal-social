@@ -45,36 +45,43 @@ body {
 .photo, .scrim, .content { position: absolute; inset: 0; }
 .photo { object-fit: cover; width: ${w}px; height: ${h}px; }
 
-/* A gradient alone does not do it. The first decks put cream type straight over
-   a sunlit building and the text disappeared into the facade — a scrim that is
-   dark enough to fix that is dark enough to ruin the photograph.
-   So the wash stays gentle and the type sits on its own plate instead. */
+/* Barely there. The photograph is the post; this only takes the edge off a
+   blown-out sky so white type has something to sit against. */
 .scrim {
   background:
-    linear-gradient(to bottom, rgba(6,14,13,0.66) 0%, rgba(6,14,13,0.16) 30%, rgba(6,14,13,0.28) 58%, rgba(6,14,13,0.88) 100%);
+    linear-gradient(to bottom, rgba(6,14,13,0.34) 0%, rgba(6,14,13,0.06) 26%, rgba(6,14,13,0.10) 62%, rgba(6,14,13,0.58) 100%);
 }
 
-/* The plate. Legibility stops depending on what the photograph happens to be
-   doing behind any given word. */
+/* Legibility comes from the letters themselves, not from a panel behind them.
+
+   The first version put the type on a blurred dark plate. It was perfectly
+   readable and it looked like an advertisement: a card floating over a holiday
+   photo is a thing a brand makes, and the format's own convention — white text
+   with a heavy outline, straight on the image — is what everything else in the
+   feed looks like. paint-order is what makes it work: without it the stroke is
+   painted over the fill and eats the letterforms from the inside. */
 .plate {
-  background: rgba(8,17,16,0.62);
-  backdrop-filter: blur(18px) saturate(0.9);
-  border-radius: ${Math.round(w * 0.045)}px;
-  padding: ${Math.round(h * 0.032)}px ${Math.round(w * 0.055)}px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: ${Math.round(h * 0.014)}px;
-  max-width: 92%;
-  box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+  max-width: 94%;
+}
+.cover-title, .place, .hook, .line, .eyebrow, .swipe {
+  paint-order: stroke fill;
+  -webkit-text-stroke: ${Math.round(h * 0.0055)}px rgba(0,0,0,0.92);
+  text-shadow: 0 ${Math.round(h * 0.004)}px ${Math.round(h * 0.012)}px rgba(0,0,0,0.55);
 }
 
+/* Text sits above the middle, not in it. Centred type lands on whatever the
+   subject of the photograph is; the upper third clears it, and it clears the
+   app's own furniture at the bottom of the screen too. */
 .content {
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
-  padding: ${Math.round(h * 0.06)}px ${Math.round(w * 0.075)}px ${bottomSafe}px;
+  padding: ${Math.round(h * 0.22)}px ${Math.round(w * 0.065)}px ${bottomSafe}px;
   gap: ${Math.round(h * 0.018)}px;
 }
 
@@ -106,14 +113,13 @@ body {
 /* The format's own convention. A slideshow that does not say it is a slideshow
    gets read as a single image and swiped past. */
 .swipe {
-  margin-top: ${Math.round(h * 0.03)}px;
+  position: absolute;
+  left: 0; right: 0;
+  bottom: ${Math.round(bottomSafe * 0.72)}px;
   font-size: ${Math.round(h * 0.024)}px;
   font-weight: 800;
   color: rgba(255,248,230,0.92);
-  background: rgba(8,17,16,0.55);
-  border-radius: 999px;
-  padding: 10px 26px;
-  text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+  letter-spacing: 1px;
 }
 .cover-angle {
   font-size: ${Math.round(h * 0.028)}px;
@@ -126,7 +132,7 @@ body {
 }
 
 .place {
-  font-size: ${Math.round(h * 0.044)}px;
+  font-size: ${Math.round(h * 0.046)}px;
   font-weight: 900;
   line-height: 1.1;
   color: #FFE9A8;
@@ -137,28 +143,24 @@ body {
    lines and set apart from them, because on the slide as on the trip it is the
    reason and they are the logistics. */
 .hook {
-  font-size: ${Math.round(h * 0.0335)}px;
+  font-size: ${Math.round(h * 0.0345)}px;
   font-weight: 800;
-  line-height: 1.28;
-  color: #FFF8E6;
-  max-width: 92%;
+  line-height: 1.26;
+  color: #FFFFFF;
+  max-width: 94%;
 }
-.hook.long { font-size: ${Math.round(h * 0.029)}px; }
-.rule {
-  width: ${Math.round(w * 0.14)}px;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255,233,168,0.55);
-  margin: ${Math.round(h * 0.006)}px 0;
-}
+.hook.long { font-size: ${Math.round(h * 0.0295)}px; }
+/* No divider. A rule between the hook and the facts is furniture — the gap
+   already does that job, and every line of decoration moves this further from
+   what the feed looks like. */
+.rule { display: none; }
 
 .lines { display: flex; flex-direction: column; gap: ${Math.round(h * 0.0125)}px; align-items: center; }
 .line {
   font-size: ${Math.round(h * 0.0295)}px;
   font-weight: 700;
   line-height: 1.25;
-  color: #FFF8E6;
-  text-shadow: 0 3px 18px rgba(0,0,0,0.85), 0 1px 0 rgba(0,0,0,0.6);
+  color: #FFFFFF;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -167,39 +169,30 @@ body {
      Hebrew. */
   unicode-bidi: isolate;
 }
-.line .em { font-size: 1.05em; }
+.line .em { font-size: 1.05em; -webkit-text-stroke: 0; paint-order: normal; }
 /* A line the drafting step made too long still renders, one step smaller,
    rather than wrapping into three lines of mush or being silently dropped —
    the fact was verified, and hiding a verified fact is the worse failure. */
 .line.long { font-size: ${Math.round(h * 0.0245)}px; }
 
-.counter {
-  position: absolute;
-  top: ${Math.round(h * 0.035)}px;
-  left: ${Math.round(w * 0.06)}px;
-  font-size: ${Math.round(h * 0.022)}px;
-  font-weight: 800;
-  color: rgba(255,248,230,0.92);
-  background: rgba(6,14,13,0.45);
-  border-radius: 999px;
-  padding: 6px 16px;
-  direction: ltr;
-}
-
+/* No slide counter. TikTok draws its own, and a second one in our styling was
+   the tell that this was made somewhere else and uploaded.
+   The attribution stays, because a claim without its source is not something
+   this pipeline ships — but small, low, and quiet enough not to read as a
+   logo. The brand appears on the cover and nowhere else. */
 .foot {
   position: absolute;
   left: 0; right: 0;
-  bottom: ${Math.round(bottomSafe * 0.42)}px;
+  bottom: ${Math.round(bottomSafe * 0.34)}px;
   display: flex;
   justify-content: center;
-  gap: 16px;
-  font-size: ${Math.round(h * 0.019)}px;
+  gap: 12px;
+  font-size: ${Math.round(h * 0.0155)}px;
   font-weight: 600;
-  color: rgba(255,248,230,0.78);
-  text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+  color: rgba(255,255,255,0.62);
+  text-shadow: 0 2px 8px rgba(0,0,0,0.9);
 }
-.foot .dot { opacity: 0.5; }
-.site { font-weight: 800; color: rgba(255,233,168,0.92); direction: ltr; }
+.site { font-weight: 700; color: rgba(255,255,255,0.72); direction: ltr; }
 .src { direction: ltr; }
 `;
 
@@ -254,17 +247,20 @@ export function renderSlideHtml(slide, { index, total, size = 'tiktok', cover = 
       (lines ? `<div class="rule"></div><div class="lines">${lines}</div>` : '') +
       `</div>`;
 
-  // The source host is printed on every fact-bearing slide. A screenshot
-  // travels without its caption, so a slide that makes a claim has to carry
-  // where the claim came from — the same rule the news card's footer follows.
+  // The source host on a fact slide, the site on the cover, and never both.
+  //
+  // A screenshot travels without its caption, so a slide making a claim has to
+  // say where the claim came from — that rule does not bend for a format. What
+  // changed is the volume: printing our own domain next to the source on every
+  // slide was branding, and branding on every slide is what an advertisement
+  // looks like.
   const foot = cover
     ? `<span class="site">${escapeHtml(siteMark())}</span>`
-    : `<span class="src">${escapeHtml(slide.sourceHost || '')}</span><span class="dot">·</span><span class="site">${escapeHtml(siteMark())}</span>`;
+    : `<span class="src">${escapeHtml(slide.sourceHost || '')}</span>`;
 
   return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><style>${css(s)}</style></head><body>
 ${photo(slide.image, s)}
 <div class="scrim"></div>
-<div class="counter">${index}/${total}</div>
 <div class="content">${body}</div>
 <div class="foot">${foot}</div>
 </body></html>`;
