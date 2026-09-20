@@ -91,6 +91,24 @@ export function rejectSingle(item) {
 }
 
 /** Everything this card owed has now gone out. */
+/**
+ * A destination was given up on for this card alone.
+ *
+ * Deliberately not phrased as a failure, because nothing is wrong with the
+ * destination and nothing will be retried. The card carries something that
+ * destination cannot accept — most often a TikTok privacy level that was never
+ * attached, on a card approved while TikTok was unreachable — and the honest
+ * report is that this one copy will not be made.
+ */
+export function targetAbandoned(headline, abandoned = []) {
+  return [
+    `⤫ ויתרנו על ${targetsHe(abandoned.map((a) => a.target))} לפוסט הזה`,
+    headline,
+    ...abandoned.map((a) => `   ${TARGET_HE[a.target] || a.target}: ${a.message}`),
+    'לא ינוסה שוב - הבעיה בפוסט עצמו, לא ביעד. שאר היעדים לא נפגעו.',
+  ].join('\n');
+}
+
 export function published({ headline, succeeded, failed = [] }) {
   const lines = [`📤 פורסם ל${targetsHe(succeeded)}`, headline];
   for (const f of failed) {

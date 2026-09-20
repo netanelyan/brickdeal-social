@@ -37,7 +37,7 @@ import { sameSite } from '../src/search.js';
 import { authorityDomains, KINDS } from '../src/sources/places.js';
 import { pick, CATEGORY_HE, canonicalKind } from '../src/sources/tiyulplus.js';
 import { keepByName } from '../src/deck/shape.js';
-import { quietAlert } from '../src/notify.js';
+import { quietAlert, targetAbandoned as notifyTargetAbandoned } from '../src/notify.js';
 import { describeError, InstagramError } from '../src/publish/instagram.js';
 import { publishTargets, targetsForKind, allowedForKind } from '../src/publish/targets.js';
 import {
@@ -1144,6 +1144,27 @@ const noPrivacy = await publishTikTok({ card: { url: 'https://x/c.jpg' } }).then
 );
 ok('refuses to publish with no privacy level chosen', noPrivacy instanceof TikTokError);
 ok('and says so before any API call', noPrivacy.step === 'config', `step was ${noPrivacy?.step}`);
+
+// `step: 'config'` is load-bearing beyond being a label. The publish loop reads
+// it to tell "this CARD can never go here" from "this DESTINATION is having a
+// bad day", and the difference is what stopped a run of unpublishable cards
+// degrading TikTok and taking good cards down with them: three no-privacy
+// cards marked the destination degraded, and every card behind them was then
+// skipped and held without ever being attempted.
+//
+// Every per-card refusal must carry it, or it gets scored as an outage.
+for (const [what, cand] of [
+  ['no privacy level', { card: { url: 'https://x/c.jpg' } }],
+  ['a non-https image', { tiktok: { privacy: 'SELF_ONLY' }, card: { url: 'http://x/c.jpg' } }],
+]) {
+  const e = await publishTikTok(cand).then(() => null, (err) => err);
+  ok(`${what} is the card's problem, not the destination's`, e?.step === 'config', `step was ${e?.step}`);
+}
+// And the message the owner gets says so, rather than reading as a failure.
+const abandonMsg = notifyTargetAbandoned('כותרת', [{ target: 'tiktok', message: 'no privacy level was chosen at approval' }]);
+ok('the notice names the destination given up on', abandonMsg.includes('טיקטוק'));
+ok('and says it will not be retried', abandonMsg.includes('לא ינוסה שוב'));
+ok('and clears the destination of blame', abandonMsg.includes('לא ביעד'));
 ok('tiktok is not configured in the test environment', !tiktokConfigured());
 
 // The error text has to name the code, because TikTok's sentence alone often

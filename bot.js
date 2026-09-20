@@ -459,6 +459,9 @@ async function publishNext() {
 
   const done = {};
   const failed = [];
+  // Targets this particular card can never reach, as opposed to targets that
+  // are having a bad day. See the catch below.
+  const abandoned = [];
 
   const publishers = {
     telegram: () =>
@@ -480,6 +483,26 @@ async function publishNext() {
     } catch (e) {
       const detail = (errorText[target] || ((x) => x.message))(e);
       console.error(`publish: ${target} failed:`, detail);
+
+      // A card this destination can NEVER accept is not an outage, and scoring
+      // it as one does real damage.
+      //
+      // `step: 'config'` is the publisher saying the problem is the card: no
+      // privacy level, an image URL that is not https, more than 35 images.
+      // Retrying cannot change any of those, and three such cards in a row
+      // degraded TikTok — after which perfectly good cards behind them were
+      // skipped and held without ever being attempted. That is how six posts
+      // staged before TikTok was connected took the whole destination down
+      // with them.
+      //
+      // So the target is dropped for THIS card and for nothing else: the
+      // destination keeps its health, the card publishes everywhere it can,
+      // and it is reported rather than retried into a hold.
+      if (e?.step === 'config') {
+        abandoned.push({ target, message: detail });
+        continue;
+      }
+
       const health = store.noteTargetFailed(target, detail);
       failed.push({ target, message: detail });
       // The edge, not the state: one escalation per outage rather than one per
@@ -505,10 +528,22 @@ async function publishNext() {
     });
   }
 
-  // What this card still owes after this pass.
+  // Said once, whichever way the card ends up going — it is the only notice
+  // that a destination was given up on, and it must not be lost inside a
+  // "retrying" or "held" message about a different target.
+  if (abandoned.length) {
+    await notify.send(bot.telegram, staging, notify.targetAbandoned(cand.headline, abandoned));
+  }
+
+  // What this card still owes after this pass. Abandoned targets are NOT owed:
+  // nothing about a later attempt would go differently.
   const stillOwed = [...skipped, ...failed.map((f) => f.target)];
   if (!stillOwed.length) {
-    await notify.send(bot.telegram, staging, notify.published({ headline: cand.headline, succeeded, failed: [] }));
+    // A card whose only remaining target was abandoned has nothing to announce
+    // as published — saying "📤 פורסם ל" with an empty list reads as a bug.
+    if (succeeded.length) {
+      await notify.send(bot.telegram, staging, notify.published({ headline: cand.headline, succeeded, failed: [] }));
+    }
     return true;
   }
 
