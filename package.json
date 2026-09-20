@@ -11,6 +11,7 @@
     "start": "node bot.js",
     "test": "node scripts/selftest.js",
     "run-once": "node scripts/run-once.js",
+    "dry-run": "node scripts/dry-run.js",
     "preview": "node scripts/preview.js",
     "check-sources": "node scripts/check-sources.js",
     "eval-feed": "node scripts/eval-feed.js",

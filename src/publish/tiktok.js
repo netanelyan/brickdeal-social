@@ -510,18 +510,27 @@ export async function resolvePrivacy(cand, { allowRefetch = true } = {}) {
   const shown = cand.tiktok?.privacy || null;
   const knownOptions = cand.tiktok?.options?.length ? cand.tiktok.options : null;
 
-  // The normal path: the owner saw a level, tapped approve, and the account
-  // still offers it. Nothing to say.
-  if (shown && (!knownOptions || knownOptions.includes(shown))) {
-    return { privacy: shown, source: 'approval', offered: knownOptions, note: null };
-  }
-
+  // Always ask, rather than trusting what was stored at staging.
+  //
+  // The stored options are a photograph of the account taken when the card was
+  // built, and this pipeline holds approved posts for hours and held ones for
+  // days. They go stale in the one direction that matters: a card staged while
+  // @tiyulplus was PUBLIC carries options:['PUBLIC_TO_EVERYONE', ...], and
+  // believing that list would publish it publicly today — from an unaudited
+  // client, against an account that is now private, which TikTok refuses
+  // anyway. Trusting the snapshot is how a post goes out at a privacy level
+  // the account no longer has.
+  //
+  // The call is not an extra cost either: TikTok requires creator_info before
+  // every Direct Post. Asking here is what the documented flow actually wants.
   let offered = knownOptions;
   let refetchError = null;
   if (allowRefetch) {
     try {
       offered = (await creatorInfo()).options;
     } catch (e) {
+      // Fall back to the snapshot. It is worse than a fresh answer and much
+      // better than nothing, and the level it produces is still checked below.
       refetchError = e;
     }
   }
