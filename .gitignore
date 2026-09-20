@@ -14,6 +14,12 @@ data/
 # these are written straight into the Caddy web root instead (CARD_OUTPUT_DIR).
 out/
 
+# Pre-change backups taken on the VPS. `.env.*` above already catches the env
+# copies wherever they sit, but a store.json backup is the TikTok and Instagram
+# token pair under a name `data/` does not match — the one file here that would
+# have been committable.
+backups/
+
 # Sample cards from `npm run render-samples` — a local eyeballing aid, not an
 # artifact worth versioning. Anchored with a leading slash: unanchored, it also
 # matched assets/samples/, which is checked in on purpose for the README.
