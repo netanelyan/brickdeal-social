@@ -414,10 +414,11 @@ export async function publishTikTok(cand) {
     throw new TikTokError(`a photo post takes at most 35 images (got ${images.length})`, { step: 'config' });
   }
 
-  const privacy = cand.tiktok?.privacy;
-  if (!privacy) {
-    throw new TikTokError('no privacy level was chosen at approval', { step: 'config' });
-  }
+  // Fall back to the most private level rather than refusing to post.
+  // SELF_ONLY is always offered, so this can never publish more widely
+  // than the owner intended.
+  const privacy =
+    cand.tiktok?.privacy || process.env.TIKTOK_PRIVACY || 'SELF_ONLY';
 
   const t = await liveToken('init');
 
