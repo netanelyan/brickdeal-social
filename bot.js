@@ -33,7 +33,7 @@ import {
   describeError as describeTikTokError,
   isCardLevel as isCardLevelTikTok,
 } from './src/publish/tiktok.js';
-import { publishTargets, targetsHe } from './src/publish/targets.js';
+import { publishTargets, targetsHe, allowedForKind } from './src/publish/targets.js';
 import { imagesEnabled } from './src/images.js';
 import { reasonHe } from './src/verify.js';
 import { LAYOUT_HE } from './src/render/templates.js';
@@ -434,10 +434,43 @@ async function publishNext() {
   if (!cand) return false;
 
   const configured = publishTargets();
-  // On a first attempt this is everything; on a retry it is only what failed.
-  const owed = (cand.pendingTargets?.length ? cand.pendingTargets : configured).filter((t) =>
-    configured.includes(t)
+
+  // What this card was BUILT for, not what happens to be configured now.
+  //
+  // These are different lists and conflating them is what stopped TikTok ever
+  // working. A card is editorially barred from TikTok (targets.js), so
+  // candidate.js stamps it `['telegram','instagram']` and bot.js never asks
+  // creator_info for it — leaving it, correctly, with no privacy level. Reading
+  // the global list here then sent that same card to TikTok anyway, where it
+  // died on `no privacy level was chosen at approval`. Every card did. The
+  // approval message has always promised the opposite ("what you were shown is
+  // what was true when you decided") and this is where that promise was kept.
+  //
+  // `allowedForKind` is applied as well as the stamp, so a candidate queued
+  // before the per-kind rule existed is held to it too rather than being
+  // grandfathered into a destination it can never satisfy.
+  const allowed = allowedForKind(cand.kind);
+  const intended = (cand.publishTargets?.length ? cand.publishTargets : configured).filter((t) =>
+    allowed.includes(t)
   );
+
+  // On a first attempt this is everything it was built for; on a retry it is
+  // only what failed — still filtered, so a stale pendingTargets cannot
+  // resurrect a destination the kind does not allow.
+  const owed = (cand.pendingTargets?.length ? cand.pendingTargets : intended).filter(
+    (t) => configured.includes(t) && allowed.includes(t)
+  );
+
+  // Not silent: a card that owed a destination its kind cannot accept is a
+  // candidate built under an older rule, and the queue draining quietly is how
+  // this went unnoticed for 45 published posts.
+  const disallowed = (cand.pendingTargets?.length ? cand.pendingTargets : cand.publishTargets || [])
+    .filter((t) => !allowed.includes(t));
+  if (disallowed.length) {
+    console.log(
+      `publish: ${disallowed.join(', ')} dropped for this ${cand.kind || 'card'} — not a destination this kind publishes to`
+    );
+  }
 
   // Nothing to do — the destination was reconfigured away while this sat in the
   // queue. Recording it stops it looping forever as a card that owes nothing.
