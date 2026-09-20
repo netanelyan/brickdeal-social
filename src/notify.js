@@ -152,6 +152,87 @@ export function publishHeld(headline, owed, succeeded = [], heldCount = 1) {
 }
 
 /**
+ * A platform said "not now", and it meant it.
+ *
+ * Deliberately not the same message as a failure or a hold. TikTok allows an
+ * unaudited client five posts a day; the sixth is refused, and that is the
+ * platform working as documented rather than anything being wrong. Saying so in
+ * the vocabulary of an outage would train you to ignore the word "failed" on
+ * the day it means something.
+ *
+ * It says when the slot frees, because the only question worth answering here
+ * is "so when does it go out".
+ */
+export function platformLimited(headline, limited = [], freesAt = null) {
+  const lines = [`⏳ ${targetsHe(limited.map((l) => l.target))} — מגבלת פלטפורמה, הפוסט ממתין`, headline];
+  for (const l of limited) lines.push(`   ${TARGET_HE[l.target] || l.target}: ${l.message}`);
+  if (freesAt) {
+    lines.push(`🕒 המכסה מתפנה בעוד ${humanDuration(Math.max(0, freesAt - Date.now()))}`);
+  }
+  lines.push('זו מגבלה של הפלטפורמה, לא תקלה — לא עוקפים אותה. הפוסט יישלח כשהמכסה תתפנה.');
+  return lines.join('\n');
+}
+
+/**
+ * Per-destination health, on demand.
+ *
+ * The one report that answers "is it working" for each destination separately.
+ * A global "something published recently" reads as healthy while one
+ * destination has been dark for a week, which is exactly how TikTok managed to
+ * never once succeed without that being the headline anywhere.
+ */
+export function healthReport(rows = [], extra = []) {
+  const lines = ['🩺 בריאות היעדים', ''];
+  if (!rows.length) lines.push('אין יעדים מוגדרים.');
+
+  for (const r of rows) {
+    const name = TARGET_HE[r.target] || r.target;
+    if (r.degraded) {
+      lines.push(`🔴 ${name} — מושבת אחרי ${r.failures} כשלונות ברצף`);
+      if (r.recoveryDueAt) {
+        const left = r.recoveryDueAt - Date.now();
+        lines.push(
+          left > 0
+            ? `   בדיקה חוזרת אוטומטית בעוד ${humanDuration(left)}`
+            : '   מוכן לבדיקה חוזרת — הפוסט הבא ינסה'
+        );
+      }
+    } else if (r.failures > 0) {
+      lines.push(`🟡 ${name} — ${r.failures} כשלונות ברצף, עדיין מנסה`);
+    } else {
+      lines.push(`🟢 ${name} — תקין`);
+    }
+
+    lines.push(
+      r.lastOkAt
+        ? `   ✅ פורסם לאחרונה לפני ${humanDuration(Date.now() - r.lastOkAt)}`
+        : '   ⚠️ מעולם לא פורסם בהצלחה'
+    );
+    if (r.lastError) lines.push(`   ⛔ ${r.lastError}`);
+  }
+
+  if (extra.length) lines.push('', ...extra);
+  return lines.join('\n');
+}
+
+/**
+ * The owner asked for something the bot would normally refuse.
+ *
+ * Every guard that was stepped over, named, before the post goes out. The point
+ * is not permission — the owner already has that — it is that a repeat should
+ * be a decision rather than something noticed three posts later. So this is
+ * sent even when it is obvious, and it names the guard and the measurement that
+ * tripped it rather than saying "overridden".
+ */
+export function overrideNotice(headline, overrides = []) {
+  if (!overrides.length) return null;
+  const lines = ['🔓 עקיפת בקרות (בקשת בעלים)', headline, ''];
+  for (const o of overrides) lines.push(`   • ${o}`);
+  lines.push('', 'מגבלות הפלטפורמה עצמן לא נעקפות.');
+  return lines.join('\n');
+}
+
+/**
  * A destination has failed enough times running to be called broken.
  *
  * Fired on the edge — the failure that tips it over — not on every card, because

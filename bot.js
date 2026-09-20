@@ -32,6 +32,8 @@ import {
   refreshTokenDaysLeft as tiktokRefreshDaysLeft,
   describeError as describeTikTokError,
   isCardLevel as isCardLevelTikTok,
+  isPlatformLimit as isPlatformLimitTikTok,
+  TIKTOK_DAILY_CAP,
 } from './src/publish/tiktok.js';
 import { publishTargets, targetsHe, allowedForKind } from './src/publish/targets.js';
 import { imagesEnabled } from './src/images.js';
@@ -496,6 +498,10 @@ async function publishNext() {
   // Targets this particular card can never reach, as opposed to targets that
   // are having a bad day. See the catch below.
   const abandoned = [];
+  // And a third kind: targets that are fine, and are simply not accepting
+  // another post yet. A daily cap is neither a broken destination nor a broken
+  // card, and treating it as either loses a post that would publish tomorrow.
+  const limited = [];
 
   const publishers = {
     telegram: () =>
@@ -513,6 +519,11 @@ async function publishNext() {
   // its error codes mean "this card" rather than "this service".
   const cardLevel = {
     tiktok: isCardLevelTikTok,
+  };
+  // Same shape, different question: is this destination refusing everyone
+  // right now, rather than refusing this card or being broken?
+  const platformLimit = {
+    tiktok: isPlatformLimitTikTok,
   };
 
   for (const target of live) {
@@ -542,6 +553,16 @@ async function publishNext() {
       // these at its end — an unaudited app asking for a public post is
       // refused at init, and the next card asking for a private one publishes
       // fine, so the destination is healthy and must not be marked otherwise.
+      // "Not now" — checked BEFORE the card-level test, because a platform
+      // limit arrives as step:'config' from our own preflight and would
+      // otherwise be read as a card that can never publish. It can; it just
+      // cannot publish yet. The destination keeps its health (nothing is wrong
+      // with it), the card keeps its place, and nothing is abandoned.
+      if (platformLimit[target]?.(e)) {
+        limited.push({ target, message: detail });
+        continue;
+      }
+
       if (e?.step === 'config' || cardLevel[target]?.(e)) {
         abandoned.push({ target, message: detail });
         continue;
@@ -572,6 +593,21 @@ async function publishNext() {
     });
   }
 
+  // Anything a publisher repaired on the way through — a privacy level the
+  // account no longer offers, slides trimmed to TikTok's 35 — is reported
+  // whether or not the post otherwise succeeded. A post that went out at a
+  // different privacy level than the approval card promised is exactly the
+  // thing that must not be discoverable only by looking at TikTok.
+  const publisherNotes = [];
+  for (const target of succeeded) {
+    for (const note of done[target]?.notes || []) {
+      publisherNotes.push(`   ${targetsHe([target])}: ${note}`);
+    }
+  }
+  if (publisherNotes.length) {
+    await notify.send(bot.telegram, staging, ['ℹ️ שינויים בפרסום', cand.headline, ...publisherNotes].join('\n'));
+  }
+
   // Said once, whichever way the card ends up going — it is the only notice
   // that a destination was given up on, and it must not be lost inside a
   // "retrying" or "held" message about a different target.
@@ -581,7 +617,7 @@ async function publishNext() {
 
   // What this card still owes after this pass. Abandoned targets are NOT owed:
   // nothing about a later attempt would go differently.
-  const stillOwed = [...skipped, ...failed.map((f) => f.target)];
+  const stillOwed = [...skipped, ...failed.map((f) => f.target), ...limited.map((l) => l.target)];
   if (!stillOwed.length) {
     // A card whose only remaining target was abandoned has nothing to announce
     // as published — saying "📤 פורסם ל" with an empty list reads as a bug.
@@ -591,16 +627,29 @@ async function publishNext() {
     return true;
   }
 
-  const attempts = (cand.publishAttempts || 0) + 1;
-  const retryable = skipped.length === 0 && attempts < MAX_PUBLISH_ATTEMPTS;
+  // A pass that only ran into a platform limit has not used an attempt. The
+  // three-attempt ceiling exists to stop a card failing forever; a card waiting
+  // on a daily quota is not failing, and spending its attempts on the wait
+  // would drop it just as the quota came free.
+  const onlyLimited = limited.length > 0 && failed.length === 0 && skipped.length === 0;
+  const attempts = (cand.publishAttempts || 0) + (onlyLimited ? 0 : 1);
+  const retryable = onlyLimited || (skipped.length === 0 && attempts < MAX_PUBLISH_ATTEMPTS);
 
   if (retryable) {
     store.enqueue({ ...cand, publishAttempts: attempts, pendingTargets: stillOwed });
-    await notify.send(
-      bot.telegram,
-      staging,
-      notify.publishRetrying(cand.headline, failed, attempts, MAX_PUBLISH_ATTEMPTS, succeeded)
-    );
+    if (onlyLimited) {
+      await notify.send(
+        bot.telegram,
+        staging,
+        notify.platformLimited(cand.headline, limited, store.tiktokCapFreesAt())
+      );
+    } else {
+      await notify.send(
+        bot.telegram,
+        staging,
+        notify.publishRetrying(cand.headline, failed, attempts, MAX_PUBLISH_ATTEMPTS, succeeded)
+      );
+    }
   } else {
     // Held, not dropped. While a destination is blocked there is nothing useful
     // to retry against — but there will be, and the backlog should still exist
@@ -1117,6 +1166,48 @@ bot.command('tiktok', async (ctx) => {
   }
 });
 
+/**
+ * Per-destination health, and what is holding anything back.
+ *
+ * The report that did not exist while TikTok never once published. /status
+ * carries a health line, but it is one line among twenty and it reads as
+ * healthy whenever *something* went out — which stayed true the whole time,
+ * because Telegram and Instagram were fine.
+ *
+ * Union of the configured destinations and every destination with a stored
+ * record, so one that has been switched off while broken still reports rather
+ * than vanishing from the list that would have explained it.
+ */
+bot.command('health', (ctx) => {
+  const targets = [...new Set([...publishTargets(), ...store.healthTargets()])];
+  const rows = targets.map((target) => ({
+    target,
+    ...store.targetHealth(target),
+    // The stored flag, not the applied one: a destination inside its cooldown
+    // and a destination due a probe are different answers to "why is nothing
+    // going out", and isDegraded() alone cannot tell them apart.
+    degraded: store.isDegradedLatched(target),
+    recoveryDueAt: store.recoveryDueAt(target),
+  }));
+
+  const extra = [];
+  if (tiktokConfigured()) {
+    const cap = TIKTOK_DAILY_CAP();
+    const used = store.tiktokPostsInLast24h();
+    extra.push(`🎵 טיקטוק: ${used}/${cap} פוסטים ב-24 שעות האחרונות`);
+    if (used >= cap) {
+      const freesAt = store.tiktokCapFreesAt();
+      if (freesAt) extra.push(`   המכסה מתפנה בעוד ${notify.humanDuration(Math.max(0, freesAt - Date.now()))}`);
+    }
+    const hours = tiktokHoursLeft();
+    if (hours != null) extra.push(`   🔑 טוקן גישה: ${hours} שעות`);
+  }
+  if (store.heldCount()) extra.push(`📥 ${store.heldCount()} פוסטים מוחזקים · /held · /retry`);
+  if (store.queueSize()) extra.push(`📦 ${store.queueSize()} בתור`);
+
+  ctx.reply(notify.healthReport(rows, extra));
+});
+
 bot.command('help', (ctx) =>
   ctx.reply(
     [
@@ -1124,6 +1215,7 @@ bot.command('help', (ctx) =>
       '/run — סבב איסוף עכשיו',
       '/redo — שכח מה כבר נראה והרץ שוב (לבדיקת שינויים בעיצוב/נוסח)',
       '/status — סטטוס מלא',
+      '/health — בריאות כל יעד בנפרד, והשגיאה האחרונה',
       '/pending /queue /next',
       '/held — פוסטים מאושרים שממתינים ליעד שנפל',
       '/retry — אחרי שתיקנת: מחזיר אותם לתור',
