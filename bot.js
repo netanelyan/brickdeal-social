@@ -37,6 +37,7 @@ import {
 } from './src/publish/tiktok.js';
 import { publishTargets, targetsHe, allowedForKind } from './src/publish/targets.js';
 import { imagesEnabled } from './src/images.js';
+import { runOverridden, noteOverride, overrideNotes } from './src/override.js';
 import { reasonHe } from './src/verify.js';
 import { LAYOUT_HE } from './src/render/templates.js';
 
@@ -483,6 +484,7 @@ async function publishNext() {
       tags: cand.tags,
       layout: cand.layout,
       sourceId: cand.sourceId,
+      topic: cand.deck ? `${cand.deck.where} · ${cand.deck.category}` : null,
     });
     return false;
   }
@@ -492,6 +494,24 @@ async function publishNext() {
   // under a copy of itself. Cards that owe only degraded destinations are held.
   const live = owed.filter((t) => !store.isDegraded(t));
   const skipped = owed.filter((t) => store.isDegraded(t));
+
+  // BEFORE anything goes out, not after. A guard that was stepped over during
+  // the gather is only worth recording if the sentence arrives while the post
+  // can still be stopped — the point of the override is that a repeat is
+  // deliberate, and "deliberate" means you read it first.
+  //
+  // Sent on every attempt rather than once, because a card that was held for a
+  // day and then retried publishes at a moment nobody is watching, and the one
+  // notice it got scrolled past yesterday.
+  // Two sources, and both matter. The candidate carries what was stepped over
+  // when it was BUILT (a quota, the dedupe window); the ambient context carries
+  // what is being stepped over to publish it RIGHT NOW (the drip interval, via
+  // /next). A card built under an override and published on the timer has only
+  // the first; one built normally and rushed out by hand has only the second.
+  const overrides = [...new Set([...(cand.overrides || []), ...overrideNotes()])];
+  if (overrides.length && live.length) {
+    await notify.send(bot.telegram, staging, notify.overrideNotice(cand.headline, overrides));
+  }
 
   const done = {};
   const failed = [];
@@ -587,6 +607,7 @@ async function publishNext() {
       tags: cand.tags,
       layout: cand.layout,
       sourceId: cand.sourceId,
+      topic: cand.deck ? `${cand.deck.where} · ${cand.deck.category}` : null,
       telegram: Boolean(done.telegram),
       instagram: Boolean(done.instagram),
       tiktok: Boolean(done.tiktok),
@@ -807,10 +828,34 @@ async function doRun({ announce = true, target } = {}) {
 // Commands
 // ---------------------------------------------------------------------------
 
+/**
+ * A gather the owner asked for.
+ *
+ * `/run` is the daily target; `/run 7` is however many you say, and everything
+ * in the way of getting there gives way — the topic quotas, the dedupe window,
+ * the daily cap itself. Each bypass is collected as it happens and travels on
+ * the candidate to the approval card and to Telegram before the post goes out.
+ *
+ * The bot is not deciding whether the owner may do this. It is making sure the
+ * owner knows they did.
+ */
 bot.command('run', async (ctx) => {
   if (running) return ctx.reply('⏳ כבר רץ סבב איסוף');
-  await ctx.reply(`⏳ מריץ סבב — עד ${dailyTarget()} פריטים`);
-  detach('סבב איסוף', () => doRun(), ctx.chat.id);
+
+  const asked = Number((ctx.message?.text || '').trim().split(/\s+/)[1]);
+  const target = Number.isFinite(asked) && asked > 0 ? Math.min(asked, 25) : null;
+
+  await ctx.reply(
+    target
+      ? `⏳ מריץ סבב — עד ${target} פריטים (עוקף את המכסה היומית ${dailyTarget()})`
+      : `⏳ מריץ סבב — עד ${dailyTarget()} פריטים`
+  );
+
+  detach(
+    'סבב איסוף',
+    () => runOverridden('/run', () => doRun(target ? { target } : {})),
+    ctx.chat.id
+  );
 });
 
 // Re-run the same sources from scratch.
@@ -828,14 +873,31 @@ bot.command('redo', async (ctx) => {
     `🔄 שכחתי ${forgotten} פריטים שכבר נראו${cleared ? ` וניקיתי ${cleared} ממתינים` : ''} — מריץ מחדש` +
       `\n(${store.publishedCount()} פוסטים שכבר פורסמו לא יחזרו)`
   );
-  detach('סבב איסוף', () => doRun(), ctx.chat.id);
+  detach('סבב איסוף', () => runOverridden('/redo', () => doRun()), ctx.chat.id);
 });
 
 bot.command('pending', (ctx) => ctx.reply(`⏳ ${store.stagingSize()} ממתינים לאישור`));
 bot.command('queue', (ctx) => ctx.reply(`📦 ${store.queueSize()} בתור לפרסום`));
 
+/**
+ * Publish the next queued post now, rather than at the next drip.
+ *
+ * The drip is POST_INTERVAL_MINUTES apart so the channel does not arrive in
+ * bursts. Asking for the next one immediately steps over that, and how far over
+ * is worth saying: "posted 10 minutes after the last one instead of 240" is the
+ * difference between a deliberate double-post and one you will be surprised by.
+ */
 bot.command('next', async (ctx) => {
-  const ok = await publishNext();
+  const sinceLast = store.lastPublishedAt() ? Date.now() - store.lastPublishedAt() : null;
+  const ok = await runOverridden('/next', async () => {
+    if (sinceLast !== null && sinceLast < intervalMs) {
+      noteOverride(
+        'מרווח בין פוסטים (POST_INTERVAL_MINUTES)',
+        `פורסם לפני ${Math.round(sinceLast / 60_000)} דק׳ במקום ${POST_INTERVAL_MINUTES}`
+      );
+    }
+    return publishNext();
+  });
   await ctx.reply(ok ? '📤 פורסם הפריט הבא' : 'התור ריק');
 });
 
@@ -1035,7 +1097,15 @@ bot.command('deck', async (ctx) => {
   // A deck is minutes of work: an idea call, a search and a drafting call per
   // place, then twelve renders. Held inside the handler it overran Telegraf's
   // timeout and took the process down with it.
-  detach('בניית מצגת', () => buildAndStageDeck(arg, ctx.chat.id), ctx.chat.id);
+  // Owner-triggered, so the guards give way — and a deck asked for by name is
+  // the case the override was written for. "Two Dolomites decks back to back"
+  // is a legitimate request; it is only a problem if it happens without anyone
+  // saying so, which is what the disclosure on the approval card prevents.
+  detach(
+    'בניית מצגת',
+    () => runOverridden('/deck', () => buildAndStageDeck(arg, ctx.chat.id)),
+    ctx.chat.id
+  );
 });
 
 async function buildAndStageDeck(arg, chatId) {
@@ -1213,6 +1283,7 @@ bot.command('help', (ctx) =>
     [
       'פקודות:',
       '/run — סבב איסוף עכשיו',
+      '/run <מספר> — סבב עם יעד גדול יותר, עוקף מכסות (מדווח מה נעקף)',
       '/redo — שכח מה כבר נראה והרץ שוב (לבדיקת שינויים בעיצוב/נוסח)',
       '/status — סטטוס מלא',
       '/health — בריאות כל יעד בנפרד, והשגיאה האחרונה',

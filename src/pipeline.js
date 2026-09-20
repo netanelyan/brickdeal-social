@@ -3,6 +3,7 @@ import { rank } from './score.js';
 import { toCandidate, candidateId, RejectedError } from './candidate.js';
 import * as store from './store.js';
 import { snapshot as usageSnapshot } from './usage.js';
+import { noteOverride, overrideActive } from './override.js';
 
 // The daily loop: gather -> rank -> build the best two or three -> hand them
 // over for approval.
@@ -64,6 +65,12 @@ export async function runOnce({
     budgetExhausted: false,
   };
 
+  // Asking for more than the daily target is itself an override, and it is the
+  // one that explains why the other bypasses in this run happened at all.
+  if (overrideActive() && target > dailyTarget()) {
+    noteOverride('יעד יומי (DAILY_TARGET)', `${target} פריטים במקום ${dailyTarget()}`);
+  }
+
   const { items, errors, perSource } = await gather({ now });
   summary.gathered = items.length;
   summary.sourceErrors = errors;
@@ -110,7 +117,15 @@ export async function runOnce({
     // Claimed before the slow work, not after. Two feeds carrying the same
     // story minutes apart would otherwise both survive the pre-rank dedupe
     // check and both get drafted — BrickDeal's lesson, in a new pipeline.
-    if (store.hasSeen(id)) continue;
+    //
+    // The owner may step over the dedupe window. Note the short-circuit: the
+    // bypass is only recorded when the item WAS going to be skipped, so the
+    // override report names the items it actually rescued rather than every
+    // item in the run. hasPublished above is NOT bypassable — that is a
+    // duplicate reaching real followers, not a window.
+    if (store.hasSeen(id) && !noteOverride('חלון כפילויות (SEEN_TTL_DAYS)', item.title || id)) {
+      continue;
+    }
     if (markSeen) store.markSeen(id);
 
     try {

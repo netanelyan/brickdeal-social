@@ -362,7 +362,7 @@ export const peekQueue = () => state.queue.slice(0, 10);
  * attempt and Instagram on a later one; two rows for one post would double-count
  * it in the quota window and skew the pillar mix the scorer reads back.
  */
-export function recordPublished({ id, pillar, tags = [], layout, sourceId, telegram, instagram, tiktok }) {
+export function recordPublished({ id, pillar, tags = [], layout, sourceId, topic = null, telegram, instagram, tiktok }) {
   if (id) state.publishedIds[id] = Date.now();
   state.lastPublishedAt = Date.now();
 
@@ -389,6 +389,11 @@ export function recordPublished({ id, pillar, tags = [], layout, sourceId, teleg
       // What the post was made from, so the quota window can answer "how much of
       // the feed is one source" — see sourceMaxShare in src/pillars.js.
       sourceId,
+      // What it was ABOUT, for posts where that is not the same question. Every
+      // deck files as pillar `day` with no sourceId, so three Dolomites decks
+      // running are indistinguishable from three unrelated ones in this log —
+      // which is exactly the repeat the owner override is supposed to name.
+      topic,
       telegram: Boolean(telegram),
       instagram: Boolean(instagram),
       tiktok: Boolean(tiktok),

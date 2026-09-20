@@ -2,6 +2,30 @@ import { createHash } from 'node:crypto';
 import { renderDeck } from '../render/deck.js';
 import { deckCaption } from '../format.js';
 import { targetsForKind } from '../publish/targets.js';
+import { overrideActive, overrideNotes } from '../override.js';
+import { recentPublished } from '../store.js';
+
+/** How many decks in a row have been about this same place and category. */
+export const deckTopic = (deck) => `${deck.where} · ${deck.category}`;
+
+/**
+ * "Third mountain deck in a row" — the sentence the owner asked to be told.
+ *
+ * Counted as a RUN from the newest post backwards rather than as a share,
+ * because a share cannot see a streak: three consecutive Dolomites decks out of
+ * forty posts is 7% of the window and looks like nothing, while on the feed it
+ * is the only thing anybody notices.
+ */
+export function deckRepeats(deck, history = recentPublished()) {
+  const topic = deckTopic(deck);
+  let run = 0;
+  for (const p of history) {
+    if (p.topic !== topic) break;
+    run++;
+  }
+  if (run < 1) return [];
+  return [`חוזר על "${topic}" — ${run + 1} מצגות ברצף`];
+}
 
 // A built deck becomes something the approval queue can carry.
 //
@@ -75,6 +99,9 @@ export async function toDeckCandidate(built, { minSlides = Number(process.env.DE
     deck: { ...deck, ...rendered },
     publishTargets: targetsForKind('deck'),
     createdAt: deck.createdAt,
+    // Same as a card: whatever the owner's request stepped over travels with
+    // the deck so it can be said before it publishes, not discovered after.
+    overrides: overrideActive() ? [...overrideNotes(), ...deckRepeats(deck)] : [],
   };
 
   // Both platforms get the same words, for the same reason the card does: the

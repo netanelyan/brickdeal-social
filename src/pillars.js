@@ -142,6 +142,54 @@ export function quotaBlock(cand, history = recentPublished()) {
   return null;
 }
 
+/**
+ * What about this candidate repeats what just went out.
+ *
+ * Not a guard — nothing here blocks anything. It exists because the quota is a
+ * share over a 30-day window, and a share is exactly the wrong instrument for
+ * noticing that the last three posts were all the same thing: three in a row
+ * out of forty is 7%, nowhere near any cap, and reads on the feed as a channel
+ * that has run out of ideas.
+ *
+ * The owner override needs this more than the quota does. "Post it anyway" is a
+ * reasonable answer to "this is the third mountain deck in a row"; it is only
+ * reasonable if somebody said the sentence out loud first.
+ *
+ * Returns human-readable lines, newest-first history assumed.
+ */
+export function describeRepeats(cand, history = recentPublished(), { streak = 5 } = {}) {
+  const notes = [];
+  const recent = history.slice(0, streak);
+  if (!recent.length) return notes;
+
+  const runLength = (pick, value) => {
+    if (value == null || value === '') return 0;
+    let n = 0;
+    for (const p of history) {
+      if (pick(p) !== value) break;
+      n++;
+    }
+    return n;
+  };
+
+  const pillarRun = runLength((p) => p.pillar, cand.pillar);
+  if (pillarRun >= 2) {
+    notes.push(`חוזר על הפילר "${pillarHe(cand.pillar)}" — ${pillarRun + 1} ברצף`);
+  }
+
+  const sourceRun = runLength((p) => p.sourceId, cand.sourceId);
+  if (sourceRun >= 2) {
+    notes.push(`אותו מקור (${cand.sourceId}) — ${sourceRun + 1} ברצף`);
+  }
+
+  if ((cand.tags || []).includes('kosher')) {
+    const share = history.filter((p) => (p.tags || []).includes('kosher')).length;
+    if (share) notes.push(`תגית kosher — ${share} מתוך ${history.length} בחלון`);
+  }
+
+  return notes;
+}
+
 // Which pillars are currently under-represented — fed to the scorer so the
 // daily pick actively spreads out rather than merely avoiding the cap.
 export function pillarDeficits(history = recentPublished()) {

@@ -170,6 +170,15 @@ export function deckApprovalMessage(cand) {
     }
   }
 
+  // Same as the card: a deck built by stepping over a guard says so before you
+  // approve it. This is the one that matters most — "the third Dolomites deck
+  // in a row" is invisible in a slideshow and obvious on the feed.
+  if (cand.overrides?.length) {
+    lines.push('');
+    lines.push('🔓 נעקפו בקרות:');
+    for (const o of cand.overrides) lines.push(`   • ${o}`);
+  }
+
   lines.push('');
   lines.push('🔗 מקורות:');
   for (const s of deck.slides) lines.push(`   ${s.nameHe}: ${s.sourceUrl}`);
@@ -258,6 +267,16 @@ export function approvalMessage(cand) {
       const who = cand.tiktok.username ? ` · @${cand.tiktok.username}` : '';
       lines.push(`🔒 פרטיות בטיקטוק: ${privacyHe(cand.tiktok.privacy)}${who}`);
     }
+  }
+
+  // What it took to build this one. Above the source URL rather than below it,
+  // because this is the part that changes whether you tap approve — the whole
+  // point of letting the owner step over a quota is that stepping over it is a
+  // decision, and a decision needs the number in front of it.
+  if (cand.overrides?.length) {
+    lines.push('');
+    lines.push('🔓 נעקפו בקרות:');
+    for (const o of cand.overrides) lines.push(`   • ${o}`);
   }
 
   // The rule is "the source URL is always in the approval message", so it is

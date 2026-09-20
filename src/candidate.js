@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { verifySource, verifyEvidence, verifyDraftText, RejectedError } from './verify.js';
 import { draft as draftPost } from './draft.js';
-import { quotaBlock } from './pillars.js';
+import { quotaBlock, describeRepeats } from './pillars.js';
+import { noteOverride, noteDisclosure, overrideActive, overrideNotes } from './override.js';
 import { findImage, imageQueries, imagesEnabled } from './images.js';
 import { renderCard } from './render/index.js';
 import { isPhotoLayout, PHOTO_FALLBACK } from './render/templates.js';
@@ -126,8 +127,20 @@ async function build(item, { render = true } = {}) {
 
   // 4. Topic quotas — checked here rather than at publish time so a blocked
   //    candidate never occupies your attention in the first place.
-  const blocked = quotaBlock({ ...d, sourceId: item.sourceId });
-  if (blocked) throw new RejectedError('quota', blocked);
+  //
+  //    The owner may step over this one. A quota protects the feed from the
+  //    pipeline, not from the person who owns it — but it gives way loudly:
+  //    what it measured and what the cap was travel with the candidate to the
+  //    approval card and to Telegram before anything publishes.
+  const quotaCand = { ...d, sourceId: item.sourceId };
+  const blocked = quotaBlock(quotaCand);
+  if (blocked && !noteOverride('מכסת נושאים', blocked)) {
+    throw new RejectedError('quota', blocked);
+  }
+
+  //    Said whether or not a quota fired, because a share over thirty days is
+  //    the wrong instrument for "the last three were all the same".
+  if (overrideActive()) for (const note of describeRepeats(quotaCand)) noteDisclosure(note);
 
   // 5. Image, if any provider is configured. v1 runs with none, so this is null
   //    and the layout choice already assumed as much.
@@ -176,6 +189,11 @@ async function build(item, { render = true } = {}) {
     // A news card is written for a feed, not a scroll: it never goes to TikTok.
     kind: 'card',
     publishTargets: targetsForKind('card'),
+    // Which guards were stepped over to build this, if any. Carried ON the
+    // candidate rather than reported at the moment of the bypass, because the
+    // bypass happens during a gather and the post goes out hours later — the
+    // sentence has to survive the wait to be worth anything.
+    overrides: overrideActive() ? overrideNotes() : [],
   };
 
   // 6. Render last — it is the only step that costs a browser.
