@@ -47,6 +47,7 @@ import {
   publishTikTok,
   tiktokConfigured,
   describeError as describeTikTokError,
+  isCardLevel as isCardLevelTikTok,
   TikTokError,
 } from '../src/publish/tiktok.js';
 import { codeFrom } from './tiktok-token.js';
@@ -1160,6 +1161,29 @@ for (const [what, cand] of [
   const e = await publishTikTok(cand).then(() => null, (err) => err);
   ok(`${what} is the card's problem, not the destination's`, e?.step === 'config', `step was ${e?.step}`);
 }
+// TikTok decides some of these at ITS end, and they are the same kind of thing.
+//
+// creator_info reports what the ACCOUNT supports, not what this CLIENT may use
+// — a comment in tiktok.js claimed the opposite for months. So an unaudited app
+// against a public account is offered all three privacy levels, offers them on
+// the approval card, and is refused at init. Scoring that as an outage degraded
+// TikTok after three cards and held every good card behind them, when a card
+// asking for SELF_ONLY would have published perfectly well.
+const unaudited = new TikTokError('Please review our integration guidelines', {
+  step: 'init',
+  code: 'unaudited_client_can_only_post_to_private_accounts',
+});
+ok("an unaudited-client refusal is the card's problem", isCardLevelTikTok(unaudited));
+ok('a mismatched privacy level is too', isCardLevelTikTok(new TikTokError('x', { step: 'init', code: 'privacy_level_option_mismatch' })));
+// The ones that really are the destination must still degrade it, or an outage
+// would be retried forever with no backoff and no alert.
+ok('a dead token is NOT', !isCardLevelTikTok(new TikTokError('x', { step: 'init', code: 'access_token_invalid' })));
+ok('nor is an unknown server error', !isCardLevelTikTok(new TikTokError('x', { step: 'init', code: 'internal_error' })));
+ok('nor is a plain Error from somewhere else', !isCardLevelTikTok(new Error('socket hang up')));
+// The raw TikTok sentence says nothing about what to do, so the code carries it.
+ok('the refusal explains the way out', describeTikTokError(unaudited).includes('audit'));
+ok('and names the level that would work', describeTikTokError(unaudited).includes('פרטי'));
+
 // And the message the owner gets says so, rather than reading as a failure.
 const abandonMsg = notifyTargetAbandoned('כותרת', [{ target: 'tiktok', message: 'no privacy level was chosen at approval' }]);
 ok('the notice names the destination given up on', abandonMsg.includes('טיקטוק'));

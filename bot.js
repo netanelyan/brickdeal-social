@@ -31,6 +31,7 @@ import {
   tokenHoursLeft as tiktokHoursLeft,
   refreshTokenDaysLeft as tiktokRefreshDaysLeft,
   describeError as describeTikTokError,
+  isCardLevel as isCardLevelTikTok,
 } from './src/publish/tiktok.js';
 import { publishTargets, targetsHe } from './src/publish/targets.js';
 import { imagesEnabled } from './src/images.js';
@@ -475,6 +476,11 @@ async function publishNext() {
     instagram: describeError,
     tiktok: describeTikTokError,
   };
+  // Per destination, because only the destination's own client knows which of
+  // its error codes mean "this card" rather than "this service".
+  const cardLevel = {
+    tiktok: isCardLevelTikTok,
+  };
 
   for (const target of live) {
     try {
@@ -498,7 +504,12 @@ async function publishNext() {
       // So the target is dropped for THIS card and for nothing else: the
       // destination keeps its health, the card publishes everywhere it can,
       // and it is reported rather than retried into a hold.
-      if (e?.step === 'config') {
+      //
+      // Not only what WE refuse before calling out. TikTok decides some of
+      // these at its end — an unaudited app asking for a public post is
+      // refused at init, and the next card asking for a private one publishes
+      // fine, so the destination is healthy and must not be marked otherwise.
+      if (e?.step === 'config' || cardLevel[target]?.(e)) {
         abandoned.push({ target, message: detail });
         continue;
       }

@@ -12,8 +12,16 @@ import * as store from '../store.js';
 //      slept through its refresh tick must still be able to publish on waking.
 //   2. The creator has to be shown the privacy level before publishing. That is
 //      TikTok's rule for Direct Post, not ours, and creatorInfo() is where the
-//      allowed levels come from — an unaudited app is given SELF_ONLY and
-//      nothing else, which is exactly what we want during review.
+//      offered levels come from.
+//
+//      It was written here that an unaudited app is given SELF_ONLY and nothing
+//      else. THAT IS NOT TRUE, and believing it cost a deck. creator_info
+//      reports what the ACCOUNT supports, not what this CLIENT may use — an
+//      unaudited app against a public account is offered all three levels,
+//      offers them to you, and is then refused at init with
+//      unaudited_client_can_only_post_to_private_accounts. The list is a
+//      courtesy, not a guarantee, and the refusal is handled as a card-level
+//      failure rather than as TikTok being down.
 //   3. Photo posts are PULL_FROM_URL only. There is no byte-upload path for
 //      images, so the same public card URL Instagram fetches is required here,
 //      AND the domain it sits on must be verified in the developer portal.
@@ -68,11 +76,43 @@ const CODE_HINTS = {
   scope_permission_missed: 'ההרשאה video.publish לא נכללה בהתחברות — npm run tiktok-token',
   url_ownership_unverified: 'הדומיין של הכרטיס לא מאומת ב-Developer Portal',
   privacy_level_option_mismatch: 'רמת הפרטיות לא זמינה לחשבון הזה כרגע',
+  unaudited_client_can_only_post_to_private_accounts:
+    'האפליקציה עוד לא עברה אודיט בטיקטוק, ולכן מותר לה לפרסם רק ב"פרטי (רק אני)". ' +
+    'בחרו פרטיות פרטי בכרטיס האישור, או הגישו את האפליקציה ל-audit כדי לפרסם ציבורי.',
   spam_risk_too_many_posts: 'חריגה ממכסת הפרסום היומית של טיקטוק',
   spam_risk_user_banned_from_posting: 'החשבון חסום לפרסום בטיקטוק',
   reached_active_user_cap: 'חריגה במספר המשתמשים של האפליקציה (sandbox)',
   rate_limit_exceeded: 'חריגה בקצב הקריאות — יתפנה מעצמו',
 };
+
+/**
+ * Codes that are about THIS CARD rather than about TikTok.
+ *
+ * The distinction the publish loop needs: a destination that is having a bad
+ * day should be retried and, after enough failures, marked degraded so the
+ * backlog stops throwing calls at it. A card asking for something it may not
+ * have should be given up on, and the destination left alone — because the very
+ * next card, asking for something allowed, will publish perfectly well.
+ *
+ * Both of these are the second kind. `unaudited_client...` means this app may
+ * only post SELF_ONLY; a card that asked for public is refused and one that
+ * asks for private is not. Scoring that as a TikTok outage degraded the whole
+ * destination and held every good card behind it.
+ */
+const CARD_LEVEL_CODES = new Set([
+  'unaudited_client_can_only_post_to_private_accounts',
+  'privacy_level_option_mismatch',
+]);
+
+/**
+ * Is this failure the card's fault rather than the destination's?
+ *
+ * `step: 'config'` covers what we refuse before calling out — no privacy level,
+ * a non-https image URL, more than 35 images. The codes above are the same
+ * thing decided at TikTok's end instead of ours.
+ */
+export const isCardLevel = (e) =>
+  e instanceof TikTokError && (e.step === 'config' || CARD_LEVEL_CODES.has(e.code));
 
 /** A failure line you can act on: the code and the step, not just the sentence. */
 export function describeError(e) {
@@ -268,9 +308,12 @@ async function liveToken(step) {
  * Who we are about to post as, and what privacy levels that account may use.
  *
  * TikTok requires this call before a Direct Post, and requires the creator to
- * see the privacy level before it goes out. Both halves matter: the list is
- * also how an unaudited app discovers it may only post SELF_ONLY, instead of
- * finding out as a rejected publish.
+ * see the privacy level before it goes out.
+ *
+ * What the list does NOT tell you is whether this app may actually use those
+ * levels. It describes the account, not the client, so an unaudited app is
+ * shown every level a public account supports and is refused at init if it
+ * picks one. Treat the options as what to offer, never as what will be allowed.
  */
 export async function creatorInfo() {
   const t = await liveToken('creator_info');
