@@ -370,6 +370,12 @@ export function recordPublished({ id, pillar, tags = [], layout, sourceId, teleg
   if (existing) {
     // Sticky: a destination that has already published must never be recorded
     // as un-published by a later attempt that only covered the other one.
+    // Stamped when TikTok specifically succeeds, because `ts` is when the POST
+    // was first published anywhere and TikTok's 5-per-24h cap is counted
+    // against when it reached TIKTOK. A card that went to Telegram on Monday
+    // and TikTok on Tuesday is a Tuesday post as far as the cap is concerned,
+    // and reading `ts` would spend Monday's budget twice.
+    if (tiktok && !existing.tiktokAt) existing.tiktokAt = Date.now();
     existing.telegram = existing.telegram || Boolean(telegram);
     existing.instagram = existing.instagram || Boolean(instagram);
     existing.tiktok = existing.tiktok || Boolean(tiktok);
@@ -386,10 +392,38 @@ export function recordPublished({ id, pillar, tags = [], layout, sourceId, teleg
       telegram: Boolean(telegram),
       instagram: Boolean(instagram),
       tiktok: Boolean(tiktok),
+      tiktokAt: tiktok ? Date.now() : null,
     });
   }
   prunePublished(state);
   save();
+}
+
+/**
+ * How many posts reached TikTok in the last 24 hours.
+ *
+ * TikTok caps an unaudited client at 5 a day and this is the number that cap is
+ * measured against. It is counted from our own record rather than asked of the
+ * API, because there is no endpoint that answers it — the only way to discover
+ * the cap at TikTok's end is to be refused by it, which costs a post and
+ * degrades the destination on the way through.
+ *
+ * Rows written before `tiktokAt` existed fall back to `ts`. That is the right
+ * way to be wrong: it can only ever over-count a post near the boundary, and
+ * over-counting pauses a post whereas under-counting spends the cap.
+ */
+export function tiktokPostsInLast24h(now = Date.now()) {
+  const cutoff = now - DAY_MS;
+  return state.published.filter((p) => p.tiktok && (p.tiktokAt ?? p.ts ?? 0) >= cutoff).length;
+}
+
+/** When the oldest TikTok post inside the 24h window falls out of it. */
+export function tiktokCapFreesAt(now = Date.now()) {
+  const inWindow = state.published
+    .filter((p) => p.tiktok && (p.tiktokAt ?? p.ts ?? 0) >= now - DAY_MS)
+    .map((p) => p.tiktokAt ?? p.ts ?? 0)
+    .sort((a, b) => a - b);
+  return inWindow.length ? inWindow[0] + DAY_MS : null;
 }
 // Newest first, already inside the quota window.
 export function recentPublished() {
@@ -455,8 +489,65 @@ export function noteTargetFailed(target, error) {
   return { ...state.targetHealth[target], justDegraded: degraded && !prev.degraded };
 }
 
-/** A destination that has failed enough times running to stop hammering it. */
-export const isDegraded = (target) => Boolean(healthOf(target).degraded);
+// How long a degraded destination is left alone before one card is allowed
+// through to test it, and the ceiling that backoff grows to.
+//
+// `degraded` used to be a latch with exactly one key: /retry. That is the wrong
+// shape for the thing it models. Every reason a destination degrades — an API
+// having an hour, an expired token, a rate limit — ends by itself, and a flag
+// that only a human can clear turns a thirty-minute outage into however long it
+// takes someone to notice and type a command. Worse, the alert fires once, on
+// the edge, so the longer it stays broken the quieter it gets.
+//
+// So the flag still latches, but it expires. After the cooldown one card is let
+// through: if it publishes, noteTargetOk clears everything; if it fails,
+// lastFailAt moves and the next cooldown is longer. That is a probe, not a
+// retry storm — at most one card per cooldown reaches a destination that is
+// still down.
+const RECOVER_AFTER_MS = () =>
+  Math.max(0, Number(process.env.TARGET_RECOVER_AFTER_MIN ?? '30')) * 60_000;
+const RECOVER_MAX_MS = () =>
+  Math.max(1, Number(process.env.TARGET_RECOVER_MAX_MIN ?? '360')) * 60_000;
+
+/**
+ * How long this destination should be left alone, given how badly it is going.
+ *
+ * Doubles per failure past the degrade threshold, capped. A destination that is
+ * properly down is probed roughly hourly rather than every four hours, and one
+ * that is dead for a day is not probed sixty times to prove it.
+ */
+export function recoveryDelayMs(target) {
+  const base = RECOVER_AFTER_MS();
+  if (base <= 0) return 0;
+  const over = Math.max(0, healthOf(target).failures - DEGRADE_AFTER());
+  return Math.min(base * 2 ** over, RECOVER_MAX_MS());
+}
+
+/** When a degraded destination is next due a probe, or null if it is not degraded. */
+export function recoveryDueAt(target) {
+  const h = healthOf(target);
+  if (!h.degraded || !h.lastFailAt) return null;
+  return h.lastFailAt + recoveryDelayMs(target);
+}
+
+/**
+ * A destination that has failed enough times running to stop hammering it.
+ *
+ * False once the cooldown has elapsed, which is what lets the backlog drain on
+ * its own. The stored flag is deliberately NOT cleared here — a read should not
+ * write, and leaving it set is what makes the difference between "recovered"
+ * and "due a probe" visible to /health.
+ */
+export function isDegraded(target) {
+  const h = healthOf(target);
+  if (!h.degraded) return false;
+  const due = recoveryDueAt(target);
+  if (due !== null && Date.now() >= due) return false;
+  return true;
+}
+
+/** Degraded and still inside its cooldown — the flag as stored, not as applied. */
+export const isDegradedLatched = (target) => Boolean(healthOf(target).degraded);
 
 /** When this destination last actually published, or null if it never has. */
 export const lastOkAt = (target) => healthOf(target).lastOkAt || null;
@@ -467,6 +558,9 @@ export function clearDegraded(target) {
   state.targetHealth[target] = { ...prev, failures: 0, degraded: false };
   save();
 }
+
+/** Every destination we hold a health record for. */
+export const healthTargets = () => Object.keys(state.targetHealth);
 
 // --- held posts --------------------------------------------------------------
 //

@@ -1,4 +1,5 @@
 import * as store from '../store.js';
+import { cardHostConfigured } from './imageHosts.js';
 
 // Instagram publishing, through the official Graph API only.
 //
@@ -34,7 +35,7 @@ export const graphHost = () =>
   authMode() === 'facebook' ? 'https://graph.facebook.com' : 'https://graph.instagram.com';
 
 export const instagramConfigured = () =>
-  Boolean(currentToken() && process.env.IG_USER_ID && process.env.CARD_PUBLIC_BASE_URL);
+  Boolean(currentToken() && process.env.IG_USER_ID && cardHostConfigured());
 
 /**
  * The token actually in use.

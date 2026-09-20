@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { renderHtml, CARD_W, CARD_H } from './templates.js';
+import { primaryCardBaseUrl } from '../publish/imageHosts.js';
 
 // Card rendering: HTML -> JPEG, via headless Chromium.
 //
@@ -91,9 +92,13 @@ export const cardOutputDir = () =>
  * is exactly why publishInstagram() refuses rather than failing halfway.
  */
 export function cardPublicUrl(filename) {
-  const base = process.env.CARD_PUBLIC_BASE_URL;
+  // The host list, not the single variable — see src/publish/imageHosts.js.
+  // The first entry is the one cards are published under; the rest exist so a
+  // second domain can be verified with TikTok and swapped to without a code
+  // change.
+  const base = primaryCardBaseUrl();
   if (!base) return null;
-  return `${base.replace(/\/+$/, '')}/${encodeURIComponent(filename)}`;
+  return `${base}/${encodeURIComponent(filename)}`;
 }
 
 /**
