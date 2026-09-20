@@ -1,0 +1,17 @@
+# The repository stores text with LF, always.
+#
+# Not cosmetic. This repo is edited from a Windows checkout and deployed to a
+# Linux VPS, and without this a file that made the round trip came back with
+# every line marked as changed — a twenty-line edit to format.js showed up as
+# 633 lines of churn, which is the kind of diff nobody reads to the end of.
+* text=auto eol=lf
+
+# Except the things that are not text and must never be rewritten.
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
