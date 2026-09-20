@@ -11,14 +11,31 @@ import { quotaBlock } from '../src/pillars.js';
 import { scoreItem, rank } from '../src/score.js';
 import * as store from '../src/store.js';
 import { candidateId, tripGap } from '../src/candidate.js';
-import { renderHtml, LAYOUTS, PHOTO_LAYOUTS, isPhotoLayout } from '../src/render/templates.js';
+import { renderHtml, LAYOUTS, PHOTO_LAYOUTS, isPhotoLayout, SCRIM_FALLBACK } from '../src/render/templates.js';
 import { assertGenericAiPrompt, ImagePolicyError, imageQueries } from '../src/images.js';
 import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, evidenceReport, deckApprovalMessage } from '../src/format.js';
-import { renderSlideHtml, SIZES, coverSize } from '../src/render/deckTemplates.js';
+import { renderSlideHtml, SIZES, sizeClass, INK_LUMINANCE, FACES } from '../src/render/deckTemplates.js';
+import {
+  lengthValue,
+  yearValue,
+  factsFor,
+  countryFor,
+  applyCountryVisibility,
+  enoughFor,
+  WIKIDATA_FIELDS,
+} from '../src/deck/facts.js';
+import { flagFor, COUNTRIES } from '../src/deck/flags.js';
+import { emojiDataUri } from '../src/render/emojiArt.js';
+import { isHebrew } from '../src/deck/hebrew.js';
+import { parseLocally } from '../src/deck/request.js';
+import { rotationFor, oneClause, emphasisFrom, COVER_SHAPES, COVER_VOICES } from '../src/deck/ideas.js';
+import { deckPlace, namesPlace, REGIONS } from '../src/deck/region.js';
+import { __test as photoTest, scrimAlpha, underScrim } from '../src/render/photo.js';
 import { deckId } from '../src/deck/candidate.js';
 import { normaliseIdea } from '../src/deck/ideas.js';
 import { sameSite } from '../src/search.js';
-import { authorityDomains } from '../src/sources/places.js';
+import { authorityDomains, KINDS } from '../src/sources/places.js';
+import { pick, CATEGORY_HE, canonicalKind } from '../src/sources/tiyulplus.js';
 import { quietAlert } from '../src/notify.js';
 import { describeError, InstagramError } from '../src/publish/instagram.js';
 import { publishTargets, targetsForKind, allowedForKind } from '../src/publish/targets.js';
@@ -1236,22 +1253,47 @@ ok('the title is not repeated - the cover slide already carries it', !dcap.inclu
 // A slide is a numbered NAME, and fields only where the category has them.
 // Never a sentence: prose on a slide is what made these read like a guidebook,
 // and it survived every typographic fix because it was never typographic.
-const slideHtml = renderSlideHtml(deckFixture.deck.slides[0], { index: 2, total: 3, size: 'tiktok' });
+const slideHtml = renderSlideHtml(deckFixture.deck.slides[0], { size: 'tiktok', style: 'info' });
 ok('the name stands alone, unnumbered', slideHtml.includes('המוזיאון הלאומי') && !slideHtml.includes('1. המוזיאון'));
 ok('a field renders as icon, label, value', slideHtml.includes('מרחק: 5.3'));
 ok('no score on a slide - it belongs in the cover line', !slideHtml.includes('class="score"'));
 
-const bare = renderSlideHtml({ n: 3, nameHe: 'גשר קרל', fields: [] }, { index: 4, total: 6 });
+const bare = renderSlideHtml({ n: 3, nameHe: 'גשר קרל', fields: [] }, { style: 'minimal' });
 ok('a name-only slide is just the name', bare.includes('גשר קרל'));
 ok('and carries nothing else at all', !bare.includes('class="field"'));
+
+// The minimal style is the one modelled on the reference that carries no facts
+// at all, so it must not start printing them when a slide happens to have some.
+ok(
+  'the minimal style shows no fields even when the slide has them',
+  !renderSlideHtml(deckFixture.deck.slides[0], { style: 'minimal' }).includes('class="field"')
+);
+
+// The flag belongs to the name, not to a line of its own.
+//
+// The reference puts it underneath and that was copied faithfully; in Hebrew at
+// this size it read as a detached ornament floating below the label. Inline it
+// wraps with the text and stays part of the thing it is labelling.
+const flagged = renderSlideHtml(
+  { nameHe: 'החוף האדום', flag: '🇬🇷', fields: [] },
+  { style: 'minimal' }
+);
+ok('the flag sits inside the name', /class="name[^"]*">[^<]*החוף האדום[^<]*<img/.test(flagged));
+ok('and there is no separate flag line', !flagged.includes('class="flag"'));
+
+// Leading, which is the thing that was wrong twice. Hebrew has almost no
+// descenders and takes far less than a Latin face; at 1.2 a wrapped place name
+// read as two separate thoughts rather than one name.
+ok('a wrapped name is set tight', flagged.includes('line-height: 0.98'));
 
 // The country is named only when the deck spans countries; in a one-city deck
 // every slide would repeat the same word.
 ok(
   'a cross-country deck names the country and flies the flag',
-  renderSlideHtml({ n: 1, nameHe: 'דולומיטים', countryHe: 'איטליה', flag: '🇮🇹', fields: [] }, { index: 2, total: 3 }).includes(
-    'דולומיטים, איטליה'
-  )
+  renderSlideHtml(
+    { n: 1, nameHe: 'דולומיטים', countryHe: 'איטליה', flag: '🇮🇹', fields: [] },
+    { style: 'minimal' }
+  ).includes('דולומיטים, איטליה')
 );
 
 // The cover is one line with one word louder. Hebrew has no capitals, so the
@@ -1259,17 +1301,20 @@ ok(
 // rather than appended.
 const coverHtml = renderSlideHtml(
   { titleHe: '5 מקומות בפראג שאסור לפספס', emphasisHe: 'בפראג' },
-  { index: 1, total: 6, cover: true }
+  { cover: true, style: 'minimal' }
 );
-ok('the emphasis is set apart', coverHtml.includes('<span class="emph">בפראג</span>'));
+ok('the emphasis is set apart', coverHtml.includes('class="emph tight">בפראג</span>'));
 ok('and the rest of the line survives intact', coverHtml.includes('5 מקומות') && coverHtml.includes('שאסור לפספס'));
 ok(
   'an emphasis that is not in the title is ignored, not appended',
-  !renderSlideHtml({ titleHe: '5 מקומות בפראג', emphasisHe: 'וויומינג' }, { index: 1, total: 6, cover: true }).includes(
+  !renderSlideHtml({ titleHe: '5 מקומות בפראג', emphasisHe: 'וויומינג' }, { cover: true, style: 'minimal' }).includes(
     'וויומינג'
   )
 );
 ok('no eyebrow and no second line on a cover', !coverHtml.includes('class="eyebrow"') && !coverHtml.includes('class="cover-angle"'));
+// A two-word emphasis broken across a line break is two coloured fragments
+// rather than one shouted phrase, which is the whole point of colouring it.
+ok('a short emphasis is held on one line', coverHtml.includes('.emph.tight { white-space: nowrap; }'));
 
 // A name is not a claim, so a name-only deck has nothing to quote - and the
 // evidence report says exactly that rather than showing an empty list.
@@ -1280,20 +1325,57 @@ ok(
 ok('a field-bearing deck still shows its quotes', evidenceReport(deckFixture).includes('Admission 250 CZK'));
 
 // A cover set at full size wraps to four lines and eats the photograph.
-eq('a short title stays large', coverSize('חמישה מוזיאונים'), '');
-eq('a medium one steps down', coverSize('המוזיאונים של פראג ששווים'), ' mid');
-eq('a long one steps down twice', coverSize('המוזיאונים של פראג ששווים את הכרטיס ועוד'), ' long');
-
-// Every line on its own slab was the app-text-tool experiment; the references
-// set cream type straight on the photograph instead, so the slab now carries
-// colour and outline rather than a background. What matters is that each line
-// is separately wrapped, or they run together - which is what you could not
-// read on a phone.
-ok('each line is wrapped separately', (slideHtml.match(/class="slab"/g) || []).length >= 2);
+eq('a short title stays large', sizeClass('חמישה מוזיאונים', { mid: 24, long: 36 }), '');
+eq('a medium one steps down', sizeClass('המוזיאונים של פראג ששווים בהחלט', { mid: 24, long: 36 }), ' mid');
+eq(
+  'a long one steps down twice',
+  sizeClass('המוזיאונים של פראג ששווים את הכרטיס ועוד כמה דברים', { mid: 24, long: 36 }),
+  ' long'
+);
 ok('a long name steps down rather than overflowing', renderSlideHtml(
   { n: 1, nameHe: 'x'.repeat(40), fields: [] },
-  { index: 2, total: 3 }
-).includes('place long'));
+  { style: 'minimal' }
+).includes('name long'));
+
+// sizeClass emits BOTH a mid and a long step for everything it is given, and
+// for a while only .long had a rule — so every name between twenty and thirty
+// characters carried a class that styled nothing and set at full size, which is
+// precisely the length at which a Hebrew place name begins to wrap. A class
+// with no rule behind it fails silently, so each one is checked against the
+// stylesheet it is supposed to match.
+for (const [what, cls, html] of [
+  ['a name', 'name', renderSlideHtml({ nameHe: 'x'.repeat(25), fields: [] }, { style: 'minimal' })],
+  ['an info name', 'title-info', renderSlideHtml({ nameHe: 'x'.repeat(22), fields: [] }, { style: 'info' })],
+  ['a cover', 'cover', renderSlideHtml({ titleHe: 'x'.repeat(25) }, { cover: true, style: 'minimal' })],
+]) {
+  ok(`${what} of middling length takes the middle step`, html.includes(`${cls} mid`));
+  ok(`and the stylesheet actually has a rule for it`, html.includes(`.${cls}.mid {`));
+}
+
+// A fourth step, for the covers that got longer when they started naming the
+// country. Same failure mode as the mid step had: a class the stylesheet has no
+// rule for sets at full size and fails silently.
+const xlongCover = renderSlideHtml({ titleHe: 'x'.repeat(50) }, { cover: true, style: 'minimal' });
+ok('a very long cover takes the smallest step', xlongCover.includes('cover xlong'));
+ok('and the stylesheet has a rule for that too', xlongCover.includes('.cover.xlong {'));
+// Opt-in, because a place name has three steps and must never be handed a class
+// that does not exist in the stylesheet.
+eq('nothing else reaches for it', sizeClass('x'.repeat(80), { mid: 20, long: 30 }), ' long');
+
+// The complaint that prompted the scale: a cover set as a poster rather than as
+// a caption. Every step is measured against the frame so the two styles cannot
+// drift apart silently.
+const coverPx = (style, cls) =>
+  Number(
+    renderSlideHtml({ titleHe: 'x' }, { cover: true, style })
+      .match(new RegExp(`\\.cover${cls ? `\\.${cls}` : ''} \\{[^}]*font-size: (\\d+)px`))?.[1]
+  );
+ok('a minimal cover is under 4% of the frame', coverPx('minimal', '') / 1920 < 0.04, coverPx('minimal', ''));
+ok('an info cover is too', coverPx('info', '') / 1920 < 0.045, coverPx('info', ''));
+ok('and every step is smaller than the one above it',
+  coverPx('minimal', '') > coverPx('minimal', 'mid') &&
+    coverPx('minimal', 'mid') > coverPx('minimal', 'long') &&
+    coverPx('minimal', 'long') > coverPx('minimal', 'xlong'));
 // A URL burned into a photograph is the clearest sign a post was made by a
 // company. The sourcing did not weaken: every slide's URL is in the approval
 // message, which is where the decision is actually made.
@@ -1306,32 +1388,83 @@ ok('no counter of our own', !slideHtml.includes('class="counter"'));
 // slide is what an advertisement looks like.
 ok('the brand is not on every slide', !slideHtml.includes('tiyulplus'));
 // Not one reference post carries a domain, cover included.
-ok('nor on the cover', !renderSlideHtml({ titleHe: 'x' }, { index: 1, total: 3, cover: true }).includes('tiyulplus'));
-// Legibility the way the app's own text tool does it: each line on its own
-// rounded slab. A heavy outline read as a badly edited image and a single
-// panel behind the block read as an advertisement.
-// Placement is per photograph now: the vision pass says which third is empty,
-// and a fixed centre is what put the text across the middle of a garden.
-ok(
-  'the text is placed in the empty band of that photograph',
-  renderSlideHtml({ nameHe: 'x', fields: [], image: { band: 'top', side: 'left' } }, { index: 2, total: 3 }).includes(
-    'band-top side-left'
-  )
+ok('nor on the cover', !renderSlideHtml({ titleHe: 'x' }, { cover: true, style: 'minimal' }).includes('tiyulplus'));
+
+// Placement is measured, not named. render/photo.js returns the centre of the
+// empty region as a fraction of the frame, and the renderer applies it
+// literally — a fixed centre is what put a title across the middle of a garden,
+// and three named bands were not much better.
+const placed = renderSlideHtml(
+  { nameHe: 'x', fields: [] },
+  { style: 'minimal', spot: { x: 0.34, y: 0.28, width: 0.52, color: '#FFFFFF', onDark: true, assist: 0, shadow: 0 } }
 );
-ok('and falls to the bottom when nothing said otherwise', renderSlideHtml({ nameHe: 'x', fields: [] }, { index: 2, total: 3 }).includes('band-bottom'));
-ok('a wrapped line does not break into two ragged pieces', slideHtml.includes('box-decoration-break: clone'));
-// TikTok Sans has no Hebrew, so it can only ever carry Latin and digits; the
-// Hebrew falls through to Rubik, a display face, rather than to Heebo, which is
-// a text face and reads as a caption at this size.
-ok('Latin and digits are set in TikTok Sans', slideHtml.includes("font-family: 'TikTok Sans', 'Rubik'"));
-ok('the Hebrew display face is bundled too', slideHtml.includes("font-family: 'Rubik'"));
+ok('the block is positioned from the measurement', placed.includes('top:538px') && placed.includes('width:562px'));
+ok('a slide with no measurement still lands somewhere sane', bare.includes('class="block"'));
+
+// Text ran off the left edge of the first renders because a 0.56-wide box
+// centred at 0.3 reaches x=0.02. The margin is guaranteed here rather than
+// trusted from the scoring.
+const hugging = renderSlideHtml(
+  { nameHe: 'x', fields: [] },
+  { style: 'minimal', spot: { x: 0.05, y: 0.5, width: 0.9, color: '#FFFFFF', onDark: true, assist: 0, shadow: 0 } }
+);
+ok('and never touches the edge of the frame', hugging.includes('left:65px'));
+
+// No outline in the minimal style. A stroke around every letter is not
+// something TikTok's own text tool can produce, so the eye reads it as foreign
+// no matter how good the rest of the slide is — it was the single loudest part
+// of "the font looks like it was added in Photoshop".
+ok('the minimal style carries no outline at all', placed.includes('-webkit-text-stroke: 0'));
+ok('the info style is cream over bronze, which is its whole signature', slideHtml.includes('-webkit-text-stroke: var(--stroke) #7A4A12'));
+
+// One Hebrew face, two weights. TikTok Sans has no Hebrew at all — it carries
+// only the digits and punctuation — so the family after it is the one that
+// actually draws the words.
+ok('Latin and digits are always set in TikTok Sans', slideHtml.includes("font-family: 'TikTok Sans'"));
+ok('the info style sets Hebrew in the display face', slideHtml.includes("font-family: 'TikTok Sans', 'Rubik'"));
+ok('and so does the minimal style', placed.includes("font-family: 'TikTok Sans', 'Rubik'"));
+// Heebo stays last, so a face that fails to parse degrades to legible-but-wrong
+// rather than to a slide full of tofu boxes.
+ok('both fall back rather than to nothing', placed.includes("'Heebo', sans-serif") && slideHtml.includes("'Heebo', sans-serif"));
+ok('the faces are bundled into the page, not linked', placed.includes('data:font/ttf;base64,'));
+
+// The weights are the difference between the two styles now that the family is
+// shared, so they are worth asserting: an info slide is meant to be loud and a
+// minimal slide is meant to look like a caption somebody typed.
+eq('the minimal name is set light', FACES.minimal.name, 600);
+eq('the info name is set heavy', FACES.info.name, 800);
+ok('and the minimal style really is lighter', FACES.minimal.name < FACES.info.name);
+ok('the weight reaches the stylesheet', placed.includes(`font-weight: ${FACES.minimal.name};`));
+ok('and the info weight does too', slideHtml.includes(`font-weight: ${FACES.info.name};`));
+
+// The wash behind the text is the last resort and has to stay rare, or every
+// slide grows a panel and the look is gone.
+ok('no wash when the photograph offers enough contrast', !placed.includes('class="assist"'));
+ok(
+  'a wash appears when it does not',
+  renderSlideHtml(
+    { nameHe: 'x', fields: [] },
+    { style: 'minimal', spot: { x: 0.5, y: 0.5, width: 0.7, color: '#FFFFFF', onDark: true, assist: 0.8, shadow: 1 } }
+  ).includes('class="assist"')
+);
+
+// The info style's ink never changes, so the placement search has to score
+// contrast against cream rather than against whichever of white and black it
+// might otherwise pick. Getting this wrong put a cream line on a sunlit
+// snowfield with clear blue sky directly above it.
+ok('the info style declares a fixed ink luminance', INK_LUMINANCE.info > 0.7);
+eq('the minimal style leaves it to the measurement', INK_LUMINANCE.minimal, null);
 eq('TikTok slides are 9:16', `${SIZES.tiktok.w}x${SIZES.tiktok.h}`, '1080x1920');
 eq('Instagram slides are 4:5, because the feed crops anything taller', `${SIZES.instagram.w}x${SIZES.instagram.h}`, '1080x1350');
-ok('a slide with no photograph still renders', renderSlideHtml({ nameHe: 'x', lines: [] }, { index: 2, total: 3 }).includes('linear-gradient'));
+ok('a slide with no photograph still renders', renderSlideHtml({ nameHe: 'x', fields: [] }, { style: 'minimal' }).includes('linear-gradient'));
 ok('HTML in a place name cannot break out of the template', renderSlideHtml(
-  { nameHe: '<script>alert(1)</script>', lines: [], sourceHost: 'x.cz' },
-  { index: 2, total: 3 }
+  { nameHe: '<script>alert(1)</script>', fields: [], sourceHost: 'x.cz' },
+  { style: 'minimal' }
 ).includes('&lt;script&gt;'));
+ok('nor out of a field value', renderSlideHtml(
+  { nameHe: 'x', fields: [{ emoji: '🗻', labelHe: 'גובה', value: '<img src=x onerror=1>' }] },
+  { style: 'info' }
+).includes('&lt;img'));
 
 // The deck id has to be stable across re-runs or the same five museums stage
 // twice, and has to change when the places do.
@@ -1362,6 +1495,60 @@ eq(
   'nm.cz,mkcr.cz,praha.eu'
 );
 eq('a place with nothing has no authority', authorityDomains({ osmTags: {} }).length, 0);
+
+/* -------------------------------------------------------------------------- */
+group('the guide page — a deck of trails is not a deck of whatever is on the page');
+
+// The bug this group exists for.
+//
+// CATEGORY_HE had no line for `trail`, and an unmapped kind fell through to the
+// permissive branch of pick(), which takes the WHOLE destination page. So
+// "trails in the Dolomites" shipped as a valley, two lakes, a town, a museum
+// town and Piazza delle Erbe market — under a cover calling them the most
+// beautiful mountains in Italy.
+//
+// A missing line is invisible until a deck goes out wrong, so the table is held
+// against the registry instead of being read by eye.
+for (const id of Object.keys(KINDS)) {
+  ok(`the guide page knows what a ${id} deck wants`, Array.isArray(CATEGORY_HE[id]) && CATEGORY_HE[id].length > 0);
+}
+
+// The site's real vocabulary, sampled off the live pages. A category we invent
+// matches nothing and fails exactly as silently as a missing line — 'shopping'
+// said 'קניות' for months while the site said 'שופינג'.
+const SITE_CATEGORIES = [
+  'טבע', 'אתר היסטורי', 'תצפית', 'אטרקציה', 'אוכל', 'אוכל כשר', 'שופינג', 'שוק', 'מוזיאון', 'בית קפה', 'גלריה', 'מסעדה', 'פארק', 'גן', 'קניות',
+];
+for (const [id, cats] of Object.entries(CATEGORY_HE)) {
+  for (const c of cats) ok(`${id} asks for a category the site actually uses: ${c}`, SITE_CATEGORIES.includes(c));
+}
+
+// The Dolomites page, as it actually parses.
+const guide = [
+  { nameHe: 'שוק פיאצה דלה ארבה', category: 'שוק', rating: 4.6 },
+  { nameHe: 'אגם סוראפיס', category: 'טבע', rating: 4.8 },
+  { nameHe: 'בולצאנו ומוזיאון אצי', category: 'אתר היסטורי', rating: 4.5 },
+  { nameHe: 'סאס פורדוי', category: 'תצפית', rating: 4.7 },
+];
+const names = (list) => list.map((p) => p.nameHe);
+
+ok('a trail deck no longer takes the market', !names(pick(guide, { kind: 'trail', want: 9 })).includes('שוק פיאצה דלה ארבה'));
+ok('nor the museum town', !names(pick(guide, { kind: 'trail', want: 9 })).includes('בולצאנו ומוזיאון אצי'));
+ok('a food deck still gets the market', names(pick(guide, { kind: 'food', want: 9 })).includes('שוק פיאצה דלה ארבה'));
+
+// A registered kind with nothing on the page returns nothing, so buildDeck
+// falls through to the map — whose Overpass tags cannot answer a summit query
+// with a market. Taking the whole page instead is the bug, not the fallback.
+eq('a registered kind with no match yields nothing', pick(guide, { kind: 'museum', want: 9 }).length, 0);
+// And the permissive branch survives for what it was written for: a deck of
+// "the best of Prague", where no category was asked for at all.
+eq('an unregistered kind still takes the page', pick(guide, { kind: 'best of', want: 9 }).length, 4);
+eq('and so does no kind at all', pick(guide, { want: 9 }).length, 4);
+
+// "/deck Italy mountains" must not fail on the plural.
+eq('a plural resolves to the registry name', canonicalKind('mountains'), 'mountain');
+eq('and so does a synonym', canonicalKind('hiking'), 'trail');
+ok('a resolved synonym reaches a real mapping', Boolean(CATEGORY_HE[canonicalKind('waterfalls')]));
 
 // The model is asked for 5-7 and will occasionally ask for eleven; that is a
 // misunderstanding of the format rather than a richer list.
@@ -1624,6 +1811,472 @@ ok('ids are unique', new Set(reg.sources.map((s) => s.id)).size === reg.sources.
 // Last, and slowest: the guard that was silently broken. Needs Chromium but no
 // network. Checked in both directions, because the whole point is that the
 // obvious version of this check passed in both.
+/* -------------------------------------------------------------------------- */
+group('measured facts — the numbers a mountain has instead of a website');
+
+const METRE = { amount: '+3967', unit: 'http://www.wikidata.org/entity/Q11573' };
+eq('an elevation in metres reads as metres', lengthValue(METRE, 'm'), '3,967 מ׳');
+eq(
+  'feet are normalised rather than printed',
+  lengthValue({ amount: '+14692', unit: 'http://www.wikidata.org/entity/Q3710' }, 'm'),
+  '4,478 מ׳'
+);
+eq(
+  'a trail in metres is stated in kilometres',
+  lengthValue({ amount: '+5300', unit: 'http://www.wikidata.org/entity/Q11573' }, 'km'),
+  '5.3 ק"מ'
+);
+// Wikidata's default unit for a bare quantity is "1", and guessing metres from
+// that is how a slide ends up claiming a hill is four kilometres high.
+eq('an unrecognised unit is refused, not guessed', lengthValue({ amount: '+900', unit: 'http://www.wikidata.org/entity/Q99' }, 'm'), null);
+eq('and so is a missing amount', lengthValue({ unit: 'x' }, 'm'), null);
+
+// Wikidata pads years to four digits; "נבנה: 0778" went out on a slide.
+eq('a padded year loses its padding', yearValue({ time: '+0778-00-00T00:00:00Z' }), '778');
+eq('a modern year is unchanged', yearValue({ time: '+1601-01-01T00:00:00Z' }), '1601');
+eq('a year BCE says so rather than showing a minus', yearValue({ time: '-0447-00-00T00:00:00Z' }), '447 לפנה"ס');
+
+const peakClaims = {
+  P2044: [{ mainsnak: { datavalue: { value: METRE } } }],
+  P17: [{ mainsnak: { datavalue: { value: { id: 'Q39' } } } }],
+};
+const peakLabels = new Map([['Q39', { he: 'שווייץ', iso: 'CH' }]]);
+const peakFields = factsFor('mountain', peakClaims, { labels: peakLabels });
+eq('a summit carries its height', peakFields[0].value, '3,967 מ׳');
+eq('labelled in Hebrew', peakFields[0].labelHe, 'גובה');
+// The flag beside the name already says the country; a field saying it again is
+// the same fact twice, and five times over a one-country deck.
+ok('and no country field, because the flag already says it', !peakFields.some((f) => f.key === 'country'));
+
+const swiss = countryFor(peakClaims, peakLabels);
+eq('the country resolves to Hebrew', swiss.he, 'שווייץ');
+eq('and to its flag', swiss.flag, '🇨🇭');
+eq('a place with no country claim says so', countryFor({}, peakLabels).flag, null);
+
+// "Tromsø, Norway" earns the word because the next slide says Finland. Six
+// Swiss summits do not.
+const oneCountry = [{ countryHe: 'שווייץ', flag: '🇨🇭' }, { countryHe: 'שווייץ', flag: '🇨🇭' }];
+applyCountryVisibility(oneCountry);
+ok('a one-country deck drops the repeated word', oneCountry.every((s) => s.countryHe === null));
+ok('but keeps the flag, which is what makes the set look like a set', oneCountry.every((s) => s.flag));
+const manyCountries = [{ countryHe: 'נורווגיה' }, { countryHe: 'פינלנד' }];
+applyCountryVisibility(manyCountries);
+ok('a cross-country deck keeps it', manyCountries.every((s) => s.countryHe));
+
+ok('a deck whose slides mostly have fields is an info deck', enoughFor([{ fields: [1] }, { fields: [1] }, { fields: [] }]));
+ok('one where they mostly do not is not', !enoughFor([{ fields: [1] }, { fields: [] }, { fields: [] }]));
+ok('and an empty deck is not', !enoughFor([]));
+
+// Artwork for every emoji a slide can draw, checked rather than assumed.
+//
+// The whole reason the set is committed rather than left to the machine's own
+// emoji font is that a missing glyph does not error, it renders as a box — and
+// a slide full of boxes screenshots perfectly happily. Adding a field to
+// WIKIDATA_FIELDS without running `npm run fetch-emoji` is the obvious way to
+// reintroduce that, so the specs are checked against the files on disk.
+for (const [kind, spec] of Object.entries(WIKIDATA_FIELDS)) {
+  for (const f of spec) {
+    ok(`${kind}/${f.key} has artwork for ${f.emoji}`, Boolean(emojiDataUri(f.emoji)));
+  }
+}
+// Flags are the ones most likely to be missing: noto-emoji keeps them in a
+// different directory, in a different format, and every one of them 404s at the
+// path the pictograms come from — which is how the whole set came to be absent.
+for (const iso of ['IT', 'CH', 'JP', 'NO', 'GR', 'IS', 'CZ']) {
+  ok(`the ${iso} flag has artwork`, Boolean(emojiDataUri(flagFor(iso))));
+}
+eq('an ISO code becomes a flag', flagFor('it'), '🇮🇹');
+eq('and nonsense does not', flagFor('xyz'), null);
+
+/* -------------------------------------------------------------------------- */
+group('Hebrew names — a Latin name on a Hebrew slide is the loudest tell there is');
+
+ok('Hebrew passes', isHebrew('מאטרהורן'));
+ok('Hebrew with a space and a comma passes', isHebrew('אלפה די סיוזי, איטליה'));
+ok('Latin is refused', !isHebrew('Piz Bernina'));
+// The failure that actually shipped: a transliteration that kept one Latin word.
+ok('and so is a mixture, which is how "Aletschhorn" survived', !isHebrew('הר Aletschhorn'));
+ok('an empty answer is refused', !isHebrew(''));
+ok('so is whitespace', !isHebrew('   '));
+
+/* -------------------------------------------------------------------------- */
+group('module surfaces — a deleted export must not fail silently');
+
+// A careless edit to deck/ideas.js removed hasApiKey and proposeIdeas along
+// with the function it meant to replace. Nothing caught it: the tests did not
+// import them, the renderer does not use them, and the only caller is the /deck
+// command with no argument — which would have thrown at runtime, in the bot, on
+// the one path nobody exercises while iterating on slides.
+//
+// Checked as a list rather than by importing each one, so the failure names the
+// missing symbol instead of taking the whole suite down with a module error.
+for (const [mod, expected] of [
+  ['../src/deck/ideas.js', ['hasApiKey', 'proposeIdeas', 'coverForDeck', 'titleForRequest', 'normaliseIdea', 'rotationFor', 'oneClause', 'emphasisFrom']],
+  ['../src/deck/build.js', ['buildDeck', 'buildDeckFromSite', 'fillImages', 'draftSlide', 'findPage']],
+  ['../src/deck/facts.js', ['factsFor', 'countryFor', 'enoughFor', 'applyCountryVisibility', 'lengthValue', 'yearValue']],
+  ['../src/render/deck.js', ['renderDeck', 'renderDeckSize', 'slideStem']],
+  ['../src/render/photo.js', ['analyseSlides', 'measureCardScrims', 'scrimAlpha', 'underScrim']],
+  ['../src/render/deckTemplates.js', ['renderSlideHtml', 'SIZES', 'FACES', 'INK_LUMINANCE']],
+  ['../src/deck/attempt.js', ['buildWithFallback', 'describeAttempt']],
+  ['../src/deck/request.js', ['resolveRequest', 'parseLocally']],
+  ['../src/deck/hebrew.js', ['hebrewNames', 'isHebrew']],
+  ['../src/deck/region.js', ['deckPlace', 'namesPlace', 'REGIONS']],
+  ['../src/images/textbox.js', ['findTextRegion']],
+]) {
+  const loaded = await import(mod).catch((e) => ({ __error: e.message }));
+  if (loaded.__error) {
+    ok(`${mod} loads`, false, loaded.__error);
+    continue;
+  }
+  for (const name of expected) {
+    ok(`${mod.split('/').pop()} still exports ${name}`, typeof loaded[name] !== 'undefined');
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+group('covers — variety is a property of the sequence, not of one call');
+
+// A model asked once per deck cannot see the previous deck, so "vary it" in a
+// brief converges on its favourite phrasing — which is how six decks in a row
+// came back "טופ N ... שאסור לפספס". The shape and voice are therefore chosen
+// outside the call and handed down.
+// An example beats a rule, so the examples have to obey the rules.
+//
+// The brief says a number on a cover is written as a numeral and never spelled
+// out — and one of the shape examples read "איסלנד בחמישה מפלים", three
+// paragraphs below that rule. The model copied the example, not the rule, and
+// shipped "האלפים של ברן בשישה הרים". Everything handed to the model as an
+// exemplar is checked against the rule it is meant to illustrate.
+const SPELLED_OUT = /\b(?:שניים|שתיים|שלושה|שלוש|ארבעה|ארבע|חמישה|חמש|שישה|שש|שבעה|שבע|שמונה|תשעה|תשע|עשרה|עשר)\b/;
+for (const shape of COVER_SHAPES) {
+  for (const example of shape.examples) {
+    ok(`the ${shape.id} example writes its number as a numeral`, !SPELLED_OUT.test(example), example);
+  }
+}
+for (const voice of Object.values(COVER_VOICES)) {
+  ok(`the ${voice.id} example does too`, !SPELLED_OUT.test(voice.example), voice.example);
+}
+
+// A counter, not a hash of the deck.
+//
+// Hashing made the choice stable across re-runs, which nothing needed — the
+// deck id is built from the region, the category and the place ids, and
+// deliberately not from the title. What it cost was collisions: seven decks
+// drawing independently from six buckets put four on the same picture and
+// returned the identical closing phrase twice, which is the exact thing the
+// rotation exists to prevent. A counter cannot collide.
+const seq = Array.from({ length: 30 }, (_, i) => rotationFor(i));
+
+ok('consecutive posts differ in shape', seq[0].shape.id !== seq[1].shape.id);
+// Not voice: it follows the shape, and two impersonal shapes can sit next to
+// each other. Three of the four covers the channel was specified by are
+// impersonal, so that is the common case rather than a fault.
+// The voice belongs to the shape rather than rotating beside it. Spun
+// independently it put "אתם" on a shape with no room for it —
+// "פסגות שאתם לא תאמינו שהן אמיתיות" where the spec says
+// "הרים שלא נראים אמיתיים".
+eq('the unreal shape is impersonal', seq[0].voice.id, 'none');
+eq('the obligation shape takes the pronoun', seq[2].voice.id, 'you');
+ok('every shape declares its voice', COVER_SHAPES.every((sh) => COVER_VOICES[sh.voice]));
+// In the four covers the channel was specified by, "אתם" appears exactly once.
+const pronouns = COVER_SHAPES.filter((sh) => sh.voice === 'you').length;
+ok('most shapes carry no pronoun', pronouns <= 2);
+
+eq('every shape is reachable', new Set(seq.map((r) => r.shape.id)).size, COVER_SHAPES.length);
+eq('and both voices are used', new Set(seq.map((r) => r.voice.id)).size, Object.keys(COVER_VOICES).length);
+// Most covers carry no count and name nowhere. The counted shape exists because
+// the channel's own first example was "טופ 4 פסגות שאסור לפספס באלפים", but a
+// list built AROUND counts and place names had every cover rejected.
+const counted = seq.slice(0, 10).filter((r) => r.shape.id === 'top-n').length;
+eq('one cover in five carries a count', counted, 2);
+// Obligation is no longer rationed by a flag — it is one of the five shapes,
+// which is what the channel's own examples do with it.
+ok('obligation is a shape of its own', COVER_SHAPES.some((sh) => sh.id === 'urgency'));
+ok('and so is the superlative', COVER_SHAPES.some((sh) => sh.id === 'superlative'));
+
+// Nonsense in, first entry out, rather than a crash — the caller passes a count
+// that could be absent on a fresh store.
+eq('a missing count starts at the beginning', rotationFor(undefined).shape.id, seq[0].shape.id);
+eq('and so does rubbish', rotationFor('x').shape.id, seq[0].shape.id);
+
+// "One line, not a title plus a subtitle" was in the brief from the start and a
+// cover still came back as "סנטוריני שאתם לא מכירים: חורבות ומצודות מול הים".
+// The half before the colon is the line that was wanted.
+eq(
+  'a cover split by a colon keeps its first half',
+  oneClause('סנטוריני שאתם לא מכירים: חורבות ומצודות מול הים'),
+  'סנטוריני שאתם לא מכירים'
+);
+eq('a clean line is untouched', oneClause('6 מפלים באיסלנד שלא נראים אמיתיים'), '6 מפלים באיסלנד שלא נראים אמיתיים');
+// Half of a short title is not a title, so a stub is refused and the whole
+// line kept — better an awkward cover than a two-word one.
+eq('but a stub is refused', oneClause('פראג: שישה מקומות'), 'פראג: שישה מקומות');
+// Told not to use a colon, the next cover used a comma for the same splice.
+eq(
+  'a comma splice is cut the same way',
+  oneClause('הסנטוריני שאתם לא מכירים, חורבות ומצודות'),
+  'הסנטוריני שאתם לא מכירים'
+);
+
+// Cutting the splice can take the model's chosen emphasis with it, which left
+// one cover with nothing set in colour. The closing clause is what should have
+// been coloured anyway, and in Hebrew it opens with ש.
+eq('the closing clause is recoverable', emphasisFrom('הסנטוריני שאתם לא מכירים'), 'שאתם לא מכירים');
+eq('and from a longer line too', emphasisFrom('6 מפלים באיסלנד שלא נראים אמיתיים'), 'שלא נראים אמיתיים');
+// No ש-clause: the last two words carry it.
+eq('otherwise the tail does', emphasisFrom('6 פינות בפראג עם גגות כתומים'), 'גגות כתומים');
+eq('a title too short to split gives nothing', emphasisFrom('פראג'), '');
+
+/* -------------------------------------------------------------------------- */
+group('where a deck is — the cover has to say it, so it has to be worked out');
+
+// Six Icelandic waterfalls went out under "מפלים שאתם חייבים לראות פעם אחת
+// בחיים". Every slide was in one country and the cover named nowhere, which is
+// the one thing a viewer needed in order to save the post.
+const ice = [
+  { nameHe: 'סקוגאפוס', iso: 'IS', countryHe: 'איסלנד' },
+  { nameHe: 'גודפוס', iso: 'IS', countryHe: 'איסלנד' },
+  { nameHe: 'דטיפוס', iso: 'is', countryHe: 'איסלנד' },
+];
+eq('one country is named', deckPlace(ice, { kind: 'waterfall' }).he, 'איסלנד');
+eq('and it is a country, not an area', deckPlace(ice, { kind: 'waterfall' }).scope, 'country');
+
+// "even if all countries are nordic, the title should say in the nordics".
+const nordic = [
+  { iso: 'NO', countryHe: 'נורווגיה' },
+  { iso: 'SE', countryHe: 'שוודיה' },
+  { iso: 'IS', countryHe: 'איסלנד' },
+];
+eq('three nordic countries are one area', deckPlace(nordic).he, 'סקנדינביה');
+eq('and it is an area, not a country', deckPlace(nordic).scope, 'region');
+
+// Only when nothing is shared does the cover name nowhere.
+eq(
+  'places on different continents share nothing',
+  deckPlace([{ iso: 'IS' }, { iso: 'JP' }, { iso: 'PE' }]).scope,
+  'none'
+);
+eq('and nothing is what it offers', deckPlace([{ iso: 'IS' }, { iso: 'JP' }]).he, null);
+
+// The SMALLEST covering group, not the first one that fits. Norway and Sweden
+// are in Europe as well as in Scandinavia, and "באירופה" for two Nordic
+// countries is the vaguer of two true answers.
+eq('the tightest grouping wins', deckPlace([{ iso: 'NO' }, { iso: 'SE' }]).he, 'סקנדינביה');
+// Italy and Norway have no region between them, and the continent is the last
+// thing true of both.
+eq('a continent is the last resort', deckPlace([{ iso: 'IT' }, { iso: 'NO' }]).he, 'אירופה');
+
+// The one grouping that asks what the deck is about. A museum in Vienna is not
+// in the Alps; a summit above it is.
+eq('a cross-border summit deck is alpine', deckPlace([{ iso: 'CH' }, { iso: 'AT' }], { kind: 'mountain' }).he, 'האלפים');
+eq(
+  'the same two countries of museums are not',
+  deckPlace([{ iso: 'CH' }, { iso: 'AT' }], { kind: 'museum' }).he,
+  'מרכז אירופה'
+);
+
+// The tiyulplus route has no Wikidata entity and therefore no ISO code; it
+// resolves one country for the whole deck and writes the Hebrew name onto every
+// slide. That has to reach the cover too.
+eq(
+  'a deck with names but no codes still has a country',
+  deckPlace([{ countryHe: 'צ׳כיה' }, { countryHe: 'צ׳כיה' }]).he,
+  'צ׳כיה'
+);
+eq('an empty deck is nowhere', deckPlace([]).scope, 'none');
+// A slide with no country does not vote. Filling it in from the region the deck
+// was searched in is a guess, and the guess that adds a country is the one that
+// turns "באיסלנד" into "בסקנדינביה".
+eq('a slide with no country abstains', deckPlace([{ iso: 'IS' }, {}, { iso: 'IS' }]).he, 'איסלנד');
+
+// Every region has to be sayable in Hebrew and reachable.
+for (const r of REGIONS) {
+  ok(`${r.id} is written in Hebrew`, isHebrew(r.he), r.he);
+  ok(`${r.id} has countries in it`, r.isos.length >= 2);
+}
+// Smallest wins, so the list is written smallest first and reads in the order
+// it resolves in.
+const sizes = REGIONS.map((r) => r.isos.length);
+ok('the groupings are declared smallest first', sizes.every((n, i) => i === 0 || n >= sizes[i - 1]), sizes.join(','));
+
+// Two groupings of the same size that shared a country would be resolved by
+// declaration order, which is a coin toss dressed as a rule. Same size is fine
+// as long as they cannot both cover one deck.
+for (const a of REGIONS) {
+  for (const b of REGIONS) {
+    if (a === b || a.isos.length !== b.isos.length) continue;
+    ok(
+      `${a.id} and ${b.id} are the same size and cannot both win`,
+      !a.isos.some((c) => b.isos.includes(c))
+    );
+  }
+}
+
+// France and Germany: the same pair of countries, two different answers,
+// because a summit between them is in the Alps and a museum in either is not.
+eq('a cross-border summit deck gets the range',
+  deckPlace([{ iso: 'FR' }, { iso: 'DE' }], { kind: 'mountain' }).he, 'האלפים');
+eq('and the same two countries of museums get the half-continent',
+  deckPlace([{ iso: 'FR' }, { iso: 'DE' }], { kind: 'museum' }).he, 'מערב אירופה');
+
+// The check that closes the loop: the model writes the place with a preposition
+// on it, so the cover is matched on the substring rather than on equality.
+ok('a country with ב in front of it counts', namesPlace('המפלים הכי יפים באיסלנד', 'איסלנד'));
+ok('and an area does too', namesPlace('המפלים הכי יפים בסקנדינביה', 'סקנדינביה'));
+ok('a cover that names nowhere does not', !namesPlace('מפלים שאתם חייבים לראות', 'איסלנד'));
+// ב absorbs a definite ה, so "הפיליפינים" is written "בפיליפינים" and a plain
+// includes() would fail a perfectly good cover.
+ok('the definite article is absorbed by the preposition', namesPlace('החופים הכי יפים בפיליפינים', 'הפיליפינים'));
+// Checked WITH the ב attached, so stripping the ה cannot match a country whose
+// name merely begins with one: "הודו" is not satisfied by a line that happens
+// to contain the letters ודו.
+ok('a stem on its own is not a match', !namesPlace('מקומות יפים עם ודו בשם', 'הודו'));
+ok('nothing asked for is always satisfied', namesPlace('כל דבר', ''));
+
+/* -------------------------------------------------------------------------- */
+group('deck requests — the command has to answer with a slideshow');
+
+eq('the category at the end is found', parseLocally('Prague museum')?.kind, 'museum');
+eq('and the region with it', parseLocally('Prague museum')?.where, 'Prague');
+// "/deck Italy mountains" is what people actually type.
+eq('a plural at the end is found too', parseLocally('Dolomites trails')?.kind, 'trail');
+eq('a category at the START is found', parseLocally('mountains Italy')?.kind, 'mountain');
+eq('with the rest as the region', parseLocally('mountains Italy')?.where, 'Italy');
+// Not a failure — a request the model is asked to interpret rather than one the
+// command rejects. Answering a typed request with a grammar complaint is the
+// behaviour being removed.
+eq('a phrase with no category is handed upwards', parseLocally('japan autumn'), null);
+eq('and so is a single word', parseLocally('Santorini'), null);
+
+/* -------------------------------------------------------------------------- */
+group('scrims — sized to the photograph, not to the worst photograph');
+
+// The complaint: Instagram cards sometimes come out too dark. "Sometimes" is
+// the tell — the scrim was a constant sized for a white sky, so over a
+// photograph that was already dark it painted near-black onto near-black and
+// the bottom half of the picture stopped existing.
+const bright = scrimAlpha(0.6);
+const dim = scrimAlpha(0.05, { floor: 0.34 });
+ok('a blown-out sky still gets a heavy scrim', bright > 0.6, bright);
+ok('an already-dark photograph gets a light one', dim <= 0.4, dim);
+ok('and darker photographs never ask for more than brighter ones',
+  scrimAlpha(0.05) <= scrimAlpha(0.25) && scrimAlpha(0.25) <= scrimAlpha(0.6));
+
+// The floor is not a legibility number. Without it a dark photograph gets no
+// scrim at all, which is legible and reads as an accident rather than as a
+// block of type.
+eq('the floor holds when no darkening is needed', scrimAlpha(0.02, { floor: 0.34 }), 0.34);
+// And the ceiling holds when no amount would be enough, rather than running off
+// the end of the search.
+eq('the ceiling holds when nothing would be enough', scrimAlpha(1, { want: 99 }), 0.97);
+
+// Composited the way the browser composites it. Averaging the LINEAR
+// luminances instead reports a scrim as darker than it renders, which would
+// size every scrim too light — the opposite failure, and a worse one.
+ok('a scrim at full strength lands on the scrim colour',
+  Math.abs(underScrim(0.9, 1) - 0.0124) < 0.001);
+eq('and at zero it changes nothing', Number(underScrim(0.42, 0).toFixed(4)), 0.42);
+ok('the sRGB midpoint is darker than the linear one would be',
+  underScrim(0.6, 0.5) < (0.6 + 0.0124) / 2);
+
+// The scrim the measurement produced has to actually reach the stylesheet, and
+// a card that could not be measured has to fall back to the old constants
+// rather than to no scrim at all.
+const lit = renderHtml(
+  { pillar: 'discover', layout: 'photoFull', headline: 'כותרת', place: 'ונציה' },
+  { image: { src: 'data:image/jpeg;base64,x', scrim: { bottom: 0.4, top: 0.2 } } }
+);
+ok('a measured scrim reaches the gradient', lit.includes('rgba(16,32,31,0.400)'), lit.match(/scrim-bottom[\s\S]{0,180}/)?.[0]);
+ok('and so does the top one', lit.includes('rgba(16,32,31,0.200)'));
+const unlit = renderHtml(
+  { pillar: 'discover', layout: 'photoFull', headline: 'כותרת', place: 'ונציה' },
+  { image: { src: 'data:image/jpeg;base64,x' } }
+);
+ok('an unmeasured card falls back to the constants', unlit.includes(`rgba(16,32,31,${SCRIM_FALLBACK.bottom.toFixed(3)})`));
+ok('rather than to no scrim at all', unlit.includes('scrim-bottom'));
+
+// TikTok draws a caption in white across the foot of the frame and a search bar
+// across the top; Instagram draws neither. The band that protects those is a
+// TikTok band, and applying it to the Instagram render darkened the bottom
+// fifth of every slide for furniture that is not there.
+const tikScrim = renderSlideHtml({ nameHe: 'x', fields: [] }, { size: 'tiktok', style: 'minimal' });
+const igScrim = renderSlideHtml({ nameHe: 'x', fields: [] }, { size: 'instagram', style: 'minimal' });
+ok('the TikTok slide darkens its foot for the caption bar', tikScrim.includes('rgba(4,10,12,0.42) 100%'));
+ok('the Instagram slide does not', !igScrim.includes('rgba(4,10,12,0.42) 100%'));
+ok('and takes only the edge off the sky', igScrim.includes('rgba(4,10,12,0.12) 100%'));
+// An unknown size is a TikTok slide, which is the shape the deck is designed
+// for — never an unscrimmed one.
+ok('an unknown size keeps the TikTok scrim',
+  renderSlideHtml({ nameHe: 'x', fields: [] }, { size: 'nonsense', style: 'minimal' }).includes('rgba(4,10,12,0.42) 100%'));
+
+/* -------------------------------------------------------------------------- */
+group('placement — measured off the photograph, not guessed at');
+
+// White until the frame is genuinely pale. Strict contrast arithmetic flips to
+// near-black above about 0.22 luminance, which is most skies, and near-black
+// lettering on a mid grey-blue sky reads as a watermark.
+ok('light type over a dark frame', photoTest.colourFor({ mean: 0.05, sat: 0.1 }, null).color === '#FFFFFF');
+ok('light type still, over a mid-tone sky', photoTest.colourFor({ mean: 0.3, sat: 0.1 }, null).color === '#FFFFFF');
+ok('dark type only once the frame is genuinely pale', photoTest.colourFor({ mean: 0.7, sat: 0.1 }, null).color === '#14110E');
+
+// Judged on the worst BAND the block crosses, not on its average. A cover over
+// bright sky at the top and dark rock at the bottom averages to a comfortable
+// mid-tone, and its last line disappears into the mountain — which it did.
+const split = photoTest.colourFor({ mean: 0.42, lo: 0.12, hi: 0.72, sat: 0.2 }, null);
+ok('a block spanning sky and rock knows it is in trouble', split.contrast < 4.5);
+ok('and calls for the wash', split.assist > 0);
+// Cream is the same luminance as a bright sky, so the coloured phrase has to be
+// refused there rather than set in something invisible.
+eq('no cream accent across a band it cannot survive', split.accent, null);
+ok('an evenly dark block still gets one', photoTest.colourFor({ mean: 0.12, lo: 0.1, hi: 0.15, sat: 0.3 }, null).accent !== null);
+// Not pure black: a true #000 over a photograph reads as a hole punched in it.
+ok('and it is not pure black', photoTest.colourFor({ mean: 0.9, sat: 0.1 }, null).color !== '#000000');
+
+// The shadow is the first line of defence and it is invisible; the wash is the
+// last and has to stay rare, or every slide grows a panel.
+ok('a clean dark frame needs no help at all', photoTest.colourFor({ mean: 0.02, sat: 0.1 }, null).assist === 0);
+ok('a frame with nothing left to give gets a wash', photoTest.colourFor({ mean: 0.42, sat: 0.1 }, null).assist > 0);
+ok(
+  'and the shadow works harder before the wash appears',
+  photoTest.colourFor({ mean: 0.3, sat: 0.1 }, null).shadow > photoTest.colourFor({ mean: 0.02, sat: 0.1 }, null).shadow
+);
+
+// Tinting the accent with the photograph's own hue was the obvious idea and it
+// is camouflage: a cover over a blue sky came back pale blue and read as white.
+const blueish = photoTest.colourFor({ mean: 0.2, sat: 0.5 }, 210).accent;
+ok('the accent is warm even over a cool photograph', blueish === '#F7E3A1');
+ok('and steps aside when the photograph is itself yellow', photoTest.colourFor({ mean: 0.2, sat: 0.5 }, 45).accent !== '#F7E3A1');
+ok('a pale frame gets no accent, having no contrast left to give', photoTest.colourFor({ mean: 0.8, sat: 0.5 }, 210).accent === null);
+
+// Background, not smoothness.
+//
+// The rule is "the words go in the sky or on the water, never across the
+// mountain". Four pixel heuristics were built for it and all four failed,
+// because the shaded face of a mountain measures CALMER than the sky above it —
+// smoothness and background are different properties. A region identified
+// semantically is turned into a mask, and coverage of that mask outranks
+// everything else in the score.
+const skyBox = { x0: 0.1, y0: 0.2, x1: 0.9, y1: 0.4 };
+const skyMask = photoTest.maskFromBox(skyBox);
+ok('a hinted region becomes a mask', Boolean(skyMask));
+eq('a box inside it is fully covered', photoTest.coverage(skyMask, 0.2 * photoTest.GW, 0.25 * photoTest.GH, 0.8 * photoTest.GW, 0.35 * photoTest.GH), 1);
+eq('a box outside it is not', photoTest.coverage(skyMask, 0.2 * photoTest.GW, 0.6 * photoTest.GH, 0.8 * photoTest.GW, 0.7 * photoTest.GH), 0);
+ok('a box half in, half out lands between', (() => {
+  const c = photoTest.coverage(skyMask, 0.2 * photoTest.GW, 0.35 * photoTest.GH, 0.8 * photoTest.GW, 0.45 * photoTest.GH);
+  return c > 0.2 && c < 0.8;
+})());
+// A degenerate rectangle is a misunderstanding rather than an answer, and the
+// pixel fallback beats honouring it.
+eq('a zero-width region yields no mask', photoTest.maskFromBox({ x0: 0.5, y0: 0.2, x1: 0.5, y1: 0.4 }), null);
+
+// TikTok draws its button rail over the right of the frame; text under it is
+// text nobody reads. Instagram draws nothing, so the exclusion is not a
+// constant in SIZES.
+ok('a box under the button rail is penalised', photoTest.railOverlap(0.8, 0.6, 0.4, 0.2) > 0);
+ok('one above it is not', photoTest.railOverlap(0.8, 0.2, 0.4, 0.1) === 0);
+ok('nor one away to the left', photoTest.railOverlap(0.3, 0.6, 0.4, 0.2) === 0);
+
+/* -------------------------------------------------------------------------- */
 group('font guard — the check that was silently passing');
 
 try {

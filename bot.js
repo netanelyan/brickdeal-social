@@ -15,6 +15,9 @@ import { proposeIdeas, titleForRequest } from './src/deck/ideas.js';
 import { buildDeck } from './src/deck/build.js';
 import { toDeckCandidate } from './src/deck/candidate.js';
 import { canonicalKind } from './src/sources/tiyulplus.js';
+import { KINDS } from './src/sources/places.js';
+import { resolveRequest } from './src/deck/request.js';
+import { buildWithFallback, describeAttempt } from './src/deck/attempt.js';
 import { searchConfigured, remaining as searchRemaining, dailyBudget as searchBudget } from './src/search.js';
 import { publishInstagram, instagramConfigured, remainingQuota, refreshToken, tokenDaysLeft, authMode, describeError } from './src/publish/instagram.js';
 import {
@@ -862,33 +865,63 @@ async function buildAndStageDeck(arg, chatId) {
   const say = (text) => notify.send(bot.telegram, chatId, text).catch(() => {});
 
   let idea;
+  let alternatives = [];
   try {
     if (arg) {
-      // "Prague museum" — the region is everything but the last word, so
-      // "Amalfi Coast beach" works too.
-      const parts = arg.split(/\s+/);
-      // "/deck Italy mountains" - plural is what people type.
-      const kind = canonicalKind(parts.pop());
-      const where = parts.join(' ');
-      await say(`⏳ בונה מצגת: ${where} / ${kind}...`);
+      // Anything at all: "Prague museum", "mountains Italy", "japan autumn",
+      // "הרים בשווייץ". Parsed when it parses and interpreted when it does not,
+      // so the command answers with a slideshow rather than with a grammar
+      // complaint.
+      const req = await resolveRequest(arg);
+      alternatives = req.alternatives;
+      await say(`⏳ בונה מצגת: ${req.where} / ${KINDS[req.kind]?.he || req.kind}...`);
       // A requested deck gets a written cover too. Naming it "Prague · museum"
       // put a filename on the front of a Hebrew slideshow.
-      const cover = await titleForRequest({ where, kind });
-      idea = { ...cover, where, kind, want: 5, whyNow: 'asked for directly' };
+      const cover = await titleForRequest({ where: req.where, kind: req.kind, count: req.want }).catch(() => ({
+        titleHe: req.titleHe,
+      }));
+      idea = { ...cover, where: req.where, kind: req.kind, want: req.want, whyNow: 'asked for directly' };
     } else {
       await say('⏳ חושב על רעיונות...');
       const recent = store.recentPublished().map((p) => p.headline || p.id).filter(Boolean).slice(0, 12);
       const ideas = await proposeIdeas({ count: 3, recent });
       if (!ideas.length) return say('❌ לא חזרו רעיונות');
       idea = ideas[0];
-      await ctx.reply(
+      // The other two are this run's fallbacks. They were generated anyway, and
+      // they are exactly what to try when the first idea turns out to be about
+      // a region nobody has mapped.
+      alternatives = ideas.slice(1).map((i) => ({ where: i.where, kind: i.kind }));
+      // `say`, not ctx.reply — this function runs detached from the update that
+      // started it and there is no ctx here. It threw a ReferenceError on every
+      // bare /deck, which is why that path appeared to hang.
+      await say(
         [`💡 ${idea.titleHe}`, idea.angleHe, `📍 ${idea.where} · ${idea.kind} · ${idea.want} מקומות`, `⏳ מחפש מקורות...`]
           .filter(Boolean)
           .join('\n')
       );
     }
 
-    const built = await buildDeck(idea);
+    const built = await buildWithFallback(idea, alternatives, {
+      // Said out loud, because a deck takes minutes and silence looks like a
+      // hang. "Bernese Alps came back with two slides, trying Valais" is also
+      // the most useful thing to know afterwards.
+      onAttempt: (attempt, i, why) => {
+        if (i > 0) say(`↩️ ${why || 'לא הצליח'} - מנסה ${describeAttempt(attempt)}`);
+      },
+    });
+    if (!built?.slides?.length) {
+      // Still a suggestion rather than a dead end: the request was understood,
+      // the region just has nothing mappable in it, and the next thing to try
+      // is worth saying out loud.
+      const next = alternatives[0];
+      return say(
+        [
+          `😕 לא הצלחתי לבנות מצגת על ${idea.where} / ${KINDS[idea.kind]?.he || idea.kind}`,
+          next ? `💡 שווה לנסות: /deck ${next.where} ${next.kind}` : '💡 נסה אזור ממוקד יותר, למשל /deck Dolomites trail',
+        ].join('\n')
+      );
+    }
+
     const cand = await toDeckCandidate(built);
 
     if (store.hasPublished(cand.id)) {
@@ -897,7 +930,13 @@ async function buildAndStageDeck(arg, chatId) {
 
     await stage(cand);
     await say(
-      `✅ ${built.slides.length} שקופיות · ${searchConfigured() ? `${searchRemaining()}/${searchBudget()} חיפושים נותרו היום` : 'בלי חיפוש'}`
+      [
+        `✅ ${built.slides.length} שקופיות · סגנון ${built.style === 'info' ? 'מידע' : 'מינימלי'}`,
+        built.short ? `⚠️ ביקשנו ${idea.want}` : null,
+        searchConfigured() ? `🔎 ${searchRemaining()}/${searchBudget()} חיפושים נותרו היום` : 'בלי חיפוש',
+      ]
+        .filter(Boolean)
+        .join('\n')
     );
   } catch (e) {
     console.error('deck failed:', e);

@@ -97,7 +97,25 @@ function shell({ accent, kicker, body, extraCss = '' }) {
 /* Photo family — the picture leads, the words sit under it                   */
 /* -------------------------------------------------------------------------- */
 
-const photoCss = `
+// The strength each scrim falls back to when the photograph could not be
+// measured — the old constants, which were sized for the worst photograph there
+// is. Correct for a white sky, and the reason a card over an already-dark
+// picture came out murky; see measureCardScrims in ./photo.js.
+export const SCRIM_FALLBACK = { bottom: 0.97, top: 0.72 };
+
+/**
+ * The two scrims, at whatever strength this photograph turned out to need.
+ *
+ * The SHAPE of each gradient is fixed and the strength scales it. That split is
+ * the point: where the stops sit is a design decision about how the type meets
+ * the picture, and how dark they get is a measurement. Scaling the whole ramp
+ * by one number keeps the first from drifting every time the second changes.
+ */
+const photoCss = (scrim = null) => {
+  const b = scrim?.bottom ?? SCRIM_FALLBACK.bottom;
+  const t = scrim?.top ?? SCRIM_FALLBACK.top;
+  const at = (share) => `rgba(16,32,31,${(b * share).toFixed(3)})`;
+  return `
   .photo-card { padding: 0; }
   .bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   /* Two scrims, not one. The bottom carries the text and needs to be nearly
@@ -107,22 +125,23 @@ const photoCss = `
   .scrim-bottom {
     position: absolute; left: 0; right: 0; bottom: 0; height: 52%;
     background: linear-gradient(to top,
-      rgba(16,32,31,0.97) 0%, rgba(16,32,31,0.94) 34%,
-      rgba(16,32,31,0.62) 66%, rgba(16,32,31,0) 100%);
+      ${at(1)} 0%, ${at(0.97)} 34%,
+      ${at(0.64)} 66%, rgba(16,32,31,0) 100%);
   }
   .scrim-top {
     position: absolute; left: 0; right: 0; top: 0; height: 22%;
-    background: linear-gradient(to bottom, rgba(16,32,31,0.72), rgba(16,32,31,0));
+    background: linear-gradient(to bottom, rgba(16,32,31,${t.toFixed(3)}), rgba(16,32,31,0));
   }
   .layer { position: relative; z-index: 2; display: flex; flex-direction: column; height: 100%; }
 `;
+};
 
 /** photoFull — full-bleed picture, the description sitting in the bottom third. */
 function photoFullCard(d, accent, image) {
   // The headline is capped a size smaller than on the text cards. This layout's
   // job is to be mainly a picture, and an 86px headline wrapping to three lines
   // pushes the scrim halfway up the frame and buries the photograph.
-  return `<style>${baseCss()}${photoCss}
+  return `<style>${baseCss()}${photoCss(image?.scrim)}
     .layer { padding: 66px 78px 58px; justify-content: space-between; }
     .pf-text { display: flex; flex-direction: column; gap: 20px; }
     .pf-text .subhead { font-size: 36px; }
@@ -144,7 +163,7 @@ function photoFullCard(d, accent, image) {
 
 /** photoBand — picture on top, a solid band of type beneath it. */
 function photoBandCard(d, accent, image) {
-  return `<style>${baseCss()}${photoCss}
+  return `<style>${baseCss()}${photoCss(image?.scrim)}
     .photo-card { display: flex; flex-direction: column; }
     .pb-img { position: relative; height: 60%; flex: none; overflow: hidden; }
     .pb-img .bg { position: absolute; }
@@ -180,7 +199,7 @@ function photoBandCard(d, accent, image) {
 
 /** photoFrame — inset picture with a gallery caption under it. */
 function photoFrameCard(d, accent, image) {
-  return `<style>${baseCss()}${photoCss}
+  return `<style>${baseCss()}${photoCss(image?.scrim)}
     .photo-card { padding: 62px 66px 56px; }
     .pfr-img {
       position: relative; height: 700px; flex: none;

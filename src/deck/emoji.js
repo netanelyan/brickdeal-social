@@ -1,3 +1,5 @@
+import { ALL_FLAGS } from './flags.js';
+
 // The channel's emoji voice.
 //
 // Supplied by the team, and it is a personality rather than a palette: faces
@@ -47,6 +49,11 @@ export const ALL_USED = [
   '🚆', '🚌', '🚶', '🧗', '⛰️', '🏔️', '🌊', '🏖️', '🌅', '🌃',
   '🎟️', '💸', '💰', '🕘', '📅', '🔒', '🍽️', '☕', '🍺', '🍷',
   '🛒', '🎨', '🏛️', '⛪', '🕍', '🏰', '📸', '🎧', '✨', '⭐',
+  // The field set. These are the ones an info slide draws in a fixed order on
+  // every slide of a deck, and they are the emoji the reference posts use for
+  // exactly these facts — a boot for difficulty, a ruler for distance, a rising
+  // chart for ascent, a stopwatch for time.
+  '🥾', '📏', '📈', '⏱️', '🗻', '🧭', '🌡️', '🎿', '🚡', '🛤️',
 ];
 
 /**
@@ -56,4 +63,4 @@ export const ALL_USED = [
  * character with no file still renders — it just renders in whatever the
  * machine has, which is the old behaviour and better than an empty box.
  */
-export const KNOWN = new Set([...VOCAB, ...ALL_USED]);
+export const KNOWN = new Set([...VOCAB, ...ALL_USED, ...ALL_FLAGS]);

@@ -7,9 +7,16 @@
 //   OpenStreetMap and Wikidata are crowd-sourced. They are excellent at
 //   enumerating what exists and roughly how well known it is, and they are not
 //   the publisher of any fact about it. So a place's OSM tags select it and
-//   rank it, and then every number that reaches a slide has to come from the
+//   rank it, and then every SENTENCE that reaches a slide has to come from the
 //   place's own official page, quoted verbatim, exactly as every other post in
 //   this pipeline works.
+//
+//   The one documented exception is a structured measurement — an elevation, a
+//   length, a founding year — read straight off a Wikidata property by
+//   deck/facts.js. There is no page to quote for the height of a mountain, and
+//   a summit deck with no heights on it was the result. A property is not
+//   prose: nothing is written, the value is copied with its unit, and the QID
+//   travels with it. Prose about a place still needs its official page.
 //
 // What travels out of here is therefore a shortlist: a name, a location, a
 // Wikidata id, and — the part that matters downstream — the official website
@@ -37,6 +44,10 @@ const OVERPASS_MIRRORS = (process.env.OVERPASS_URL || '')
   ]);
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 const WIKIDATA = 'https://www.wikidata.org/w/api.php';
+
+// Which claims are worth keeping off each entity, declared where the slides
+// that use them are declared rather than here.
+import { WANTED_PROPS, ENTITY_PROPS } from '../deck/facts.js';
 
 // Both services ask for a real user agent and mean it — Nominatim returns 403
 // to the default fetch UA, and the failure looks like the place not existing.
@@ -182,23 +193,63 @@ export async function osmPlaces(bbox, kind) {
 
   // Each mirror gets one attempt rather than three: a busy instance stays busy
   // for minutes, and the next host is a better bet than the next retry.
+  //
+  // An EMPTY answer is not an answer, and that distinction cost a whole deck.
+  // The public instances were timing out, the query fell through to a regional
+  // mirror, and that mirror replied 200 with zero elements because it does not
+  // carry the part of the world being asked about. Nothing downstream could
+  // tell that apart from "there is nothing in Santorini": the deck came back
+  // with no places, a title already written for it, and no error anywhere.
+  //
+  // So an empty result is kept only as a last resort. A mirror that returns
+  // something wins outright; if every mirror that answered returned nothing,
+  // then the region really is empty and that is the honest answer.
   let data = null;
+  let empty = null;
   let last = null;
-  for (const host of OVERPASS_MIRRORS) {
-    try {
-      data = await json(host, {
-        step: 'overpass',
-        attempts: 1,
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ data: ql }),
-      });
-      break;
-    } catch (e) {
-      last = e;
-      console.error(`places: ${new URL(host).hostname} — ${e.message}`);
+
+  // Two sweeps of the mirrors, not one.
+  //
+  // The public instances go through patches of returning 504 and timing out —
+  // it is their normal weather rather than an outage — and a single pass across
+  // three of them during one of those patches loses the deck entirely. An
+  // Iceland deck died that way with all three refusing inside ten seconds of
+  // each other, which is exactly the shape of a transient.
+  //
+  // The pause matters more than the retry: coming straight back hits the same
+  // busy instance in the same state. Skipped when the first sweep got a real
+  // (if empty) answer, because that is a fact about the region rather than
+  // about the server.
+  const SWEEPS = Number(process.env.OVERPASS_SWEEPS || 2);
+  for (let sweep = 0; sweep < SWEEPS && !data && !empty; sweep++) {
+    if (sweep) {
+      console.error(`places: every mirror refused, waiting before one more sweep`);
+      await wait(Number(process.env.OVERPASS_RETRY_MS || 12_000));
+    }
+
+    for (const host of OVERPASS_MIRRORS) {
+      try {
+        const got = await json(host, {
+          step: 'overpass',
+          attempts: 1,
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ data: ql }),
+        });
+        if (got?.elements?.length) {
+          data = got;
+          break;
+        }
+        empty ??= got;
+        console.error(`places: ${new URL(host).hostname} — answered with nothing, trying the next mirror`);
+      } catch (e) {
+        last = e;
+        console.error(`places: ${new URL(host).hostname} — ${e.message}`);
+      }
     }
   }
+
+  data ??= empty;
   if (!data) throw last || new PlacesError('every Overpass mirror refused', { step: 'overpass' });
 
   const seen = new Set();
@@ -264,10 +315,24 @@ export async function enrich(places) {
         continue;
       }
       const site = ent.claims?.P856?.[0]?.mainsnak?.datavalue?.value || null;
+
+      // The measured properties, kept rather than discarded.
+      //
+      // This pass already downloads every claim on the entity and was throwing
+      // all but four of them away, which is why a deck of summits had no
+      // heights in it: P2044 was in the response and nothing read it. Narrowed
+      // to the properties deck/facts.js actually draws with, so a place carries
+      // its numbers without carrying its entire Wikidata record around.
+      const wd = {};
+      for (const prop of WANTED_PROPS) {
+        if (ent.claims?.[prop]) wd[prop] = ent.claims[prop];
+      }
+
       out.push({
         ...p,
         sitelinks: Object.keys(ent.sitelinks || {}).length,
         officialUrl: typeof site === 'string' ? site : null,
+        claims: wd,
         // Who runs it (P137 operator) and what it is inside (P131 administrative
         // unit, P706 terrain feature). A waterfall has no website of its own and
         // never will, but the national park it sits in publishes about it — and
@@ -327,6 +392,52 @@ export async function resolveAuthorities(places) {
 }
 
 /**
+ * Hebrew labels for the entities the kept claims point AT.
+ *
+ * A claim like P17 or P4552 gives back a QID, not a word — "Q38" rather than
+ * "איטליה" — so a slide that wants to name the country or the range needs one
+ * more lookup. Batched across the whole deck, which makes it a single request
+ * for a five-place deck rather than five.
+ *
+ * P297 comes back with it: the ISO code is what picks the flag, and deriving it
+ * from a name would be a lookup table of every country spelled two ways.
+ */
+export async function resolveClaimLabels(places) {
+  const ids = [
+    ...new Set(
+      places.flatMap((p) =>
+        ENTITY_PROPS.map((prop) => p.claims?.[prop]?.[0]?.mainsnak?.datavalue?.value?.id).filter(Boolean)
+      )
+    ),
+  ];
+  if (!ids.length) return new Map();
+
+  const out = new Map();
+  for (let i = 0; i < ids.length; i += 50) {
+    const data = await json(
+      `${WIKIDATA}?${new URLSearchParams({
+        action: 'wbgetentities',
+        ids: ids.slice(i, i + 50).join('|'),
+        props: 'labels|claims',
+        languages: 'he|en',
+        format: 'json',
+        origin: '*',
+      })}`,
+      { step: 'wikidata_claim_labels' }
+    ).catch(() => null);
+
+    for (const [qid, ent] of Object.entries(data?.entities || {})) {
+      out.set(qid, {
+        he: ent.labels?.he?.value || null,
+        en: ent.labels?.en?.value || null,
+        iso: ent.claims?.P297?.[0]?.mainsnak?.datavalue?.value || null,
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * Every domain whose word counts for a fact about this place, best first.
  *
  * Order is the whole point. The place's own site is the publisher of its own
@@ -356,7 +467,7 @@ export function authorityDomains(place) {
  * is what lets the deck builder drop places without the deck silently shrinking
  * for reasons nobody can see.
  */
-export async function shortlist({ where, kind, want = 5, pool = 0 }) {
+export async function shortlist({ where, kind, want = 5, pool = 0, requireAuthority = true }) {
   const area = await resolveArea(where);
   const found = await osmPlaces(area.bbox, kind);
   const enriched = await resolveAuthorities(await enrich(found));
@@ -364,10 +475,26 @@ export async function shortlist({ where, kind, want = 5, pool = 0 }) {
   const ranked = enriched.sort((a, b) => b.sitelinks - a.sitelinks);
   const withAuthority = ranked.filter((p) => authorityDomains(p).length);
 
+  // Requiring an official website is right for a museum and fatal for a
+  // mountain.
+  //
+  // A summit has no site, no operator and nothing that contains it with one, so
+  // this filter emptied every mountain shortlist before it reached the deck —
+  // which is exactly the "mountains in Italy came back with nothing" failure.
+  // The requirement belongs to the KIND of claim a slide will make, not to the
+  // shortlist: a deck drawing its numbers off Wikidata properties needs no page
+  // to quote, and a deck drafting prose still does.
+  const usable = requireAuthority ? withAuthority : ranked;
+
+  // The labels behind the kept claims — the country, the range — resolved once
+  // for the whole shortlist rather than per slide.
+  const labels = await resolveClaimLabels(usable.slice(0, pool || want * 3)).catch(() => new Map());
+
   return {
     area,
     kind,
     want,
+    labels,
     // Reported to the approval message verbatim: "75 known places, 52 with an
     // authority, 5 used" is the difference between a thin region and a region
     // where nobody records a website. Both happen, and they look identical
@@ -377,10 +504,12 @@ export async function shortlist({ where, kind, want = 5, pool = 0 }) {
       withWikidata: enriched.length,
       withAuthority: withAuthority.length,
     },
-    places: withAuthority.slice(0, pool || want * 3),
-    rejected: ranked
-      .filter((p) => !authorityDomains(p).length)
-      .slice(0, 10)
-      .map((p) => ({ name: p.name, qid: p.qid, why: 'no official site, operator or containing body with one' })),
+    places: usable.slice(0, pool || want * 3),
+    rejected: requireAuthority
+      ? ranked
+          .filter((p) => !authorityDomains(p).length)
+          .slice(0, 10)
+          .map((p) => ({ name: p.name, qid: p.qid, why: 'no official site, operator or containing body with one' }))
+      : [],
   };
 }

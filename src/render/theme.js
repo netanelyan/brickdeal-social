@@ -53,38 +53,68 @@ export function heeboDataUri() {
  * from SITE_URL rather than written out again, and stripped back to the bare
  * host — the protocol and the www are noise at 20px.
  */
-// TikTok Sans, bundled the same way and for the same reason as Heebo: a webfont
-// that fails to load does not error, it silently falls back. Two static weights
-// rather than the variable font, because the renderer only ever asks for bold
-// and black and a variable file is three times the bytes to inline.
-const tiktokCache = new Map();
-export function tiktokSansDataUri(weight = 700) {
-  const file = weight >= 900 ? 'TikTokSans-Black.ttf' : 'TikTokSans-Bold.ttf';
-  if (!tiktokCache.has(file)) {
-    const buf = readFileSync(new URL(`../../assets/fonts/${file}`, import.meta.url));
-    tiktokCache.set(file, `data:font/ttf;base64,${buf.toString('base64')}`);
-  }
-  return tiktokCache.get(file);
+// TikTok Sans, bundled the same way and for the same reason as Heebo: a
+// webfont that fails to load does not error, it silently falls back.
+//
+// ONE VARIABLE FILE, not two static weights — and the two static weights that
+// used to sit here were not fonts at all. They were committed with a sfnt
+// header of 0x64ad0200, no glyf table and no CFF table, so Chromium rejected
+// both on every render since the day they were added. Nothing failed: the
+// renderer simply fell through to the next family, and every "TikTok Sans"
+// digit on every slide was actually Heebo. The same was true of Rubik below.
+//
+// That is precisely the silent-fallback failure this file's comments have
+// warned about from the beginning, and it survived because nothing checked. It
+// is checked now — see the face audit in render/index.js.
+let tiktokCache = null;
+export function tiktokSansDataUri() {
+  if (tiktokCache) return tiktokCache;
+  const buf = readFileSync(new URL('../../assets/fonts/TikTokSans.ttf', import.meta.url));
+  tiktokCache = `data:font/ttf;base64,${buf.toString('base64')}`;
+  return tiktokCache;
 }
 
-// Rubik, for the slideshow's Hebrew.
+// Assistant, for the minimal style's Hebrew.
 //
-// Heebo is a text face — it extends Roboto, and it is the right choice for a
-// card that wants to read as a publication. Set at 60px over a photograph it
-// looks like a caption rather than a title: the strokes are too even and the
-// counters too open to hold their own against a picture.
+// The question "which font does TikTok use for Hebrew" has no answer, and
+// finding that out is what settled this. TikTok Sans — the app's own typeface,
+// which TikTok publishes under the OFL — has no Hebrew coverage whatsoever:
+// Latin, Greek and Cyrillic only. So the app never draws Hebrew in a TikTok
+// font. The PHONE falls back: SF Hebrew on iOS, Noto Sans Hebrew on Android.
+// What anyone means by "the TikTok font" for Hebrew is whichever of those their
+// own handset shows them.
 //
-// Rubik is a display face with real weight at 800 and 900, it is what Israeli
-// social graphics are actually set in, and it holds an outline without the
-// letterforms closing up. The news cards keep Heebo; only decks use this.
-const rubikCache = new Map();
-export function rubikDataUri(weight = 800) {
-  const file = weight >= 900 ? 'Rubik-Black.ttf' : 'Rubik-ExtraBold.ttf';
-  if (!rubikCache.has(file)) {
-    const buf = readFileSync(new URL(`../../assets/fonts/${file}`, import.meta.url));
-    rubikCache.set(file, `data:font/ttf;base64,${buf.toString('base64')}`);
-  }
-  return rubikCache.get(file);
+// Apple's SF Hebrew cannot be shipped for the same reason Apple's emoji cannot
+// — it is theirs, it comes with their operating systems, and rendering happens
+// on Linux. Assistant is the closest licensable relative: humanist, slightly
+// wider than Heebo, open counters, and it is what Hebrew interfaces reach for
+// when they want to look like the system rather than like a brand.
+//
+// One variable file for every weight the slides ask for — 500 on a note, 600 on
+// a name, 700 on a cover — at 97KB, which is less than a single static Rubik.
+let assistantCache = null;
+export function assistantDataUri() {
+  if (assistantCache) return assistantCache;
+  const buf = readFileSync(new URL('../../assets/fonts/Assistant.ttf', import.meta.url));
+  assistantCache = `data:font/ttf;base64,${buf.toString('base64')}`;
+  return assistantCache;
+}
+
+// Rubik, for the info style's Hebrew.
+//
+// Heebo is a text face — it extends Roboto, and set at this size over a
+// photograph it reads as a caption. Rubik is a display face with real weight at
+// 800, it is what Israeli social graphics are actually set in, and it holds an
+// outline without the letterforms closing up.
+//
+// One variable file, for the reason given above TikTok Sans: the two static
+// weights that used to be here were corrupt and had never once loaded.
+let rubikCache = null;
+export function rubikDataUri() {
+  if (rubikCache) return rubikCache;
+  const buf = readFileSync(new URL('../../assets/fonts/Rubik.ttf', import.meta.url));
+  rubikCache = `data:font/ttf;base64,${buf.toString('base64')}`;
+  return rubikCache;
 }
 
 export function siteMark() {

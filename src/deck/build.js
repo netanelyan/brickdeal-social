@@ -8,10 +8,16 @@ import { findImage } from '../images.js';
 import * as unsplash from '../images/unsplash.js';
 import * as pexels from '../images/pexels.js';
 import { pickCinematic, cinematicQueries } from '../images/curate.js';
+import { SIZES } from '../render/deckTemplates.js';
 import { destinationPlaces, pick } from '../sources/tiyulplus.js';
 import { coverForDeck } from './ideas.js';
+import { publishedCount } from '../store.js';
 import { fieldsFor, hasFields } from './fields.js';
-import { decideShape } from './shape.js';
+import { WIKIDATA_FIELDS, factsFor, countryFor, enoughFor, applyCountryVisibility } from './facts.js';
+import { hebrewNames, isHebrew } from './hebrew.js';
+import { decideShape, keepVisitable } from './shape.js';
+import { countryOfDestination } from './where.js';
+import { deckPlace } from './region.js';
 import { vocabForPrompt } from './emoji.js';
 
 // An idea becomes a deck, or it doesn't.
@@ -72,7 +78,7 @@ const SLIDE_SCHEMA = {
               'The sentence from the PAGE TEXT that states this fact, copied character for character. Never paraphrased, never assembled from two places.',
           },
         },
-        required: ['emoji', 'text', 'quote'],
+        required: ['text', 'quote'],
         additionalProperties: false,
       },
     },
@@ -240,7 +246,7 @@ const BULLETS_SCHEMA = {
             description: 'The sentence in the PAGE TEXT that says it, character for character',
           },
         },
-        required: ['text', 'quote'],
+        required: ['emoji', 'text', 'quote'],
         additionalProperties: false,
       },
     },
@@ -272,11 +278,27 @@ of its type is not a line, it is filler.
 
 FORM
 
-Hebrew, under 30 characters, no full stop. Two lines at most and one is usually
-better. Every line needs a quote that appears in the PAGE TEXT character for
-character - copy it, do not tidy it. A line you cannot quote does not go on the
-slide, and a slide with one good line beats one with two where the second was
-invented.`;
+Hebrew, UNDER 28 CHARACTERS, no full stop. Count them.
+
+This is the constraint that gets ignored, so it is the one to check before you
+answer. "בית הקברות הלאומי על צוק מעל הוולטבה" is 36 and reads as a sentence;
+"בית הקברות הלאומי" is 17 and reads as a label. A line over the limit is thrown
+away by the code that receives it, and the slide goes out with the name alone -
+so a long line is not a richer slide, it is no line at all.
+
+ONE line. Two is allowed and almost never right.
+
+Every line needs a quote that appears in the PAGE TEXT character for character -
+copy it, do not tidy it. A line you cannot quote does not go on the slide, and a
+slide with one good line beats one with two where the second was invented.
+
+NO EMOJI
+
+This line carries none. One was asked for and the results were decoration
+rather than meaning - a sheaf of wheat turned up beside "this is where the
+Velvet Revolution happened" - and a picture that does not mean anything is
+worse than no picture at all. The slide keeps its flag, which says which
+country, and nothing else.`;
 
 /** One or two lines under a name, for decks whose shape asked for them. */
 export async function draftBulletsFromEntry(place, pageText) {
@@ -301,10 +323,29 @@ export async function draftBulletsFromEntry(place, pageText) {
   if (!parsed.usable) return [];
 
   const clean = (s) => String(s || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+
+  // A hard cap, because "under 30 characters" in a brief is a request and this
+  // is a rule.
+  //
+  // The brief has asked for a short line since the beginning and kept getting
+  // back "the national cemetery on a cliff above the Vltava" — accurate, and a
+  // sentence, which at this size wraps to two lines under a place name and is
+  // exactly the "sentences are too long" complaint. An over-long line is
+  // dropped rather than trimmed: a line cut mid-phrase is worse than no line,
+  // and a slide with only a name is the style's default anyway.
+  const MAX = Number(process.env.DECK_NOTE_MAX || 28);
   const bullets = (parsed.bullets || [])
     .map((b) => ({ text: clean(b.text), quote: String(b.quote || '').trim() }))
     .filter((b) => b.text && b.quote)
-    .slice(0, 2);
+    .filter((b) => {
+      if (b.text.length <= MAX) return true;
+      console.error(`deck: note dropped, ${b.text.length} chars — "${b.text}"`);
+      return false;
+    })
+    // One line, not two. The minimal style puts this under a place name in type
+    // smaller than the name, and a second line there is the same failure
+    // arriving by a different route.
+    .slice(0, 1);
 
   if (!bullets.length) return [];
 
@@ -525,11 +566,27 @@ async function cinematicImage({ nameEn, where, used, label }) {
   const libraries = [unsplash, pexels].filter((lib) => lib.configured());
   if (!libraries.length) return null;
 
+  // A slide is 9:16, so both the thumbnail the curator judges and the file that
+  // ships are asked for at 9:16. Before this the deck took the card's 4:5 crop
+  // and let CSS cover it into a taller box, which threw away a third of the
+  // width — including, often, the thing the slide was named after.
+  const shot = { w: SIZES.tiktok.w, h: SIZES.tiktok.h };
+
+  // How many searches one place is worth.
+  //
+  // Unbounded, a place with no usable photograph costs every query in the list
+  // times eight thumbnail downloads times a vision call each — and it spends all
+  // of that to arrive at the same "no" it would have reached after three. The
+  // queries are ordered best-first (the bare name, then the name with its
+  // region, then the cinematic variants), so the tail is where the least likely
+  // answers live anyway.
+  const MAX_QUERIES = Number(process.env.DECK_IMAGE_QUERIES || 3);
+
   for (const lib of libraries) {
-    for (const q of cinematicQueries(nameEn, where)) {
+    for (const q of cinematicQueries(nameEn, where).slice(0, MAX_QUERIES)) {
       let pool = [];
       try {
-        pool = await lib.candidates(q, { n: 6 });
+        pool = await lib.candidates(q, { n: 8, w: 440, h: 780 });
       } catch (e) {
         console.error(`images: candidates "${q}" failed — ${e.message}`);
         continue;
@@ -561,16 +618,19 @@ async function cinematicImage({ nameEn, where, used, label }) {
       if (!chosen) continue;
 
       const pick = fresh[chosen.index];
-      const got = await lib.fetchChosen(pick).catch(() => null);
+      const got = await lib.fetchChosen(pick, shot).catch(() => null);
       if (!got?.src) continue;
 
       used.add(pick.key);
       return {
         ...got,
         why: chosen.why,
-        // Where the words go on this particular photograph.
-        band: chosen.band,
-        side: chosen.side,
+        // Where the words go is no longer asked for here. render/photo.js
+        // measures the photograph's luminance and texture and answers it
+        // exactly, which is a question with an arithmetic answer; what the
+        // curator is uniquely good at — "is this actually the Eiger" — it is
+        // still the only thing that can decide.
+        subject: chosen.subject,
         chosenFrom: fresh.length,
         viaQuery: q,
       };
@@ -579,7 +639,22 @@ async function cinematicImage({ nameEn, where, used, label }) {
   return null;
 }
 
-export async function imagesForSlides(slides, where, { cover = null } = {}) {
+/**
+ * Photographs for a deck, taking the next candidate whenever one fails.
+ *
+ * This used to be "fetch a picture for each of these six slides", and the
+ * six were whatever the sourcing step had stopped at — so when three of them
+ * had no usable photograph, the deck was three slides long and there was no
+ * path back to the seventh, eighth and ninth places that were sitting right
+ * there. Kyoto asked for six, sourced six, lost three and published three.
+ *
+ * So it takes the whole shortlist and stops when it has `want` slides WITH
+ * pictures. A place that fails costs one more candidate rather than one slide,
+ * and nothing is fetched for candidates that are never needed.
+ *
+ * Returns the slides that have photographs, in order.
+ */
+export async function fillImages(slides, where, { want = slides.length, cover = null } = {}) {
   const used = new Set();
 
   // The cover is claimed first so it cannot end up with slide one's
@@ -590,8 +665,10 @@ export async function imagesForSlides(slides, where, { cover = null } = {}) {
     if (shot) cover.image = shot;
   }
 
-
+  const kept = [];
   for (const slide of slides) {
+    if (kept.length >= want) break;
+
     const picked = await cinematicImage({
       nameEn: slide.nameEn,
       where,
@@ -599,11 +676,20 @@ export async function imagesForSlides(slides, where, { cover = null } = {}) {
       label: slide.nameHe,
     });
     slide.image = picked;
+    if (picked) {
+      kept.push(slide);
+      continue;
+    }
     // "None of these was good enough, or none of them was this place" is a
-    // real answer, and the caller drops the place on it.
-    if (!picked) slide.imageMiss = `no photograph of "${slide.nameEn}" that is both this place and worth looking at`;
+    // real answer, and the place leaves rather than appearing over somebody
+    // else's garden.
+    slide.imageMiss = `no photograph of "${slide.nameEn}" that is both this place and worth looking at`;
   }
-  return slides;
+
+  kept.forEach((s, i) => {
+    s.n = i + 1;
+  });
+  return kept;
 }
 
 /** Turn one place plus one fetched page into a slide, or explain why not. */
@@ -727,10 +813,25 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
   // The page text every quote is checked against is the page that was fetched.
   // Concatenating the entries keeps that true while letting one drafting call
   // see only its own place.
-  const picked = pick(places, { kind: idea.kind, want: idea.want + 3 });
+  const wide = pick(places, { kind: idea.kind, want: idea.want + 5 });
+
+  // The guide's page is a guide, not a list of places: alongside the temples it
+  // carries sections on flights, on when to go, and a heading for the city
+  // itself. Those became slides — a Kyoto deck went out with "טיסות מנתב״ג" set
+  // across a photograph — so the shortlist is filtered before anything is
+  // drafted or any picture is fetched.
+  const picked = (
+    await keepVisitable(wide, { where: idea.where, kind: idea.kind }).catch((e) => {
+      console.error(`deck: place filter failed, using the raw list — ${e.message}`);
+      return wide;
+    })
+  ).slice(0, idea.want + 3);
 
   const slides = [];
   const dropped = [];
+  // Places that made it onto a slide carrying less than they might have.
+  // Distinct from `dropped`, which is places that did not make it at all.
+  const degraded = [];
 
   const withFields = hasFields(idea.kind);
 
@@ -744,9 +845,12 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
         return { bullets: false, why: 'decision failed' };
       });
 
+  // Every candidate gets a slide built for it, not just the first `want`.
+  //
+  // A name-only slide costs nothing, and the surplus is what fillImages draws
+  // on when a place turns out to have no usable photograph. Capping the list at
+  // `want` here is what made a deck that lost three pictures three slides long.
   for (const place of picked) {
-    if (slides.length >= idea.want) break;
-
     // A name-only slide costs nothing and cannot fail. There is no drafting
     // call because there is nothing to draft, and nothing to verify because a
     // place's name is not a claim about it — which is the whole reason the
@@ -779,41 +883,95 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
       const slide = await draftFieldsFromEntry(place, place.description, idea.kind);
       slides.push({ ...slide, n: slides.length + 1 });
     } catch (e) {
-      dropped.push({
+      // A page with no numbers on it is not a place worth dropping, it is a
+      // place with no numbers. Dropping it took a deck of six trails down to
+      // two, which is a far worse post than six names would have been — and the
+      // style decision below sees a deck that is mostly bare and sets the whole
+      // thing in the minimal style, where a name is the entire slide by design.
+      //
+      // Recorded as DEGRADED rather than dropped. They are two different things
+      // and the approval card has to be able to tell them apart: a dropped
+      // place is missing from the deck, a degraded one is in it with less on
+      // it, and listing the second under "✗" makes a working deck look broken.
+      degraded.push({
         place: place.nameHe,
-        why: e instanceof RejectedError ? `${e.reason}: ${String(e.detail || '').slice(0, 120)}` : e.message,
+        why: e instanceof RejectedError ? e.reason : String(e.message).slice(0, 60),
         url,
+      });
+      slides.push({
+        n: slides.length + 1,
+        nameHe: place.nameHe,
+        nameEn: place.nameEn,
+        fields: [],
+        bullets: [],
+        sourceUrl: place.sourceUrl,
+        sourceHost: 'tiyulplus.com',
+        qid: place.id,
       });
     }
   }
 
   const coverSlot = {};
+  let built = slides;
   if (wantImages) {
-    await imagesForSlides(slides, idea.where, { cover: coverSlot });
-
-    // A place whose photograph could not be found — or could not be trusted to
-    // be that place — leaves the deck rather than appearing over somebody
-    // else's garden. Renumbered afterwards so the list still counts 1..n.
-    for (let i = slides.length - 1; i >= 0; i--) {
-      if (slides[i].image) continue;
-      dropped.push({ place: slides[i].nameHe, why: slides[i].imageMiss || 'no photograph', url });
-      slides.splice(i, 1);
+    // Takes the next candidate whenever one has no usable photograph, rather
+    // than shortening the deck by one. Everything it did not reach is reported
+    // as a near-miss rather than as a failure.
+    built = await fillImages(slides, idea.where, { want: idea.want, cover: coverSlot });
+    for (const s of slides) {
+      if (s.image || !s.imageMiss) continue;
+      dropped.push({ place: s.nameHe, why: s.imageMiss, url });
     }
-    slides.forEach((s, i) => {
-      s.n = i + 1;
-    });
+  } else {
+    built = slides.slice(0, idea.want);
+  }
+  slides.length = 0;
+  slides.push(...built);
+
+  // The country, resolved BEFORE the cover rather than after it.
+  //
+  // Every place on this route is inside one destination, so it is one lookup
+  // for the deck rather than one per slide. It used to happen further down,
+  // purely because the flag is a slide ornament — but the cover has to name the
+  // country now, and a cover cannot name what has not been looked up yet.
+  const home = await countryOfDestination(idea.where);
+  for (const s of slides) {
+    if (home.flag) s.flag = home.flag;
+    if (home.he) s.countryHe = home.he;
+    if (home.iso) s.iso = home.iso;
   }
 
   // The cover is written now, from the slides that exist, rather than from the
   // idea that asked for them. A title is a promise about contents and it should
   // not be made before the contents are known.
   const cover = slides.length
-    ? await coverForDeck({ where: idea.where, kind: idea.kind, slides, hint: idea.titleHe }).catch((e) => {
+    ? await coverForDeck({
+        where: idea.where,
+        kind: idea.kind,
+        slides,
+        hint: idea.titleHe,
+        // Which country or area the cover must name. One destination means one
+        // country, so this route always has an answer.
+        place: deckPlace(slides, { kind: idea.kind }),
+        // Steps the cover's shape, voice and picture on with every post, so two
+        // decks in a row cannot come back with the same closing phrase.
+        nth: idea.nth ?? publishedCount(),
+      }).catch((e) => {
         console.error(`deck: cover generation failed, keeping the working title — ${e.message}`);
         return null;
       })
     : null;
   const titled = cover ? { ...idea, ...cover } : idea;
+
+  // Same rule as the map route: the look follows what the slides actually
+  // carry. A deck of city places with one quoted line each is a minimal deck;
+  // one where the category supplied real numbers is an info deck.
+  const style = enoughFor(slides) ? 'info' : 'minimal';
+
+  // The country is the same on every slide here, so the WORD comes off and only
+  // the flag stays, exactly as on a single-country map deck. It had to survive
+  // until now because the cover was written from it.
+  applyCountryVisibility(slides);
 
   return {
     kind: 'deck',
@@ -821,6 +979,7 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
     titleHe: titled.titleHe,
     where: idea.where,
     category: idea.kind,
+    style,
     via: 'tiyulplus',
     // Reported so the approval message can say why a deck has lines under its
     // names and the previous one did not.
@@ -836,6 +995,7 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
     slides,
     coverImage: coverSlot.image || null,
     dropped,
+    degraded,
     short: slides.length < idea.want,
     createdAt: new Date().toISOString(),
   };
@@ -848,92 +1008,210 @@ export async function buildDeck(idea, { wantImages = true } = {}) {
     console.error(`deck: tiyulplus route failed, falling back to the map — ${e.message}`);
     return null;
   });
-  if (fromSite?.slides.length) return fromSite;
 
-  const pool = await shortlist({ where: idea.where, kind: idea.kind, want: idea.want });
+  // A FULL deck, not merely enough of one.
+  //
+  // The old test was "did it produce any slides at all", which let a Kyoto deck
+  // ship with two: our destination page for it lists a handful of places and
+  // several sections about flights, and once the sections were filtered out
+  // there was almost nothing left. That was raised to three, and three is still
+  // the wrong number — it is a floor on publishability, and what belongs here
+  // is the question "is there any point asking the other route".
+  //
+  // Since keepVisitable started filtering on the deck's SUBJECT as well as on
+  // whether a thing is a place, the site route comes back short far more often
+  // and for a good reason: our Dolomites page lists four peaks and eleven
+  // lakes. Four survivors cleared the floor, so the map — which knows a great
+  // many Italian summits — was never asked, and a deck that wanted six shipped
+  // with four.
+  //
+  // So the short circuit now requires the site route to have delivered what was
+  // ASKED for. Anything less and both routes run, which costs one more build on
+  // a deck that was going to be short anyway.
+  //
+  // Running the map is NOT the same as preferring it — see the comparison at
+  // the bottom of this function, which is where the first version of this
+  // change went wrong.
+  const FULL = Number(process.env.DECK_FULL_SLIDES || idea.want || 3);
+  if ((fromSite?.slides.length || 0) >= FULL) return fromSite;
+
+  // Two kinds of field, and they have different requirements.
+  //
+  //   pageFields  — drafted from an authority page and quoted from it. Rich,
+  //                 and only possible where such a page exists and search is
+  //                 configured to find it.
+  //   wikiFields  — read off a Wikidata property. Thinner, always available,
+  //                 and impossible to get wrong because nothing is written.
+  //
+  // A kind that has wikiFields does not need an authority to make a slide, so
+  // the shortlist stops insisting on one. That single line is what unblocks
+  // summit decks: no peak on earth has an official website.
+  const pageFields = hasFields(idea.kind);
+  const wikiFields = (WIKIDATA_FIELDS[idea.kind] || []).length > 0;
+
+  const pool = await shortlist({
+    where: idea.where,
+    kind: idea.kind,
+    want: idea.want,
+    requireAuthority: pageFields && !wikiFields,
+  });
 
   const slides = [];
   const dropped = [];
 
-  // Name only, always, on this route.
+  // Hebrew names for everything the shortlist kept, in one call.
   //
-  // It used to hunt an authority page per place and draft prose from it, which
-  // is why "mountains in Italy" came back with nothing: a peak has no official
-  // website, and the search landed on a cantonal news index. A mountain slide
-  // carries its name — there is no claim to source, so there is nothing to
-  // fail. The fields path stays for kinds that declare fields, and those still
-  // quote an authority.
-  const withFields = hasFields(idea.kind);
+  // Wikidata has a Hebrew label for the famous places and not for the rest, and
+  // "Piz Bernina" on a Hebrew slide is the thing the channel most obviously
+  // must not do. Asked for the whole shortlist at once rather than per slide.
+  const candidates = pool.places.slice(0, Math.max(idea.want * 2, idea.want + 4));
+  const hebrew = await hebrewNames(candidates).catch((e) => {
+    console.error(`deck: transliteration failed — ${e.message}`);
+    return new Map();
+  });
 
-  for (const place of pool.places) {
-    if (slides.length >= idea.want) break;
-
-    const nameHe = place.labelHe || place.labelEn || place.name;
+  // Same reasoning as the other route: build a slide for every candidate and
+  // let the image step decide how far down the list it needs to go.
+  for (const place of candidates) {
     const nameEn = place.labelEn || place.name;
+    const nameHe = place.labelHe || hebrew.get(place.qid) || null;
 
-    if (!withFields) {
-      slides.push({
-        n: slides.length + 1,
-        nameHe,
-        nameEn,
-        fields: [],
-        bullets: [],
-        qid: place.qid,
-        sourceUrl: place.officialUrl || null,
-        sourceHost: place.officialUrl ? new URL(place.officialUrl).hostname.replace(/^www\./, '') : 'wikidata',
-      });
+    // No Hebrew name is a dropped place, not an English slide. The channel is
+    // Hebrew and a Latin name on a slide is the single most visible tell that
+    // nobody looked at it.
+    if (!nameHe || !isHebrew(nameHe)) {
+      dropped.push({ place: nameEn, why: 'no Hebrew name could be established' });
       continue;
     }
 
-    const found = await findPage(place, idea.searchTerms);
-    if (!found.url) {
-      dropped.push({ place: nameEn, why: found.why });
-      continue;
+    // The ISO code travels with the slide, not only the flag it produced. It is
+    // what decides whether six slides are one country, one region or a genuine
+    // mix — a question the cover now has to answer, and one that cannot be
+    // asked of a Hebrew country name without a table mapping it back.
+    const { he: countryHe, flag, iso } = countryFor(place.claims, pool.labels);
+    const facts = wikiFields ? factsFor(idea.kind, place.claims, { labels: pool.labels }) : [];
+
+    const base = {
+      n: slides.length + 1,
+      nameHe,
+      nameEn,
+      countryHe,
+      iso,
+      flag,
+      fields: facts,
+      bullets: [],
+      qid: place.qid,
+      sourceUrl: place.officialUrl || null,
+      sourceHost: place.officialUrl ? new URL(place.officialUrl).hostname.replace(/^www\./, '') : 'wikidata',
+    };
+
+    // A page, when the kind wants one and there is one to find. Its fields are
+    // better than Wikidata's, so they replace them; a failure here is not a
+    // dropped place any more, it falls back to the properties.
+    if (pageFields) {
+      const found = await findPage(place, idea.searchTerms);
+      if (found.url) {
+        try {
+          const pageText = (await fetchReadable(found.url)).text || '';
+          const drafted = await draftFieldsFromEntry({ ...place, nameHe, nameEn }, pageText, idea.kind);
+          slides.push({
+            ...base,
+            ...drafted,
+            nameHe,
+            countryHe,
+            iso,
+            flag,
+            n: slides.length + 1,
+            sourceUrl: found.url,
+            via: found.via,
+            domain: found.domain,
+          });
+          continue;
+        } catch (e) {
+          dropped.push({
+            place: nameEn,
+            why: `page fields failed, used Wikidata: ${
+              e instanceof RejectedError ? e.reason : e.message
+            }`,
+            url: found.url,
+          });
+        }
+      }
     }
 
-    let pageText = '';
-    try {
-      pageText = (await fetchReadable(found.url)).text || '';
-    } catch (e) {
-      dropped.push({ place: nameEn, why: `fetch failed: ${e.message}`, url: found.url });
-      continue;
-    }
-
-    try {
-      const slide = await draftFieldsFromEntry({ ...place, nameHe, nameEn }, pageText, idea.kind);
-      slides.push({ ...slide, n: slides.length + 1, sourceUrl: found.url, via: found.via, domain: found.domain });
-    } catch (e) {
-      dropped.push({
-        place: nameEn,
-        why: e instanceof RejectedError ? `${e.reason}: ${String(e.detail || '').slice(0, 120)}` : e.message,
-        url: found.url,
-      });
-    }
+    slides.push(base);
   }
 
   // Same curation and the same drop rule as the other route: a place whose
   // photograph cannot be found, or cannot be trusted to be that place, leaves.
   if (wantImages) {
     const coverSlot = {};
-    await imagesForSlides(slides, idea.where, { cover: coverSlot });
-    for (let i = slides.length - 1; i >= 0; i--) {
-      if (slides[i].image) continue;
-      dropped.push({ place: slides[i].nameEn, why: slides[i].imageMiss || 'no photograph' });
-      slides.splice(i, 1);
+    const built = await fillImages(slides, idea.where, { want: idea.want, cover: coverSlot });
+    for (const s of slides) {
+      if (s.image || !s.imageMiss) continue;
+      dropped.push({ place: s.nameEn, why: s.imageMiss });
     }
-    slides.forEach((s, i) => {
-      s.n = i + 1;
-    });
+    slides.length = 0;
+    slides.push(...built);
     pool.coverImage = coverSlot.image || null;
+  } else {
+    slides.length = Math.min(slides.length, idea.want);
+  }
+
+  // Where the deck is, for the cover to name.
+  //
+  // Slides missing a P17 simply do not vote — filling them in from the region
+  // the deck was searched in would be a guess, and a guess that adds a country
+  // to the set is exactly the guess that turns "באיסלנד" into "בסקנדינביה".
+  // Only when NOT ONE slide has a country is the destination asked, because
+  // then there is nothing to contradict.
+  let place = deckPlace(slides, { kind: idea.kind });
+  if (place.scope === 'none' && !slides.some((s) => s.iso || s.countryHe)) {
+    const home = await countryOfDestination(idea.where);
+    if (home.he) place = { scope: 'country', he: home.he, iso: home.iso };
   }
 
   // Written last, from the places that survived, exactly as on the other route.
   const cover = slides.length
-    ? await coverForDeck({ where: idea.where, kind: idea.kind, slides, hint: idea.titleHe }).catch(() => null)
+    ? await coverForDeck({
+        where: idea.where,
+        kind: idea.kind,
+        slides,
+        hint: idea.titleHe,
+        // One country, one region, or nowhere — decided from the slides' own
+        // ISO codes rather than from the region the deck was searched in.
+        place,
+        nth: idea.nth ?? publishedCount(),
+      }).catch(() => null)
     : null;
   if (cover) {
     idea = { ...idea, ...cover };
   }
+
+  // Which of the two looks this deck is set in, decided by what it actually
+  // has rather than by its category. A deck where most slides carry numbers is
+  // an info deck; one where they do not is a minimal deck, and forcing the
+  // info style on it would promise four lines and deliver a name.
+  const style = enoughFor(slides) ? 'info' : 'minimal';
+  applyCountryVisibility(slides);
+
+  // Which route wins, and it is NOT simply the longer one.
+  //
+  // The two are not interchangeable and ranking them by length says they are.
+  // The site route's places are curated and already written in Hebrew; the map
+  // route's are whatever Wikidata happens to hold an entity for, which for
+  // "attractions in Prague" is a Kafka statue and a monument to the victims of
+  // communism long before it is Malá Strana. Sorting on length alone handed
+  // Prague four obscure statues over three real quarters — a longer deck and a
+  // worse one.
+  //
+  // So the map has to be CLEARLY better to displace curated content: two whole
+  // slides better, not one. Below that the site route keeps it, provided it is
+  // a publishable deck at all.
+  const FLOOR = Number(process.env.DECK_MIN_SLIDES || 3);
+  const siteLen = fromSite?.slides.length || 0;
+  if (siteLen >= FLOOR && slides.length < siteLen + 2) return fromSite;
+  if (fromSite && siteLen > slides.length) return fromSite;
 
   return {
     kind: 'deck',
@@ -941,12 +1219,14 @@ export async function buildDeck(idea, { wantImages = true } = {}) {
     titleHe: idea.titleHe,
     where: idea.where,
     category: idea.kind,
+    style,
     counts: { ...pool.counts, asked: idea.want, built: slides.length },
     area: pool.area,
     coverImage: pool.coverImage || null,
-    shape: { bullets: false, why: 'map route carries names only' },
+    shape: { bullets: false, why: `map route, ${style} style` },
     slides,
     dropped,
+    degraded: [],
     // A deck that came up short is still publishable — five is a target, not a
     // format requirement — but the approval card has to say it, because a
     // three-slide deck and a three-slide idea look identical afterwards.

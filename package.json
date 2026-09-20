@@ -20,7 +20,11 @@
     "backfill-ig": "node scripts/backfill-instagram.js",
     "render-samples": "node scripts/render-samples.js",
     "test-url": "node test.js",
-    "fetch-emoji": "node scripts/fetch-emoji.js"
+    "fetch-emoji": "node scripts/fetch-emoji.js",
+    "deck-lab": "node scripts/deck-lab.js",
+    "deck-once": "node scripts/deck-once.js",
+    "font-lab": "node scripts/font-lab.js",
+    "contact-sheet": "node scripts/contact-sheet.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",

@@ -21,6 +21,10 @@
 // price or category fields, so the cards themselves are the better source.
 
 import { fetchReadable } from '../fetchPage.js';
+// The registry of deck kinds, so this route can tell "a kind I have no category
+// for" from "no kind was asked for". They are opposite situations and treating
+// them alike is what put a market on a trail deck.
+import { KINDS } from './places.js';
 
 const BASE = process.env.TIYULPLUS_BASE || 'https://www.tiyulplus.com';
 
@@ -135,14 +139,36 @@ export async function destinationPlaces(where) {
 // What a deck asks for, and what the site calls it. Several site categories can
 // feed one deck kind — a deck about "what to eat" wants restaurants, cafes and
 // markets, and the site files those separately.
+//
+// EVERY REGISTERED DECK KIND NEEDS A LINE HERE. trail, waterfall and beach had
+// none, and the consequence was not an empty deck — it was the opposite. An
+// unmapped kind fell through to the permissive branch in pick() below and took
+// the ENTIRE destination page, so "trails in the Dolomites" shipped as a
+// valley, two lakes, a town, a museum town and Piazza delle Erbe market, under
+// a cover that called them the most beautiful mountains in Italy. A selftest
+// now holds this table against the registry so the next kind added cannot
+// repeat it.
+//
+// The site's own vocabulary is short — טבע, אתר היסטורי, תצפית, אטרקציה, אוכל,
+// אוכל כשר, שופינג, שוק, מוזיאון, בית קפה — and it has no word for a hiking
+// route at all. So the outdoor kinds all map onto טבע, which is coarse enough
+// to return a lake for a mountain deck; keepVisitable in deck/shape.js is what
+// closes that gap, because it sees the names rather than the filing.
 export const CATEGORY_HE = {
   museum: ['מוזיאון', 'גלריה'],
   attraction: ['אתר היסטורי', 'אטרקציה', 'תצפית'],
-  food: ['אוכל', 'בית קפה', 'מסעדה', 'אוכל כשר', 'שוק'],
-  nature: ['טבע', 'פארק', 'גן'],
+  // 'אוכל' is a substring of 'אוכל כשר', so the kosher entries come along with
+  // the plain ones rather than needing their own line.
+  food: ['אוכל', 'בית קפה', 'מסעדה', 'שוק'],
   mountain: ['טבע', 'תצפית'],
+  trail: ['טבע', 'תצפית'],
+  waterfall: ['טבע'],
+  beach: ['טבע'],
+  // Not deck kinds, but things people type. `shopping` said 'קניות'; the site
+  // says 'שופינג', so it had never matched anything.
+  nature: ['טבע', 'פארק', 'גן'],
   view: ['תצפית'],
-  shopping: ['קניות', 'שוק'],
+  shopping: ['שופינג', 'קניות', 'שוק'],
 };
 
 // What people actually type. "/deck Italy mountains" should not fail because
@@ -175,13 +201,30 @@ export const canonicalKind = (kind) => {
   return SYNONYMS[k] || k;
 };
 
-/** The places for one deck, best-rated first. */
+/**
+ * The places for one deck, best-rated first.
+ *
+ * The permissive branch is the dangerous one and it is now narrow.
+ *
+ * "An unknown kind takes the whole city rather than nothing" is right for
+ * exactly one case: a deck of "the best of Prague", where no category was asked
+ * for and filtering to nothing would be pedantry. It is catastrophic for a kind
+ * the registry DOES declare — a trail deck that falls through takes markets and
+ * museums, which is not a permissive result, it is a wrong one.
+ *
+ * So a registered deck kind is strict: no category match means no places from
+ * this route, and buildDeck falls through to the map, whose Overpass tags
+ * cannot return a market for `natural=peak`. Only a kind that is not in the
+ * registry at all gets the whole page.
+ */
 export function pick(places, { kind, want = 5 }) {
-  const wanted = CATEGORY_HE[canonicalKind(kind)];
-  // An unknown kind takes the whole city rather than nothing: a deck of "the
-  // best of Prague" is a real deck, and refusing it because the word did not
-  // match a category would be pedantry.
-  const pool = wanted ? places.filter((p) => wanted.some((c) => (p.category || '').includes(c))) : [...places];
+  const id = canonicalKind(kind);
+  const wanted = CATEGORY_HE[id];
+  const pool = wanted
+    ? places.filter((p) => wanted.some((c) => (p.category || '').includes(c)))
+    : KINDS[id]
+      ? []
+      : [...places];
 
   return pool
     .slice()

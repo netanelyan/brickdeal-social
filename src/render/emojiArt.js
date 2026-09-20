@@ -26,15 +26,24 @@ const cache = new Map();
 const codepoints = (ch) =>
   [...ch].map((c) => c.codePointAt(0).toString(16)).filter((hex) => hex !== 'fe0f');
 
-/** The data URI for one emoji, or null if we have no artwork for it. */
+/**
+ * The data URI for one emoji, or null if we have no artwork for it.
+ *
+ * Two formats, because the set is in two formats: the pictograms are PNG and
+ * the flags are SVG — noto-emoji keeps flags in a separate directory and only
+ * as vector. Both inline the same way and Chromium draws both the same way, so
+ * the only thing that changes is which extension is on disk.
+ */
 export function emojiDataUri(ch) {
   if (!ch) return null;
   if (cache.has(ch)) return cache.get(ch);
 
-  const file = `${dir}${codepoints(ch).join('_')}.png`;
+  const stem = `${dir}${codepoints(ch).join('_')}`;
   let uri = null;
-  if (existsSync(file)) {
-    uri = `data:image/png;base64,${readFileSync(file).toString('base64')}`;
+  if (existsSync(`${stem}.png`)) {
+    uri = `data:image/png;base64,${readFileSync(`${stem}.png`).toString('base64')}`;
+  } else if (existsSync(`${stem}.svg`)) {
+    uri = `data:image/svg+xml;base64,${readFileSync(`${stem}.svg`).toString('base64')}`;
   }
   cache.set(ch, uri);
   return uri;

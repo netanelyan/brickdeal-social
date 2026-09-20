@@ -58,6 +58,149 @@ SAY YES only when knowing the name leaves an obvious question unanswered:
 If it is genuinely borderline, say no. A deck can always be re-run; a slide
 overloaded with text is the thing being corrected here.`;
 
+const KEEP_SCHEMA = {
+  type: 'object',
+  properties: {
+    keep: {
+      type: 'array',
+      description: 'The names to keep, copied exactly as given, in the order given.',
+      items: { type: 'string' },
+    },
+    why: { type: 'string', description: 'Under fifteen words, English, on what was dropped and why' },
+  },
+  required: ['keep', 'why'],
+  additionalProperties: false,
+};
+
+const KEEP_SYSTEM = `You are given entries from a travel guide's page about one destination.
+
+Two questions, and an entry has to pass BOTH to be kept.
+
+FIRST: is it a place at all?
+
+Some entries are PLACES. Others are sections of the guide - advice about
+flights, where to stay, when to visit, how to get around, or the destination
+itself as a heading.
+
+A place, for this purpose, is somewhere a traveller physically stands: a
+temple, a lake, a quarter, a market, a peak, a museum, a beach. It can be
+photographed, and a photograph of it would show something specific.
+
+Drop, always:
+
+  - the destination itself ("Kyoto", "Kyoto - the city")
+  - anything about getting there: flights, airports, transfers, car hire
+  - anything about planning: when to go, how long to stay, what it costs,
+    where to sleep, what to pack
+  - a region so broad that a photograph of it would show anything at all
+
+This matters because each survivor becomes one slide with its name written
+across a photograph. "Flights from Tel Aviv" as a slide in a slideshow about
+Kyoto is the single most embarrassing thing this channel could publish, and it
+happened, which is why you are being asked.
+
+SECOND: is it the thing THIS deck is about?
+
+The deck has a subject and it is stated below. Every slide has to be an example
+of it. This is not a preference about balance - a deck titled "the most
+beautiful mountains in Italy" that ends on a photograph of a market has told
+the viewer something false, and that has happened too.
+
+The guide files places into broad buckets, so the bucket cannot answer this and
+you are seeing the names instead. Judge what the place IS:
+
+  mountain   a thing that RISES: a peak, a summit, a massif, a ridge, and a
+             named summit is still one when there is a terrace or a cable car
+             on top of it. NOT a lake below it, not the valley it stands in,
+             not the town you drive through to reach it, and obviously not a
+             market or a museum in that town.
+  trail      a walking route you follow from one end to the other. NOT the lake
+             at the end of it and NOT the town the trailhead is in.
+  waterfall  falling water. Nothing else.
+  beach      a beach.
+  museum     a museum or a gallery.
+  food       a market, a food hall, a restaurant, a cafe.
+  attraction the WIDEST of these, deliberately - it is the catch-all a city
+             deck uses, and judging it narrowly empties good decks. Anything a
+             traveller goes to in order to look at it: a castle, a palace, a
+             temple, a church, a monument, a tower, a quarter, a square, a
+             garden, a famous grove, a viewpoint, a bridge, a zoo. It does NOT
+             have to be a building and it does NOT have to be old. Drop only
+             what is plainly something else - a restaurant, a shop, a hotel, a
+             station - or a whole separate town.
+
+A NOTE ON HOW HARD TO PUSH. The failure being corrected is a market on a
+mountain deck: a slide that makes the cover a lie. It is not "this is a
+slightly odd choice". Drop what is the WRONG KIND OF THING, and keep what is
+merely a weaker example of the right one.
+
+When the name alone cannot settle it, the description is there. When it still
+cannot be settled, keep it when the deck's subject is the catch-all one and
+drop it otherwise - the narrow kinds are where a wrong slide shows.
+
+Keep the good ones in the order given. Keeping very few, or none, is a correct
+answer and often the right one: this page may simply not be about that subject.
+Do not pad the list to make it look useful.`;
+
+/**
+ * Which of these entries are actually places, and of the kind this deck wants.
+ *
+ * One call per deck, on the shortlist, before anything is drafted or any
+ * photograph is fetched. Cheap, and it is the only thing standing between a
+ * guide page's "Flights from Ben Gurion" section and a slide with those words
+ * set across a photograph of Kyoto.
+ *
+ * It answers the second question because it is the only step that can. The
+ * guide's categories are four or five broad buckets — a lake, a valley and a
+ * summit are all "טבע" — so a category filter cannot tell a mountain deck from
+ * a lake deck, and the Overpass tags that could are on the other route. What
+ * this step has is the NAMES, which is what a person would use.
+ */
+export async function keepVisitable(places, { where, kind = null }) {
+  if (places.length < 2) return places;
+
+  const res = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 2000,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: KEEP_SCHEMA } },
+    system: [{ type: 'text', text: KEEP_SYSTEM, cache_control: { type: 'ephemeral' } }],
+    messages: [
+      {
+        role: 'user',
+        content: [
+          `DESTINATION: ${where}`,
+          kind ? `THIS DECK IS ABOUT: ${kind}` : 'THIS DECK HAS NO SUBJECT - judge only whether each entry is a place.',
+          '',
+          'ENTRIES:',
+          // The description as well as the name, because "אגם סוראפיס" and
+          // "סאס פורדוי" are both two Italian words to anybody who has not been
+          // there, and one of them is a lake.
+          ...places.map((p) => `  ${p.nameHe}${p.description ? ` — ${String(p.description).slice(0, 160)}` : ''}`),
+        ].join('\n'),
+      },
+    ],
+  });
+
+  recordUsage(res.usage, MODEL);
+  const text = res.content.find((b) => b.type === 'text')?.text;
+  if (!text) return places;
+
+  const keep = new Set((JSON.parse(text).keep || []).map((s) => String(s).trim()));
+  const kept = places.filter((p) => keep.has(String(p.nameHe).trim()));
+
+  // With no subject asked for, a filter that removes everything has
+  // misunderstood the list rather than found it all unusable, and an empty deck
+  // is worse than an unfiltered one.
+  //
+  // WITH a subject, the opposite is true and the old guard was actively
+  // harmful: "this page has no trails on it" is a correct and common answer,
+  // and overriding it hands the deck back every market on the page. An empty
+  // result here costs nothing — buildDeck falls through to the map route, whose
+  // Overpass tags cannot return a market for a summit query.
+  if (kind) return kept;
+  return kept.length >= 2 ? kept : places;
+}
+
 /**
  * One call per deck, before any bullets are drafted.
  *

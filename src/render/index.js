@@ -24,7 +24,11 @@ let idleTimer = null;
 // re-render from an edit, with room to spare.
 const IDLE_SHUTDOWN_MS = Number(process.env.RENDER_IDLE_MS ?? 5 * 60_000);
 
-function getBrowser() {
+// Shared rather than private because the photo measuring in ./photo.js runs in
+// the same Chromium: it decodes each slide's image to a canvas and reads the
+// pixels back, which is a page and a browser, and launching a second one to do
+// it would double the resident memory for no gain.
+export function getBrowser() {
   // Chromium takes a second or two to start; a handful of cards a day would
   // otherwise pay that every time. Launched lazily so `npm start` doesn't need it.
   browserPromise ??= chromium.launch({ args: ['--font-render-hinting=none'] });
@@ -99,7 +103,28 @@ export function cardPublicUrl(filename) {
  * CARD_PUBLIC_BASE_URL is set — Telegram publishing works without it.
  */
 export async function renderCard(draft, { id, data = null, image = null, outDir = cardOutputDir() } = {}) {
-  return renderToJpeg(renderHtml(draft, { data, image }), {
+  // Measured before the card is built, because the scrim is part of the
+  // stylesheet rather than something that can be adjusted afterwards.
+  //
+  // Only for the photo layouts: the text-led cards are a flat dark ground by
+  // design and have no photograph to measure. Failure is silent and falls back
+  // to the old constants — a scrim sized for the worst photograph is what the
+  // card had before this existed, and it is not worth losing a card over.
+  //
+  // Imported here rather than at the top of the file because ./photo.js imports
+  // getBrowser from this module: a static import back would close the cycle,
+  // and the measuring module is the one that should depend on the renderer
+  // rather than the other way round. The module is cached after the first card.
+  let shot = image;
+  if (image?.src) {
+    const scrim = await import('./photo.js')
+      .then((m) => m.measureCardScrims([image.src]))
+      .then(([s]) => s)
+      .catch(() => null);
+    if (scrim?.bottom != null) shot = { ...image, scrim };
+  }
+
+  return renderToJpeg(renderHtml(draft, { data, image: shot }), {
     stem: id,
     width: CARD_W,
     height: CARD_H,
@@ -144,7 +169,7 @@ export async function renderToJpeg(html, { stem, width = CARD_W, height = CARD_H
     // replacing it. The two checks below test the thing we actually care about:
     // that our own @font-face rule loaded, and that it is what's being drawn.
     await page.evaluate(() => document.fonts.ready);
-    const font = await page.evaluate(() => {
+    const font = await page.evaluate(async () => {
       const face = [...document.fonts].find((f) => f.family.replace(/['"]/g, '') === 'Heebo');
 
       // Width comparison against a family that cannot exist. If Heebo failed,
@@ -162,6 +187,33 @@ export async function renderToJpeg(html, { stem, width = CARD_W, height = CARD_H
       return {
         status: face?.status ?? 'missing',
         distinct: Math.abs(measure("'Heebo'") - measure("'__no_such_font__'")) > 0.5,
+        // Every OTHER face the page declared, forced to resolve.
+        //
+        // The check above was written when Heebo carried all the Hebrew and it
+        // still earns its place — it proves a font reached the page at all. But
+        // the slides now set Hebrew in Assistant and the info style sets it in
+        // Rubik, and a face that fails to PARSE falls through to the next
+        // family silently: the render succeeds, the text is legible, and it is
+        // in the wrong typeface. Four of the bundled files turned out to be
+        // corrupt and had never once loaded, which is exactly that failure.
+        //
+        // load() is what makes this meaningful. @font-face is lazy: a declared
+        // face that nothing has drawn with yet sits at "unloaded", which is not
+        // an error and must not be treated as one — doing that refused every
+        // render outright. Asking for it explicitly resolves the question,
+        // after which "error" means the bytes are not a font.
+        others: await Promise.all(
+          [...document.fonts]
+            .filter((f) => f.family.replace(/['"]/g, '') !== 'Heebo')
+            .map(async (f) => {
+              try {
+                await f.load();
+              } catch {
+                /* status carries the answer */
+              }
+              return { family: f.family.replace(/['"]/g, ''), status: f.status };
+            })
+        ),
       };
     });
 
@@ -169,6 +221,14 @@ export async function renderToJpeg(html, { stem, width = CARD_W, height = CARD_H
       throw new Error(
         `Heebo did not load (@font-face status: ${font.status}, distinct from fallback: ${font.distinct}) — ` +
           'refusing to render, because the Hebrew would come out as tofu boxes'
+      );
+    }
+
+    const broken = font.others.filter((f) => f.status === 'error');
+    if (broken.length) {
+      throw new Error(
+        `these faces are not valid fonts: ${broken.map((f) => f.family).join(', ')} — ` +
+          'refusing to render, because the text would silently come out in a fallback typeface'
       );
     }
 

@@ -35,22 +35,31 @@ const SCHEMA = {
       description:
         'True only if the chosen photograph actually depicts the named place - not merely the same city or region.',
     },
-    band: {
-      type: 'string',
-      enum: ['top', 'middle', 'bottom'],
+    subject: {
+      type: 'integer',
       description:
-        'Which horizontal third of the CHOSEN photograph is emptiest - open sky, water, grass, snow - and can hold text without covering the subject.',
-    },
-    side: {
-      type: 'string',
-      enum: ['right', 'center', 'left'],
-      description: 'Which side of that band is emptiest. "center" when the whole band is open.',
+        'How much of the frame the named thing itself occupies, 0-10. 8+ means it dominates and is unmistakable. 3 means it is somewhere in the picture if you know where to look. Be strict.',
     },
     why: { type: 'string', description: 'Six words at most, English, on what decided it' },
   },
-  required: ['pick', 'shows_place', 'band', 'side', 'why'],
+  required: ['pick', 'shows_place', 'subject', 'why'],
   additionalProperties: false,
 };
+
+// How prominent the named thing has to be before a photograph is worth using.
+//
+// Tuned against a real failure: a deck of Alpine summits came back with a
+// picture of a bird against cloud with a snowfield along the bottom edge, and
+// another where the peak was a grey wedge behind a valley full of trees and a
+// farmhouse. Both genuinely were the right mountain; neither showed it. A
+// viewer cannot tell a slide labelled "Eiger" is the Eiger if the Eiger is
+// eight percent of the frame, and a slideshow of near-misses is worse than a
+// shorter one.
+// Five rather than six: at six, three well-known Kyoto temples in a row came
+// back with no usable photograph at all and left a deck of three. The bird and
+// the valley score two or three, which is what this is for; a temple sharing
+// its frame with a courtyard scores five and is a perfectly good slide.
+const MIN_SUBJECT = Number(process.env.CURATE_MIN_SUBJECT || 5);
 
 const SYSTEM = `You choose one photograph for a slide in a travel slideshow.
 
@@ -98,12 +107,27 @@ If you are not confident the picture shows the named place, say 0. Being unsure
 is itself the answer: a deck that drops a place is fine, a deck that mislabels
 one is not.
 
-WHERE THE TEXT WILL GO
+AND IT MUST ACTUALLY SHOW IT
 
-Also say which third of the chosen picture is emptiest, and which side of it -
-open sky, still water, a field of snow, a lawn. The words are placed there, so
-this is not a note about composition; it decides whether the text lands on the
-mountain or beside it.
+Being the right place is not enough. The named thing has to be the SUBJECT -
+large in the frame, unmistakable, the thing your eye lands on first. Score that
+in the subject field, out of ten, and be hard about it.
+
+  9  the peak fills the frame, lit, nothing competing with it
+  6  clearly the subject, but sharing the frame with a village or a valley
+  3  it is in there somewhere, behind trees, small, low in the corner
+  0  a bird, a cloud, a lake that happens to be near it
+
+A picture of a mountain range with a bird in the sky and a snowfield along the
+bottom edge is a photograph of a bird. A valley with a farmhouse, trees, a road
+and a grey summit somewhere at the back is a photograph of a valley. Both of
+those shipped on slides that named a mountain, and they are the reason this
+field exists. When the best candidate is a 4, say 0 and let the caller look
+again - there is always another query, and a slide that does not show its own
+subject is not worth the place it takes.
+
+Between two that both show the place, take the one that shows it BIGGER, even
+if the smaller one has nicer light.
 
 If nothing here both shows the place and is worth looking at, say 0. The caller
 tries another search and then drops the place, which is the correct outcome.`;
@@ -126,7 +150,7 @@ export async function pickCinematic(thumbs, { place = '', where = '', placeEn = 
           where ? `, ${where}` : ''
         }`,
         `${thumbs.length} candidate${thumbs.length === 1 ? '' : 's'} follow${thumbs.length === 1 ? 's' : ''}, numbered from 1.`,
-        'Pick the one that shows THIS PLACE and would stop a thumb, and say where its empty space is.',
+        'Pick the one that shows THIS PLACE, large in the frame, and would stop a thumb.',
       ].join('\n'),
     },
   ];
@@ -160,11 +184,17 @@ export async function pickCinematic(thumbs, { place = '', where = '', placeEn = 
   // somewhere else.
   if (parsed.shows_place === false) return null;
 
+  // Nor one where the place is technically present and visually absent. Refused
+  // here rather than in the prompt alone, because "be strict" is advice and a
+  // threshold is a rule — and the caller's response to null is exactly right:
+  // try the next query, then drop the place.
+  const subject = Number(parsed.subject);
+  if (Number.isFinite(subject) && subject < MIN_SUBJECT) return null;
+
   return {
     index: pick - 1,
     why: String(parsed.why || '').slice(0, 60),
-    band: ['top', 'middle', 'bottom'].includes(parsed.band) ? parsed.band : 'bottom',
-    side: ['right', 'center', 'left'].includes(parsed.side) ? parsed.side : 'center',
+    subject: Number.isFinite(subject) ? subject : null,
   };
 }
 
@@ -173,14 +203,28 @@ export async function pickCinematic(thumbs, { place = '', where = '', placeEn = 
 // place still has to be in the frame.
 //
 // Not all at once: each is tried as its own query, so a place that has a famous
-// aerial gets the aerial and a place that does not still gets its sunset.
-export const CINEMATIC_TERMS = ['aerial view', 'golden hour', 'sunrise', 'landscape', 'viewpoint'];
+// sunrise gets the sunrise and a place that does not still gets its bare name.
+export const CINEMATIC_TERMS = ['golden hour', 'sunrise', 'landscape', 'viewpoint', 'aerial view'];
 
-/** Query variants for one place, most cinematic first. */
+/**
+ * Query variants for one place, and the ORDER is the load-bearing part.
+ *
+ * The bare name goes first. It used to go last, behind "aerial view", and that
+ * single ordering is why summit decks came back with photographs of valleys:
+ * "Eiger aerial view" returns a drone shot of the Bernese Oberland in which the
+ * Eiger is one grey shape among several, while "Eiger" returns the north face.
+ * The library is better at the plain noun than at our adjectives, and the
+ * curator's own light-and-depth rubric is what earns the cinematic result — it
+ * does not need the query to beg for one.
+ */
 export function cinematicQueries(nameEn, where) {
   // Deduped: a cover asks for the city by name and the region IS the city, so
-  // without this every cover query read "Prague Prague aerial view".
+  // without this every cover query read "Prague Prague golden hour".
   const base = [...new Set([nameEn, where].filter(Boolean).flatMap((s) => s.split(/\s+/)))].join(' ');
   if (!base.trim()) return [];
-  return [...CINEMATIC_TERMS.map((t) => `${base} ${t}`), base];
+
+  const bare = String(nameEn || '').trim();
+  // The name on its own, then the name with the region for disambiguation,
+  // then the cinematic variants for a place that returned nothing usable.
+  return [...new Set([bare, base, ...CINEMATIC_TERMS.map((t) => `${base} ${t}`)].filter(Boolean))];
 }

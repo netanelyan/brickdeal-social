@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { record as recordUsage } from '../usage.js';
 import { KINDS, kindIds } from '../sources/places.js';
+import { namesPlace } from './region.js';
 
 // What deck to make. The step before any data is fetched.
 //
@@ -114,30 +115,176 @@ story beats one that narrates it. Hyphens, never em dashes.
 
 HOW A COVER IS ACTUALLY WRITTEN
 
-The cover is ONE line of text. Not a title plus a subtitle, not a city label
-above it - one line. Everything else belongs on the slides or nowhere.
+The cover is ONE short line. Five to eight words. These four are the spec — not
+illustrations of a spec, the spec itself:
 
-It counts the places and names the destination, and one word in it is set
-louder than the rest. The posts this channel is modelled on use exactly this:
+  הרים באיסלנד שלא נראים אמיתיים
+  מקומות בשווייץ שאתם חייבים לראות לפני שזה מאוחר מדי
+  המקומות הכי טובים בנורווגיה לראות את האורות הצפוניים
+  המפלים הכי יפים בסקנדינביה
 
-  "7 reasons why you HAVE to visit WYOMING"
-  "10/10 hikes in the Dolomites you HAVE to experience"
+Read what they have in common, because it is the opposite of what a careful
+writer reaches for.
 
-In Hebrew:
+NO COUNT. None of them says how many. "טופ 6" and "6 מקומות" are not wrong,
+they are just rarely what this page sounds like, and they will be asked for
+explicitly when they are wanted.
 
-  5 מקומות בפראג שאסור לפספס
-  טופ 5 מסלולים בדולומיטים
-  7 סיבות לטוס לוויומינג
+NAME WHERE IT IS. Every one of those four says where, and it is never optional.
+A scroller who cannot tell which country the photograph is in has no reason to
+save the post, and a deck of six Icelandic waterfalls titled "המפלים הכי יפים
+בעולם" is not withholding a story, it is withholding the only fact that makes
+the list usable.
 
-Hebrew social writes the number as a NUMERAL and borrows "טופ": טופ 5, טופ 3,
-"5 מקומות". It does not spell it out - "חמישה מוזיאונים" is how a newspaper
-writes, and it is the clearest tell that a page is not a person.
+The place is HANDED TO YOU with the deck and it is the only one you may use:
 
-Count correctly. A deck of four places does not say 5.
+  every slide in one country  →  that country.        "באיסלנד", "בשווייץ"
+  several countries, one area →  that area.           "בסקנדינביה", "בבלקן"
+  nothing in common at all    →  "בעולם", and nowhere else.
+
+Do not name a city, a valley or a national park instead of what you were given,
+and do not add a second place beside it. One place, the one supplied.
+
+A BROAD PLURAL NOUN opens it: הרים, מפלים, מקומות, חופים, ערים, כפרים. Not a
+category from a database.
+
+ONE STRONG CLAUSE, and it may be any of these:
+
+  a superlative     — הכי יפים בעולם, הכי טובים ל...
+  a picture         — שלא נראים אמיתיים, שנראים כמו סרט
+  an obligation     — שאתם חייבים לראות, שאסור לפספס
+  a time pressure   — לפני שזה מאוחר מדי, פעם אחת בחיים
+
+Superlatives are welcome here. "הכי יפים בעולם" is a claim nobody can check and
+everybody understands, and it is exactly how this kind of page talks.
+
+USE SIMPLE WORDS
+
+  BAD:   המפלים באיסלנד שעוצרים לך את הנשימה
+  GOOD:  המפלים הכי יפים באיסלנד
+
+"עוצר נשימה", "חוויה בלתי נשכחת", "פנינה נסתרת", "קסום", "מרהיב", "ייחודי" are
+advertising words. A person does not say them out loud and a scroller does not
+read them.
+
+ONE CLAUSE, AND NO COLON
+
+A colon turns the line into a title and a subtitle, which is a magazine spread
+and not a slide somebody sees for a second and a half:
+
+  BAD:   סנטוריני שאתם לא מכירים: חורבות ומצודות מול הים
+  GOOD:  הסנטוריני שאתם לא מכירים
+
+No colon, no dash holding two halves together, no comma splicing a second
+thought onto the first.
+
+DO NOT NAME ONE PLACE FROM THE LIST
+
+The cover is about the promise, not about slide four. Naming a single place
+promises that one thing and makes the other five feel like padding. The country
+or area the whole deck sits in is the opposite of that and is required; a
+waterfall's name is not.
+
+NO STATISTICS
+
+How few people go, what time it opens, how long the queue is, how cold the
+water is. Those belong on a slide. A cover wants something felt, not counted.
+
+WHAT KILLS A COVER
+
+Describing the MECHANISM instead of the appeal:
+
+  BAD:  פסגות באלפים שמגיעים אליהן ברכבל
+  GOOD: הפסגות הכי יפות באלפים
+
+Nobody opens a slideshow because of how you get somewhere.
+
+Also fatal: a neutral catalogue title ("מוזיאונים בפראג"), a question, "ידעתם
+ש", and any attempt to be clever at the cost of being clear.
+
+IF A COUNT IS ASKED FOR
+
+Then the number is a NUMERAL and "טופ" is borrowed: טופ 5, טופ 3. Never spelled
+out — "חמישה מוזיאונים" is how a newspaper writes. Count correctly; a deck of
+four places does not say 5.
 
 NEVER on a cover: a second explanatory line, a city label above the title, a
 list of what the slides contain, opening hours, prices, or the words
 "שעות פתיחה" in any arrangement whatsoever.`;
+
+// The cover is written to a rotation, not left to the model's favourite.
+//
+// Told only to "vary it", a model asked once per deck has no memory of the last
+// deck and converges on whichever phrasing it likes best — six decks in a row
+// came back "טופ N ... שאסור לפספס". Variety across posts is a property of the
+// SEQUENCE, and nothing inside a single call can see the sequence.
+//
+// These five shapes are the four covers the channel was specified by, plus the
+// counted form for when it is wanted. An earlier version of this list was built
+// around numbers and place names — "טופ 6 מקומות בקיוטו..." — and every cover it
+// produced was rejected. The lesson is in the shapes now: most covers carry no
+// count and name nowhere.
+//
+// Every shape carries the place now. Where it SITS in the line differs — after
+// the noun for three of them, after the superlative for one, at the end for the
+// counted one — and that is most of what keeps five covers in a row from
+// reading as one template with the nouns swapped.
+export const COVER_SHAPES = [
+  {
+    id: 'unreal',
+    brief:
+      'A plain plural noun, then the place, then a clause saying it does not look real. No "ה" on the noun, no count, and NO pronoun — "הרים באיסלנד שלא נראים אמיתיים", never "הרים שאתם לא תאמינו שהם אמיתיים".',
+    voice: 'none',
+    examples: ['הרים באיסלנד שלא נראים אמיתיים', 'מקומות בפורטוגל שנראים כמו סרט'],
+  },
+  {
+    id: 'superlative',
+    brief:
+      'ה + plural noun + הכי + adjective + the place. The place closes the line, which is where this shape puts it. A flat claim, no pronoun.',
+    voice: 'none',
+    examples: ['המפלים הכי יפים באיסלנד', 'הכפרים הכי יפים באיטליה'],
+  },
+  {
+    id: 'urgency',
+    // The one shape that takes a pronoun. In the four covers this channel was
+    // specified by, "אתם" appears exactly once and it is on the obligation.
+    brief:
+      'Plural noun + the place + שאתם חייבים לראות + a twist that puts time pressure on it. The place goes between the noun and the clause.',
+    voice: 'you',
+    examples: ['מקומות בשווייץ שאתם חייבים לראות לפני שזה מאוחר מדי', 'מפלים באיסלנד שחייבים לראות פעם אחת בחיים'],
+  },
+  {
+    id: 'best-for',
+    // The activity has to be something done with the body. "לגעת בעבר" came
+    // back from an early run and is the failure this brief is guarding against:
+    // an abstraction dressed up as an activity.
+    brief:
+      'ה + noun + הכי טובים + the place + a PHYSICAL thing you go there to do: see the northern lights, watch a sunrise, swim, ski, walk. Never an abstraction like "לגעת בעבר" or "להרגיש חופש".',
+    voice: 'none',
+    examples: ['המקומות הכי טובים בנורווגיה לראות את האורות הצפוניים', 'המקומות הכי טובים ביוון לראות זריחה'],
+  },
+  {
+    id: 'top-n',
+    // The one counted shape. It exists because the channel's own first example
+    // was "טופ 4 פסגות שאסור לפספס באלפים" — one cover in five, not the default.
+    brief: 'טופ + numeral + noun + a clause + the place at the end. The only shape that counts.',
+    voice: 'you',
+    examples: ['טופ 4 פסגות שאסור לפספס באלפים', 'טופ 5 מסלולים שאסור לפספס בסלובניה'],
+  },
+];
+
+// Who the line talks to — a property of the SHAPE, not a second wheel spun
+// beside it.
+//
+// Rotating the voice independently put "אתם" on a shape that has no room for
+// it: "פסגות שאתם לא תאמינו שהן אמיתיות" where the spec says
+// "הרים שלא נראים אמיתיים". In the four covers this channel was specified by,
+// the pronoun appears exactly once, on the obligation — so that is where it
+// lives.
+export const COVER_VOICES = {
+  you: { id: 'you', brief: 'Talk straight at them: אתם, לכם, שלכם.', example: 'מקומות שאתם חייבים לראות' },
+  none: { id: 'none', brief: 'Impersonal. No pronoun at all.', example: 'המפלים הכי יפים בעולם' },
+};
 
 export const hasApiKey = () =>
   Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
@@ -196,7 +343,12 @@ const TITLE_SCHEMA = {
     emphasis_he: {
       type: 'string',
       description:
-        'One word or short phrase copied exactly from title_he, to be set louder than the rest. Usually the destination or the word carrying the urgency.',
+        'The phrase copied EXACTLY from title_he that is set in colour. Take the phrase that paints the picture - "שנראים כמו סרט", "שלא נראות אמיתיות" - rather than the destination, because that is the part the eye should land on. Keep it under 16 characters so it holds on one line.',
+    },
+    place_he: {
+      type: 'string',
+      description:
+        'The place named inside title_he, copied EXACTLY as it appears there, preposition included: "באיסלנד", "בסקנדינביה", "בעולם". Empty string only if the deck was told to name nowhere.',
     },
     eyebrow_he: { type: 'string', description: 'Unused. Return an empty string.' },
     angle_he: { type: 'string', description: 'Unused. Return an empty string.' },
@@ -206,61 +358,237 @@ const TITLE_SCHEMA = {
       items: { type: 'string' },
     },
   },
-  required: ['title_he', 'emphasis_he', 'eyebrow_he', 'angle_he', 'search_terms'],
+  required: ['title_he', 'emphasis_he', 'place_he', 'eyebrow_he', 'angle_he', 'search_terms'],
   additionalProperties: false,
 };
 
 /**
- * The cover, written after the deck exists.
+ * One line, not a title and a subtitle.
  *
- * The first version wrote the title first and gathered the places afterwards,
- * so a deck asked for as "Prague attraction" came back with a cover promising
- * five museums. Nothing downstream could catch that: the title was a prediction
- * about places that had not been chosen yet, and predictions are wrong.
- *
- * Writing it last makes the mismatch impossible — the model is shown the five
- * places that are actually in the deck and titles those.
+ * "The cover is ONE line of text" has been in the brief from the beginning and
+ * a cover still came back as "סנטוריני שאתם לא מכירים: חורבות ומצודות מול הים".
+ * The half before the colon is almost always the line that was wanted, so it is
+ * kept — and only when it can stand on its own, because half of a short title
+ * is not a title.
  */
-export async function coverForDeck({ where, kind, slides = [], hint = '' }) {
+export const oneClause = (line) => {
+  // Comma as well as colon. Told not to use a colon, the next cover came back
+  // as "הסנטוריני שאתם לא מכירים, חורבות ומצודות" — the same two halves held
+  // together by different punctuation. The rule is one thought, so it is the
+  // splice that is banned rather than the character.
+  const cut = String(line || '').split(/\s*[:|,،]\s*/)[0].trim();
+  return cut.length >= 12 ? cut : String(line || '');
+};
+
+/**
+ * The phrase to set in colour, when the model's own choice did not survive.
+ *
+ * The emphasis has to appear in the title verbatim or the renderer cannot find
+ * it, and cutting a comma splice can take the model's chosen phrase away with
+ * the half it removed — which left one cover with no coloured phrase at all.
+ * The closing clause is what should be coloured anyway, so it is recoverable:
+ * in Hebrew that clause almost always opens with ש, and failing that the last
+ * two words carry it.
+ */
+export function emphasisFrom(title) {
+  const line = String(title || '').trim();
+  if (!line) return '';
+
+  const words = line.split(/\s+/);
+  const at = words.findLastIndex((w) => /^ש/.test(w) && w.length > 2);
+  if (at > 0) {
+    const clause = words.slice(at).join(' ');
+    if (clause.length <= 22) return clause;
+  }
+
+  const tail = words.slice(-2).join(' ');
+  return tail.length <= 22 && words.length > 2 ? tail : '';
+}
+
+/**
+ * Which shape, voice and picture this cover uses.
+ *
+ * A COUNTER, not a hash of the deck — and that took two attempts to get right.
+ *
+ * Hashing the deck made the choice stable across re-runs, which sounded
+ * valuable and is not: the deck id is built from the region, the category and
+ * the place ids, deliberately NOT from the title, precisely so the cover can be
+ * rewritten without the deck counting as a different deck. Nothing needed the
+ * stability.
+ *
+ * What it cost was real. Seven decks drawing independently from six buckets
+ * clustered — four landed on the same picture, and two came back with the
+ * identical closing phrase, which is the exact complaint the rotation exists to
+ * answer. Hashing harder does not fix that; independent draws collide, and with
+ * seven samples they collide often.
+ *
+ * A counter cannot collide. Consecutive posts step through the list, and
+ * because the three lists are different lengths the combination does not repeat
+ * for thirty decks. `n` comes from how many decks have already gone out.
+ */
+export function rotationFor(n = 0) {
+  const i = Math.max(0, Math.trunc(Number(n) || 0));
+  return {
+    shape: COVER_SHAPES[i % COVER_SHAPES.length],
+    voice: COVER_VOICES[COVER_SHAPES[i % COVER_SHAPES.length].voice],
+  };
+}
+
+/**
+ * The paragraph that tells the cover where the deck is.
+ *
+ * Written from the slides rather than from the idea, and handed down as a
+ * single instruction with no choice in it. The earlier version passed the
+ * country as a hint — "use it if the region is a name travellers would not
+ * recognise" — and the model, reading a brief three paragraphs above that said
+ * covers name nowhere, declined every time. Six Icelandic waterfalls went out
+ * under "מפלים שאתם חייבים לראות פעם אחת בחיים".
+ */
+function whereBrief(place) {
+  if (place?.scope === 'country') {
+    return [
+      `WHERE THIS DECK IS: ${place.he}. Every place on it is in that one country,`,
+      'so the cover says so. This is not optional and it is not a hint: a cover',
+      `for these slides that does not carry "${place.he}" is wrong.`,
+    ];
+  }
+  if (place?.scope === 'region') {
+    return [
+      `WHERE THIS DECK IS: ${place.he}. The places are spread over more than one`,
+      'country, but they all sit in that one area, and the area is what a viewer',
+      `reads as the destination. The cover says "${place.he}" and does NOT name`,
+      'any of the individual countries.',
+    ];
+  }
+  return [
+    'WHERE THIS DECK IS: nowhere in particular. These places have no country and',
+    'no region in common, so the cover names none of them - "בעולם" is the only',
+    'place word available to it.',
+  ];
+}
+
+export async function coverForDeck({
+  where,
+  kind,
+  slides = [],
+  hint = '',
+  countryHe = null,
+  place = null,
+  nth = 0,
+}) {
   if (!hasApiKey()) throw new Error('ANTHROPIC_API_KEY is not set');
 
-  const res = await getClient().messages.create({
-    model: MODEL,
-    max_tokens: 4000,
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: TITLE_SCHEMA } },
-    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
-    messages: [
-      {
-        role: 'user',
-        content: [
-          `A deck about ${where} is finished. It has ${slides.length} places, in this order:`,
-          '',
-          ...slides.map((s, i) => `${i + 1}. ${s.nameHe}`),
-          '',
-          hint ? `The working title was: ${hint}` : null,
-          '',
-          `Write its cover: ONE line, naming ${slides.length} and the destination, and`,
-          'describing THESE places - if they are castles and squares it is not a deck',
-          'about museums. Then copy one word out of it as the emphasis.',
-        ]
-          .filter((l) => l !== null)
-          .join('\n'),
-      },
-    ],
-  });
+  // Seeded on what the deck IS, so a rebuild of the same deck writes the same
+  // cover and the next deck writes a different-shaped one.
+  const { shape, voice } = rotationFor(nth);
 
-  recordUsage(res.usage, MODEL);
-  const text = res.content.find((b) => b.type === 'text')?.text;
-  if (!text) throw new Error('cover generation returned no text');
+  // `countryHe` is the old single-country hint, kept working for callers that
+  // have not been taught to compute a place: one country is what it always
+  // meant.
+  const spot = place || (countryHe ? { scope: 'country', he: countryHe } : { scope: 'none', he: null });
+  const wanted = spot.scope === 'none' ? null : spot.he;
 
-  const parsed = JSON.parse(text);
+  const ask = [
+    `A deck about ${where} is finished. It has ${slides.length} places, in this order:`,
+    '',
+    ...slides.map((s, i) => `${i + 1}. ${s.nameHe}`),
+    '',
+    hint ? `The working title was: ${hint}` : null,
+    '',
+    `Write its cover: ONE line describing THESE places - if they are castles`,
+    'and squares it is not a deck about museums. It must carry a reason to',
+    'care, not a description of how you get there.',
+    '',
+    ...whereBrief(spot),
+    '',
+    `SHAPE FOR THIS ONE: ${shape.brief}`,
+    ...shape.examples.map((e) => `  ${e}`),
+    '',
+    `VOICE FOR THIS ONE: ${voice.brief}`,
+    `  ${voice.example}`,
+    'Let the voice shape the sentence; do not wedge a pronoun into a',
+    'comparison. "שנראים כמו אגדה" is right and "שנראים לכם כמו אגדה" is',
+    'not — if the voice does not fit naturally, write the line without it.',
+    '',
+    'Use that shape and that voice. They rotate between posts so the page',
+    'does not read as a template; this is the turn for these two.',
+    '',
+    'Five to eight words. Simple words, nothing a person would not say out',
+    'loud. Unless the shape is the counted one, do NOT put a number on it.',
+    '',
+    'Then copy the phrase that carries the hook out of it, character for',
+    'character, as the emphasis, and the place word out of it as place_he.',
+  ]
+    .filter((l) => l !== null)
+    .join('\n');
+
+  const write = async (messages) => {
+    const res = await getClient().messages.create({
+      model: MODEL,
+      max_tokens: 4000,
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: TITLE_SCHEMA } },
+      system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+      messages,
+    });
+    recordUsage(res.usage, MODEL);
+    const text = res.content.find((b) => b.type === 'text')?.text;
+    if (!text) throw new Error('cover generation returned no text');
+    return { raw: text, parsed: JSON.parse(text) };
+  };
+
+  const turns = [{ role: 'user', content: ask }];
+  let { raw, parsed } = await write(turns);
+
   const clean = (s) => String(s || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+
+  // The colon rule, enforced rather than requested.
+  //
+  // "One line, not a title plus a subtitle" has been in the brief from the
+  // beginning and a cover still came back as
+  // "סנטוריני שאתם לא מכירים: חורבות ומצודות מול הים". The half before the
+  // colon is almost always the line that was wanted, so it is kept — and only
+  // if it can stand on its own, because half of a short title is not a title.
+  let titleHe = oneClause(clean(parsed.title_he));
+
+  // Checked, not requested, for the same reason the colon rule is.
+  //
+  // One correction only. A model that has been shown its own line and told
+  // which word is missing fixes it on the first try or is not going to; a loop
+  // here would spend four calls to arrive at the same place, and the fallback
+  // is a cover that is merely vaguer than it should be rather than a broken
+  // deck.
+  if (wanted && !namesPlace(titleHe, wanted)) {
+    turns.push({ role: 'assistant', content: raw });
+    turns.push({
+      role: 'user',
+      content: [
+        `That cover does not say where these places are. It has to carry "${wanted}".`,
+        '',
+        'Write it again, same shape and same voice, with the place in it. Do not',
+        'lengthen the line to make room - drop an adjective if you need the words.',
+      ].join('\n'),
+    });
+    const retry = await write(turns).catch(() => null);
+    if (retry) {
+      const second = oneClause(clean(retry.parsed.title_he));
+      if (namesPlace(second, wanted)) {
+        titleHe = second;
+        parsed = retry.parsed;
+      } else {
+        console.error(`deck: cover would not name ${wanted} — keeping "${titleHe}"`);
+      }
+    }
+  }
+
   return {
-    titleHe: clean(parsed.title_he),
+    titleHe,
     // Copied out of the title rather than invented, so the renderer can find it
     // in the string and set it louder. A phrase that is not in the title is
-    // dropped rather than appended.
-    emphasisHe: clean(parsed.emphasis_he),
+    // dropped rather than appended — including one that only survived in the
+    // half of the line the colon rule just removed.
+    emphasisHe: titleHe.includes(clean(parsed.emphasis_he))
+      ? clean(parsed.emphasis_he)
+      : emphasisFrom(titleHe),
     eyebrowHe: '',
     angleHe: '',
   };

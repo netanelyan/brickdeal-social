@@ -69,7 +69,7 @@ export async function search(query, { timeoutMs = 15_000 } = {}) {
  * and what it cannot see (a cable across the frame, flat grey light) is what
  * the caller's own eyes are for.
  */
-export async function candidates(query, { n = 6, timeoutMs = 15_000 } = {}) {
+export async function candidates(query, { n = 6, timeoutMs = 15_000, w = 440, h = 780 } = {}) {
   const q = String(query || '').trim();
   if (!q) return [];
 
@@ -95,7 +95,11 @@ export async function candidates(query, { n = 6, timeoutMs = 15_000 } = {}) {
 
   const out = [];
   for (const { photo } of ranked) {
-    const thumbUrl = photo?.src?.medium || photo?.src?.small;
+    // The thumbnail is cropped to the SAME shape the slide will use, not to
+    // Pexels' own landscape preview. Judging a wide frame and then shipping a
+    // centre-cropped tall one is how a curator approves a composition that
+    // never reaches the slide: the subject it approved is outside the crop.
+    const thumbUrl = cropUrl(photo, { w, h }) || photo?.src?.medium || photo?.src?.small;
     if (!thumbUrl) continue;
     const bytes = await download(thumbUrl, timeoutMs);
     if (!bytes) continue;
@@ -114,9 +118,9 @@ export async function candidates(query, { n = 6, timeoutMs = 15_000 } = {}) {
   return out;
 }
 
-/** Download one candidate at card size, once it has been chosen. */
-export async function fetchChosen(candidate, { timeoutMs = 15_000 } = {}) {
-  const href = cropUrl(candidate.photo);
+/** Download one candidate at the requested size, once it has been chosen. */
+export async function fetchChosen(candidate, { w = CARD_W, h = CARD_H, timeoutMs = 15_000 } = {}) {
+  const href = cropUrl(candidate.photo, { w, h });
   if (!href) return null;
   const bytes = await download(href, timeoutMs);
   if (!bytes) return null;
@@ -228,15 +232,20 @@ export function pickBest(photos, query) {
 // so asking for 1080x1350 directly returns a sharp, centre-cropped image at
 // exactly the card's size. Falls back to the largest generic size if the
 // original URL is missing.
-export function cropUrl(photo) {
+// The size is a parameter because a card and a slide are different shapes. The
+// card is 1080x1350; a TikTok slide is 1080x1920, and serving it the 4:5 crop
+// meant the renderer covered a 4:5 image into a 9:16 box — throwing away a
+// third of the width and upscaling what was left by 1.4. Every deck photograph
+// was soft and over-cropped before this took an argument.
+export function cropUrl(photo, { w = CARD_W, h = CARD_H } = {}) {
   const original = photo?.src?.original;
   if (original) {
     const u = new URL(original);
     u.searchParams.set('auto', 'compress');
     u.searchParams.set('cs', 'tinysrgb');
     u.searchParams.set('fit', 'crop');
-    u.searchParams.set('w', String(CARD_W));
-    u.searchParams.set('h', String(CARD_H));
+    u.searchParams.set('w', String(w));
+    u.searchParams.set('h', String(h));
     return u.toString();
   }
   return photo?.src?.large2x || photo?.src?.large || photo?.src?.portrait || null;

@@ -53,36 +53,79 @@ TikTok and Instagram. It is built the other way round: Claude proposes what
 would be worth watching, and only then does the pipeline go looking for whether
 it can be sourced.
 
-**A slide carries a numbered place name and nothing else.** That is copied from
-the posts this channel is modelled on, and it was arrived at the hard way: the
-first decks put a sentence under each name, and a sentence on a slide reads as a
-guidebook no matter how it is set. Fields are added only for categories where a
-number decides which one you pick — distance and difficulty choose a hike, and
-opening hours choose nothing — and then the same fields appear in the same order
-on every slide, because consistency is what makes them scan.
+**A slide carries a place name and nothing else, unless a number decides
+something.** That is copied from the posts this channel is modelled on, and it
+was arrived at the hard way: the first decks put a sentence under each name, and
+a sentence on a slide reads as a guidebook no matter how it is set.
+
+### Two styles, chosen per deck
+
+The reference accounts use two different systems and averaging them produced
+slides that belonged to neither. So a deck picks one, once, and every slide in
+it matches:
+
+| | **minimal** | **info** |
+|---|---|---|
+| looks like | a photograph you captioned | a card you would screenshot |
+| type | Heebo 600, ~2.6% of the frame, **no outline** | Rubik 800, cream `#F7E3A1` over a bronze outline |
+| colour | white or near-black, measured per photograph | always cream |
+| carries | name, country, flag, at most one short note | name, flag, and the same fields in the same order |
+| chosen when | most slides have fewer than one measured fact | most slides have one or more |
+
+The type is deliberately **small**. A place name sits at about 2.6% of the frame
+height, which feels wrong in a design tool and is right in a feed: it reads as
+somebody captioning their own photograph rather than as a graphic laid over
+stock. The minimal style carries **no outline at all** — a stroke around every
+letter is not something TikTok's own text tool can produce, so the eye reads it
+as foreign however good the rest of the slide is.
+
+### Where the words go is measured, not guessed
+
+`src/render/photo.js` draws each photograph to a 45×80 grid in the renderer's own
+Chromium and reads the pixels back. For every candidate position it has the mean
+luminance, the spread, and the texture — the mean step between neighbouring
+cells, which is what tells a smooth gradient from a chequerboard. It returns the
+centre of the quietest region as a fraction of the frame, the colour the type
+has to be to survive there, and how hard the shadow has to work.
+
+This replaced asking the vision model which third of the picture was "emptiest".
+A model is the right tool for *is this actually the Eiger* and the wrong tool for
+*what is the mean luminance of the region the text will occupy* — the second has
+an exact answer, it is free, and it is the one that decides whether the slide is
+legible. TikTok's button rail is excluded as a rectangle, which is why text on a
+TikTok slide drifts left and on the Instagram render does not.
 
 ```
-idea (Claude) → places (OpenStreetMap + Wikidata) → an authority per place
-   → find its page (Google CSE, site-restricted) → fetch → quote → slide
-   → render 1080×1920 and 1080×1350 → Telegram album → you tap ✅ → TikTok + Instagram
+idea (Claude) → places (OpenStreetMap + Wikidata) → facts → photographs (curated by looking)
+   → measure each photograph → render 1080×1920 and 1080×1350
+   → Telegram album → you tap ✅ → TikTok + Instagram
 ```
 
-**OpenStreetMap chooses the places; it never states a fact.** The map and
-Wikidata are good at enumerating what exists and how well known it is, and they
-are not the publisher of anything. So a place's tags select it and rank it by
-how many language Wikipedias write about it, and then every number on the slide
-is quoted from the official site of the place, of the body that runs it, or of
-the body that contains it — checked character-for-character, exactly like a
-card.
+**OpenStreetMap chooses the places; it never states a fact.** A place's tags
+select it and rank it by how many language Wikipedias write about it, and then
+every *sentence* on a slide is quoted from the official site of the place, of the
+body that runs it, or of the body that contains it — checked
+character-for-character, exactly like a card.
 
-The consequence is that some decks cannot be made. Museums, temples, castles and
-markets publish their own opening hours; waterfalls and hiking routes mostly do
-not. A probe of seven themes found 52 of 75 Prague museums quotable and 1 of 74
-Icelandic waterfalls. A deck that wanted five places and sourced three says so
-on the approval card, with the name and the reason for each place it dropped.
+**The one documented exception is a structured measurement.** A summit has no
+official website, no operator and no opening hours, so there is no page to quote
+and summit decks came back as bare names — with the one fact anybody wants, the
+height, sitting unread in Wikidata's P2044. `src/deck/facts.js` reads those
+properties directly: an elevation, a length, a founding year. A property is not
+prose. Nothing is written, the value is copied with its unit normalised, and the
+QID travels with it. Prose about a place still needs its official page.
 
-`/deck` builds one from an idea of the model's choosing; `/deck Prague museum`
-builds the one you asked for.
+**Every name is Hebrew.** Wikidata has a Hebrew label for the famous places and
+not for the rest, and the old code fell back to the English one — which is how
+"Piz Bernina" and "Aletschhorn" shipped on a Hebrew slide. `src/deck/hebrew.js`
+transliterates the rest and then *checks*: a name that still contains a Latin
+letter is not used and the place is dropped.
+
+`/deck` builds one from an idea of the model's choosing. `/deck Prague museum`
+builds the one you asked for — and so does `/deck mountains Italy`,
+`/deck japan autumn` or `/deck Santorini`, because the request is parsed when it
+parses and interpreted when it does not. A thin result falls back to another
+category or region rather than answering with a failure.
 
 ## What makes it different from "an AI wrote a post"
 
@@ -183,12 +226,28 @@ Requires Node 18+ (developed on 24) and no build step.
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env      # then fill it in
-npm test                  # 302 offline checks, no credentials needed
+npm test                  # 479 offline checks, no credentials needed
 npm run check-sources     # probe every feed
 npm run eval-feed <url>   # size up a feed before adding it
 npm run run-once          # a full pass, printed to the terminal, publishes nothing
 npm start
 ```
+
+Slides cannot be reviewed by reading the HTML — Hebrew shaping, bidi, where a
+line breaks, whether white type survives on that particular sky, all of it
+happens at render time. Two scripts exist to look at them:
+
+```bash
+npm run deck-lab                      # fixed content, cached photographs, no model calls
+npm run deck-once -- "Dolomites trails" "Kyoto temples"
+```
+
+`deck-lab` is the fast one: hand-written fixtures against real photographs, so a
+number in the stylesheet can be argued with in about fifteen seconds.
+`deck-once` is the whole pipeline — request, places, facts, curation, render —
+written to `out/decks/` instead of to Telegram, with a contact sheet showing
+every slide in a row and the measurements that placed each block underneath it.
+Neither writes to the store and neither publishes anything.
 
 TikTok, if you want it, is connected once with `npm run tiktok-token` — it
 prints an authorization URL, you paste back the address you land on, and the
@@ -221,6 +280,12 @@ rejections · `/queue` `/next` `/pending`
 | `src/verify.js` | **the gate** — allowlist, quotes, fares, rounding, repeats |
 | `src/score.js` | ranking before anything expensive happens |
 | `src/render/` | templates, theme, Chromium |
+| `src/render/photo.js` | measures each photograph: where the words go, what colour they are |
+| `src/render/deckTemplates.js` | the two slide styles, minimal and info |
+| `src/deck/facts.js` | structured measurements off Wikidata properties |
+| `src/deck/hebrew.js` | every place name in Hebrew, and the check that it is |
+| `src/deck/request.js` | turns anything typed after `/deck` into something buildable |
+| `src/deck/flags.js` | countries in Hebrew, with their flag |
 | `src/sources/` | feed adapters and the climate dataset |
 | `src/publish/` | Instagram Graph API, publish targets |
 | `src/images.js` | image provenance policy |

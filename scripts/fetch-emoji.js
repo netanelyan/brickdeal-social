@@ -4,6 +4,7 @@ loadEnv();
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { VOCAB, ALL_USED } from '../src/deck/emoji.js';
+import { ALL_FLAGS } from '../src/deck/flags.js';
 
 // Fetches the emoji artwork the slides draw with.
 //
@@ -30,6 +31,23 @@ import { VOCAB, ALL_USED } from '../src/deck/emoji.js';
 const TAG = process.env.EMOJI_SET_TAG || 'v2.047';
 const SET_URL = process.env.EMOJI_SET_URL || `https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@${TAG}/png/128/emoji_u{cp}.png`;
 
+// Flags live somewhere else in the same repository, and not as PNG.
+//
+// noto-emoji's png/128 directory simply has no flags in it — every one of the
+// seventy this channel wants 404s there, which is how they came to be missing.
+// They are in third_party/region-flags as "waved" SVG: the same drawings the
+// font uses, at any size, a kilobyte each. Same repository and same licence as
+// the rest of the set, so nothing new is being taken on here.
+const FLAG_URL =
+  process.env.EMOJI_FLAG_URL ||
+  `https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@${TAG}/third_party/region-flags/waved-svg/emoji_u{cp}.svg`;
+
+/** Two regional indicators and nothing else — that is a flag. */
+const isFlag = (ch) => [...ch].length === 2 && [...ch].every((c) => {
+  const cp = c.codePointAt(0);
+  return cp >= 0x1f1e6 && cp <= 0x1f1ff;
+});
+
 const outDir = fileURLToPath(new URL('../assets/emoji/', import.meta.url));
 
 /**
@@ -42,12 +60,15 @@ const outDir = fileURLToPath(new URL('../assets/emoji/', import.meta.url));
 export const codepoints = (ch) =>
   [...ch].map((c) => c.codePointAt(0).toString(16)).filter((hex) => hex !== 'fe0f');
 
-export const fileFor = (ch) => `${codepoints(ch).join('_')}.png`;
+export const fileFor = (ch) => `${codepoints(ch).join('_')}.${isFlag(ch) ? 'svg' : 'png'}`;
 
 async function main() {
   mkdirSync(outDir, { recursive: true });
 
-  const wanted = [...new Set([...VOCAB, ...ALL_USED])];
+  // Flags are included, and they are not decoration: the reference slides put
+  // the country's flag on its own line under the place name on every single
+  // slide, and a flag with no artwork renders as two letter-boxes on Linux.
+  const wanted = [...new Set([...VOCAB, ...ALL_USED, ...ALL_FLAGS])];
   let fetched = 0;
   let already = 0;
   const missing = [];
@@ -58,7 +79,7 @@ async function main() {
       already++;
       continue;
     }
-    const url = SET_URL.replace('{cp}', codepoints(ch).join('_'));
+    const url = (isFlag(ch) ? FLAG_URL : SET_URL).replace('{cp}', codepoints(ch).join('_'));
     const res = await fetch(url);
     if (!res.ok) {
       missing.push(`${ch} (${res.status}) ${url}`);

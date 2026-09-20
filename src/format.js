@@ -106,10 +106,15 @@ export function deckApprovalMessage(cand) {
   const deck = cand.deck || cand;
   const lines = [];
 
-  lines.push(`🎞️ מצגת · ${deck.category} · ${deck.where}`);
+  // The style is on the header because it is the single biggest visual
+  // difference between two decks and it is chosen automatically. Reading
+  // "minimal" and seeing cream-and-bronze slides means the style decision is
+  // wrong, and that is otherwise invisible until the pictures load.
+  const styleHe = deck.style === 'info' ? 'מידע' : 'מינימלי';
+  lines.push(`🎞️ מצגת · ${deck.category} · ${deck.where} · סגנון ${styleHe}`);
   lines.push('');
   lines.push(`🖼️ על השער: ${clean(deck.titleHe)}`);
-  if (deck.idea?.angleHe) lines.push(`   ${clean(deck.idea.angleHe)}`);
+  if (deck.idea?.emphasisHe) lines.push(`   בצבע: ${clean(deck.idea.emphasisHe)}`);
   lines.push('');
 
   lines.push(`📑 ${deck.slides.length + 1} שקופיות (שער + ${deck.slides.length} מקומות):`);
@@ -117,7 +122,9 @@ export function deckApprovalMessage(cand) {
     // A slide is a name and, where the category has them, a few fields. The
     // fields are shown because they are the only part that can be wrong.
     const fields = (s.fields || []).map((f) => `${f.labelHe}: ${f.value}`).join(' · ');
-    lines.push(`   ${i + 2}. ${s.nameHe}${fields ? ` — ${fields}` : ''}`);
+    const note = (s.bullets || [])[0]?.text;
+    const extra = fields || note || '';
+    lines.push(`   ${i + 2}. ${s.nameHe}${s.flag ? ` ${s.flag}` : ''}${extra ? ` — ${extra}` : ''}`);
   }
   lines.push('');
 
@@ -137,6 +144,15 @@ export function deckApprovalMessage(cand) {
     lines.push(`   ✗ ${d.place}: ${String(d.why).slice(0, 80)}`);
   }
   if ((deck.dropped || []).length > 4) lines.push(`   ✗ ועוד ${deck.dropped.length - 4}`);
+
+  // Kept, but with less on them than the category asked for. Listed separately
+  // from the dropped, and with a different mark: a place whose page had no
+  // numbers is on a slide carrying its name, which is a working slide — showing
+  // it under "✗" made a perfectly good deck read as half-broken.
+  for (const d of (deck.degraded || []).slice(0, 3)) {
+    lines.push(`   ~ ${d.place}: בלי נתונים, רק השם`);
+  }
+  if ((deck.degraded || []).length > 3) lines.push(`   ~ ועוד ${deck.degraded.length - 3}`);
 
   const missing = deck.slides.filter((s) => s.imageMiss).length;
   if (missing) lines.push(`⚠️ ${missing} שקופיות בלי צילום`);
