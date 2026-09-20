@@ -36,6 +36,7 @@ import { normaliseIdea } from '../src/deck/ideas.js';
 import { sameSite } from '../src/search.js';
 import { authorityDomains, KINDS } from '../src/sources/places.js';
 import { pick, CATEGORY_HE, canonicalKind } from '../src/sources/tiyulplus.js';
+import { keepByName } from '../src/deck/shape.js';
 import { quietAlert } from '../src/notify.js';
 import { describeError, InstagramError } from '../src/publish/instagram.js';
 import { publishTargets, targetsForKind, allowedForKind } from '../src/publish/targets.js';
@@ -1544,6 +1545,36 @@ eq('a registered kind with no match yields nothing', pick(guide, { kind: 'museum
 // "the best of Prague", where no category was asked for at all.
 eq('an unregistered kind still takes the page', pick(guide, { kind: 'best of', want: 9 }).length, 4);
 eq('and so does no kind at all', pick(guide, { want: 9 }).length, 4);
+
+// The filter must never fail CLOSED on a formatting detail.
+//
+// Entries go to the model as "name — description" so it can judge the subject,
+// and it is asked for the name. Told to copy "exactly as given", it reasonably
+// echoed the WHOLE line — and an exact-string lookup then matched none of its
+// ten correct answers, so Prague built zero slides out of ten good quarters and
+// castles. An empty result from a filter is indistinguishable from "everything
+// was rejected", which is why this is checked rather than eyeballed.
+const pragueish = [
+  { nameHe: 'מאלה סטראנה' },
+  { nameHe: 'מצודת וישהראד' },
+  { nameHe: 'קוטנה הורה' },
+  { nameHe: 'סאס פורדוי - מרפסת הדולומיטים' },
+];
+eq(
+  'a name echoed with its description still matches',
+  keepByName(pragueish, ['מאלה סטראנה — הרובע הבארוקי שמתחת למצודה']).length,
+  1
+);
+eq('and a bare name matches too', keepByName(pragueish, ['מצודת וישהראד']).length, 1);
+// A place whose OWN name contains a dash reduces the same way on both sides,
+// so it still matches itself rather than being cut in half and lost.
+eq(
+  'a name with a dash in it survives the reduction',
+  keepByName(pragueish, ['סאס פורדוי - מרפסת הדולומיטים'])[0]?.nameHe,
+  'סאס פורדוי - מרפסת הדולומיטים'
+);
+eq('a name nobody asked for stays out', keepByName(pragueish, ['מאלה סטראנה']).length, 1);
+eq('and asking for nothing keeps nothing', keepByName(pragueish, []).length, 0);
 
 // "/deck Italy mountains" must not fail on the plural.
 eq('a plural resolves to the registry name', canonicalKind('mountains'), 'mountain');

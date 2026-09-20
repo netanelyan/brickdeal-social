@@ -63,7 +63,8 @@ const KEEP_SCHEMA = {
   properties: {
     keep: {
       type: 'array',
-      description: 'The names to keep, copied exactly as given, in the order given.',
+      description:
+        'The NAME of each entry to keep, in the order given. The name only - the part before the dash, without the description that follows it.',
       items: { type: 'string' },
     },
     why: { type: 'string', description: 'Under fifteen words, English, on what was dropped and why' },
@@ -143,6 +144,29 @@ answer and often the right one: this page may simply not be about that subject.
 Do not pad the list to make it look useful.`;
 
 /**
+ * The entries whose names the model asked to keep.
+ *
+ * Both sides are reduced to the name before any dash, because the entries go
+ * out as "name — description" and come back in whichever of those two shapes
+ * the model felt was meant by "the name". A place whose own name contains a
+ * dash — "סאס פורדוי - מרפסת הדולומיטים" — reduces the same way on both sides,
+ * so it still matches itself.
+ *
+ * Separate and exported because the failure it prevents is invisible: an
+ * exact-string lookup against the wrong shape returns an empty list, which is
+ * indistinguishable from "the model rejected everything", and Prague shipped
+ * zero slides out of ten good ones before anybody noticed.
+ */
+export function keepByName(places, names) {
+  const head = (s) =>
+    String(s || '')
+      .split(/\s+[—–-]\s+/)[0]
+      .trim();
+  const keep = new Set((names || []).map(head).filter(Boolean));
+  return places.filter((p) => keep.has(head(p.nameHe)) || keep.has(String(p.nameHe).trim()));
+}
+
+/**
  * Which of these entries are actually places, and of the kind this deck wants.
  *
  * One call per deck, on the shortlist, before anything is drafted or any
@@ -185,8 +209,18 @@ export async function keepVisitable(places, { where, kind = null }) {
   const text = res.content.find((b) => b.type === 'text')?.text;
   if (!text) return places;
 
-  const keep = new Set((JSON.parse(text).keep || []).map((s) => String(s).trim()));
-  const kept = places.filter((p) => keep.has(String(p.nameHe).trim()));
+  // Matched on the NAME, however much of the line came back.
+  //
+  // The entries are handed over as "name — description" so the subject can be
+  // judged, and asked for by name. A model that echoes the whole line instead
+  // is not wrong about anything that matters, but an exact-string lookup finds
+  // none of its answers and the deck silently becomes empty — which is what
+  // happened to Prague: ten good quarters and castles kept, Kutná Hora
+  // correctly dropped as a separate town, and zero slides built.
+  //
+  // A filter must never fail CLOSED because of a formatting detail, so the name
+  // is taken off the front of whatever came back rather than demanded whole.
+  const kept = keepByName(places, JSON.parse(text).keep || []);
 
   // With no subject asked for, a filter that removes everything has
   // misunderstood the list rather than found it all unusable, and an empty deck

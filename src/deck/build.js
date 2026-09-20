@@ -1049,12 +1049,32 @@ export async function buildDeck(idea, { wantImages = true } = {}) {
   const pageFields = hasFields(idea.kind);
   const wikiFields = (WIKIDATA_FIELDS[idea.kind] || []).length > 0;
 
+  // A map route that cannot run must not take a working site deck down with it.
+  //
+  // shortlist() throws when Overpass has nothing to say, and "nothing to say"
+  // covers both "this region has no waterfalls" and "all three mirrors are
+  // returning 504", which is what they were doing the afternoon this was
+  // written. Before the short circuit above was tightened, a site deck of three
+  // or more never reached this line; now it does, and one throw here threw away
+  // six perfectly good Prague places and sent the whole request off to Vienna.
+  //
+  // So the map is best-effort from here on. If it fails and we have anything
+  // from the site, that is the deck. If we have nothing either, the throw is
+  // the honest answer and the caller's fallback ladder is the right place for
+  // it.
   const pool = await shortlist({
     where: idea.where,
     kind: idea.kind,
     want: idea.want,
     requireAuthority: pageFields && !wikiFields,
+  }).catch((e) => {
+    if (fromSite?.slides.length) {
+      console.error(`deck: map route unavailable, keeping the ${fromSite.slides.length}-slide site deck — ${e.message}`);
+      return null;
+    }
+    throw e;
   });
+  if (!pool) return fromSite;
 
   const slides = [];
   const dropped = [];
