@@ -226,7 +226,7 @@ Requires Node 18+ (developed on 24) and no build step.
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env      # then fill it in
-npm test                  # 479 offline checks, no credentials needed
+npm test                  # 744 offline checks, no credentials needed
 npm run check-sources     # probe every feed
 npm run eval-feed <url>   # size up a feed before adding it
 npm run run-once          # a full pass, printed to the terminal, publishes nothing
