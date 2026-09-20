@@ -154,7 +154,29 @@ sudo -u tiyul npm run deck-once -- "Dolomites mountain"
 measurement and the renderer together. If it writes slides into `out/decks/`,
 the hard part of this deployment is done.
 
-## 7. systemd
+## 7. Keeping it running
+
+> **What the live box actually does, as of 2026-09-20.** The production host
+> runs this under **pm2 as root from `/opt/tiyul-social`**, not under systemd
+> from `/srv/tiyul/app`. The unit file below describes the intended shape and is
+> still the better one — it drops privileges, caps memory and isolates the
+> filesystem, none of which pm2 is doing here — but it is not what is running,
+> and a deploy that follows this file to the letter will end up with two copies
+> of the bot long-polling the same Telegram token. Reconcile before you follow
+> the section below.
+>
+> The commands for what is actually there:
+>
+> ```bash
+> pm2 list                 # tiyul should be `online`
+> pm2 restart tiyul
+> pm2 logs tiyul --lines 50
+> pm2 save                 # persist the process list across reboots
+> ```
+>
+> Note also that pm2 does not read `.env` for you the way `EnvironmentFile`
+> does — `src/env.js` loads it from the working directory, which is why
+> `exec cwd` must stay `/opt/tiyul-social`.
 
 `/etc/systemd/system/tiyul.service`:
 
@@ -213,6 +235,21 @@ domain:
   developer portal, or every post fails with `url_ownership_unverified`.
 - `TIKTOK_REDIRECT_URI` must match what is registered there character for
   character, trailing slash included.
+
+Set `TIKTOK_VERIFIED_DOMAINS` to whatever you verified there. It is checked
+before init, and an image on any other domain is refused by name rather than
+handed over — because TikTok's answer to an unverified host is not reliably an
+error, it can simply decline to fetch, and that surfaces as a post stuck in
+`PROCESSING` and looks like nothing at all. Left unset it falls back to the host
+of the first card base URL, which is right while there is only one; the moment
+you add a second via `CARD_PUBLIC_BASE_URLS`, set it explicitly or the new host
+will be refused.
+
+`npm run dry-run` exercises all of this — config, token, `creator_info`, the
+privacy level, the domain preflight and the 24h cap — and stops at the one call
+that would create a post. It points `STORE_PATH` at a copy of `data/store.json`
+first, so it is safe to run while the bot is live. Run it after any change to
+the card host or the TikTok app.
 
 Then `npm run tiktok-token` as the service user, so the token pair lands in
 `data/store.json` — where it is refreshed, because the access token lasts about

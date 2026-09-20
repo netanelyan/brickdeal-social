@@ -265,10 +265,27 @@ fetches the card image from a public URL rather than receiving bytes.
 
 ### Commands in the bot
 
-`/run` gather now · `/redo` forget what was seen and re-run, for testing a change
-· `/status` · `/usage` tokens and cost · `/igquota` · `/tiktok` connection,
-tokens and available privacy levels · `/mix` topic balance · `/why` last run's
-rejections · `/queue` `/next` `/pending`
+`/run` gather now · `/run 7` gather more than the daily target, overriding the
+quotas and reporting each one it stepped over · `/redo` forget what was seen and
+re-run, for testing a change · `/status` · `/health` every destination
+separately, with its last error · `/usage` tokens and cost · `/igquota` ·
+`/tiktok` connection, tokens and available privacy levels · `/sources` every
+feed with its last success and error, `/sources off <id>` to stand one down ·
+`/mix` topic balance · `/why` last run's rejections · `/queue` `/next`
+`/pending`
+
+**The owner is not rate-limited by any of this.** Every guard here — the topic
+quotas, the dedupe window, the daily target, the drip interval — protects the
+feed from the pipeline, not from the person who owns it, who can already publish
+anything by hand. So an owner-triggered post steps over all of them. What it
+does not do is step over them quietly: each bypass is recorded with the
+measurement that would have blocked it, shown on the approval card before you
+tap, and sent again before the post goes out. Two Dolomites decks back to back
+is a decision the bot will carry out and name.
+
+Platform limits are a different category and are never bypassed. TikTok allows
+an unaudited client five posts a day; the sixth is held, not failed, and the
+message says when the slot frees.
 
 ## Layout of the code
 
@@ -302,8 +319,16 @@ faithfully repeat FCDO being wrong. "Verified" here means *traceable*.
 summarises two sentences into one loses the whole draft. Better to re-run than
 to loosen it: a fuzzy quote match is indistinguishable from no check at all.
 
-**Twenty-one of forty-three declared sources work.** The rest are off with the
-probe result recorded. The two most wanted are `gov.il` and the Israel Airports
+**Twenty-one of fifty-four declared sources work.** The rest are off with the
+probe result recorded. A further eleven were probed on 2026-09-20 — Smartraveller,
+USGS, the NHC, WHO, the Met Office, Canada, NPS, TfL, Go Tokyo, Visit Malta and
+Turismo Roma — and not one cleared the bar: two 404s, three empty shells, one
+feed abandoned in 2019, one stale since February, one timeout, and USGS, whose
+109 fresh items all link to a JavaScript application that serves 155 characters
+of "supported browsers" to a fetcher. `npm run find-feeds <site>` was written
+during that pass and reads a site's declared `<link rel="alternate">` instead of
+guessing paths; it is the reason the Malta and Roma feeds were found at all,
+both of which then turned out to be empty. The two most wanted are `gov.il` and the Israel Airports
 Authority, both behind Imperva. There is now a real browser fetch
 (`src/browserFetch.js`), written to get past UNESCO's 403 — whether it is enough
 for Imperva, which is a considerably more determined wall, is untested. Most
