@@ -717,7 +717,56 @@ bot.command('held', (ctx) => {
   const lines = rows.map(
     (h, i) => `${i + 1}. ${h.cand.headline}\n   חסר: ${targetsHe(h.targets)}${h.error ? `\n   ${h.error}` : ''}`
   );
-  ctx.reply([`⏸️ ${rows.length} פוסטים מוחזקים:`, '', ...lines, '', '/retry כדי לנסות שוב'].join('\n'));
+  ctx.reply(
+    [
+      `⏸️ ${rows.length} פוסטים מוחזקים:`,
+      '',
+      ...lines,
+      '',
+      '/retry כדי לנסות שוב · /clear_held כדי לוותר עליהם',
+    ].join('\n')
+  );
+});
+
+/**
+ * Give up on the held backlog, and un-degrade the destinations it was stuck on.
+ *
+ * /retry is the "I have fixed it" signal and it assumes the held cards can
+ * succeed once the destination is back. Some cannot: a card is frozen at
+ * approval with what its destinations said then, and for TikTok that includes
+ * the privacy level, which is read once at staging and never again. A card
+ * approved while TikTok was unreachable has none, so it fails the instant it
+ * is picked up — and /retry re-enqueues it verbatim, so it fails identically
+ * every time while re-degrading TikTok behind it.
+ *
+ * Clearing the degraded flag is itself something only /retry does, so without
+ * this there is no way out of that loop: every attempt to un-block the
+ * destination drags the unpublishable cards back in with it.
+ *
+ * What is discarded is only what a destination still OWED. Every target that
+ * already published did so before the card was held, so nothing that went out
+ * is affected — only the copy that was never going to be made.
+ */
+bot.command('clear_held', async (ctx) => {
+  const rows = store.heldItems();
+  if (!rows.length) return ctx.reply('✅ אין פוסטים מוחזקים');
+
+  const lost = new Set();
+  for (const h of rows) for (const t of h.targets) lost.add(t);
+
+  const n = store.clearHeld();
+  // The point of the command. Un-degrading is what lets the NEXT post reach
+  // the destination, and it is the half that /retry could not deliver on its
+  // own here.
+  for (const t of publishTargets()) store.clearDegraded(t);
+
+  await ctx.reply(
+    [
+      `🗑️ ${n} פוסטים מוחזקים נמחקו.`,
+      `ויתרנו על: ${targetsHe([...lost])}`,
+      'מה שכבר פורסם נשאר. כל היעדים סומנו כתקינים - הפוסט הבא ינסה מחדש.',
+    ].join('\n')
+  );
 });
 
 /**
@@ -999,6 +1048,7 @@ bot.command('help', (ctx) =>
       '/pending /queue /next',
       '/held — פוסטים מאושרים שממתינים ליעד שנפל',
       '/retry — אחרי שתיקנת: מחזיר אותם לתור',
+      '/clear_held — מוותר על המוחזקים ומסמן את היעדים כתקינים',
       '/why [n] — מה נפסל ולמה',
       '/mix — תמהיל הנושאים שפורסמו',
       '/sources — רשימת המקורות',

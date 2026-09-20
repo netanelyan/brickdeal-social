@@ -769,6 +769,31 @@ group('a blocked destination must not be silently abandoned');
   eq('the card itself survives intact', released[0].cand.headline, 'כותרת');
 }
 
+// Not every held post CAN be retried, which is why there is a way to give up.
+//
+// A card is frozen at approval with whatever its destinations said then, and
+// for TikTok that includes the privacy level - attached once by creator_info at
+// staging and never re-read. A card approved while TikTok was unreachable
+// carries none, so it throws the instant it is picked up, and /retry cannot
+// help: it re-enqueues the stored candidate verbatim, so the same card fails
+// the same way forever while re-degrading the destination behind it. Clearing
+// the degraded flag is itself only something /retry does, so without this there
+// is no exit from that loop.
+{
+  const frozen = { id: 'poisoned-probe', headline: 'בלי רמת פרטיות', pillar: 'fact', tags: [], layout: 'numbers' };
+  store.hold(frozen, ['tiktok'], 'no privacy level was chosen at approval');
+  store.hold({ ...frozen, id: 'poisoned-probe-2' }, ['tiktok'], 'no privacy level was chosen at approval');
+  eq('two unpublishable cards are held', store.heldCount(), 2);
+
+  eq('/clear_held reports what it discarded', store.clearHeld(), 2);
+  eq('and the backlog is gone', store.heldCount(), 0);
+  // The distinction that makes this safe to offer: a held row lists only what a
+  // destination still OWES. Whatever already published did so before the card
+  // was held, so giving up on the row cannot unpublish anything.
+  eq('nothing is left to release afterwards', store.releaseHeld().length, 0);
+  eq('and clearing an empty backlog is a no-op', store.clearHeld(), 0);
+}
+
 // Reaching the second destination later must not count the post twice.
 {
   const id = 'partial-publish-probe';

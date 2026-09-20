@@ -490,6 +490,30 @@ export function releaseHeld() {
   return rows;
 }
 
+/**
+ * Throw everything held away. Returns how many went.
+ *
+ * The opposite of releaseHeld, and it exists because not every held post CAN
+ * be retried. A card is frozen at approval with whatever its destinations said
+ * at the time — for TikTok that includes the privacy level, which is attached
+ * once and never re-read. A card approved while TikTok was unreachable carries
+ * no privacy level, so it fails the moment it is picked up, and /retry cannot
+ * help: it re-enqueues the stored candidate verbatim, so the same card fails
+ * the same way forever while re-degrading the destination behind it.
+ *
+ * That is a small trap with no exit, because clearing the degraded flag is
+ * what /retry does and /retry also drags the unpublishable cards back in. This
+ * is the exit. It only ever discards what a destination still OWES — the
+ * targets that already published are long gone from this row — so the post
+ * itself is not lost, only the copy that was never going to be made.
+ */
+export function clearHeld() {
+  const n = state.held.length;
+  state.held = [];
+  save();
+  return n;
+}
+
 // --- Instagram token ---------------------------------------------------------
 // The Instagram Login path issues 60-day tokens that must be refreshed. The
 // refreshed value has to outlive the process, or every restart would fall back
