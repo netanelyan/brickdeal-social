@@ -55,6 +55,12 @@ const empty = {
   // succeeding while Instagram is blocked looks identical to a healthy day.
   // { instagram: { failures, lastError, lastFailAt, lastOkAt, degraded } }
   targetHealth: {},
+  // The same, per source feed. A dead feed should stand itself down rather than
+  // costing a timeout on every run forever — see noteSourceFailed.
+  sourceHealth: {},
+  // Sources switched off from Telegram rather than in sources.json. Keyed by
+  // id, valued with when it happened.
+  sourceOff: {},
   // Approved cards that could not reach a destination and are waiting for it to
   // come back, rather than being dropped. /retry replays them.
   held: [],
@@ -114,6 +120,8 @@ function load() {
   if (!Array.isArray(s.published)) s.published = [];
   if (!Array.isArray(s.held)) s.held = [];
   if (!s.targetHealth || typeof s.targetHealth !== 'object') s.targetHealth = {};
+  if (!s.sourceHealth || typeof s.sourceHealth !== 'object') s.sourceHealth = {};
+  if (!s.sourceOff || typeof s.sourceOff !== 'object') s.sourceOff = {};
 
   // Migration for stores written before publishedIds existed. Backfill from the
   // quota window — it is the only record of what went out, and recovering the
@@ -566,6 +574,119 @@ export function clearDegraded(target) {
 
 /** Every destination we hold a health record for. */
 export const healthTargets = () => Object.keys(state.targetHealth);
+
+// --- per-source health -------------------------------------------------------
+//
+// The same shape as targetHealth, for the same reason and a different failure.
+//
+// gather() already survives a dead feed: every source runs under allSettled and
+// a rejection is tallied rather than thrown. What it could not do is REMEMBER.
+// A feed that has been 404 for three weeks was fetched on every run, timed out,
+// and reported in the digest next to the genuinely new failures — so the one
+// line that meant "this broke today" sat in a list of lines that meant "this
+// broke last month", which is how a source registry rots without anyone
+// noticing. Twenty-one enabled feeds fetched every two hours is also twenty-one
+// chances to spend twenty seconds of timeout on something known to be gone.
+//
+// So a source that fails repeatedly is stood down, and — exactly like a
+// destination — it is stood down with an expiry rather than a latch, because
+// feeds come back and nobody should have to notice that they have.
+
+const SOURCE_DEGRADE_AFTER = () => Math.max(1, Number(process.env.SOURCE_DEGRADE_AFTER ?? '3'));
+const SOURCE_RECOVER_AFTER_MS = () =>
+  Math.max(0, Number(process.env.SOURCE_RECOVER_AFTER_MIN ?? '360')) * 60_000;
+const SOURCE_RECOVER_MAX_MS = () =>
+  Math.max(1, Number(process.env.SOURCE_RECOVER_MAX_MIN ?? '2880')) * 60_000;
+
+const sourceHealthOf = (id) =>
+  state.sourceHealth?.[id] || {
+    failures: 0,
+    lastError: null,
+    lastFailAt: null,
+    lastOkAt: null,
+    lastItems: null,
+    degraded: false,
+  };
+
+export const sourceHealth = (id) => ({ ...sourceHealthOf(id) });
+export const sourceHealthAll = () => ({ ...(state.sourceHealth || {}) });
+
+export function noteSourceOk(id, items = 0) {
+  if (!state.sourceHealth) state.sourceHealth = {};
+  state.sourceHealth[id] = {
+    ...sourceHealthOf(id),
+    failures: 0,
+    lastError: null,
+    lastOkAt: Date.now(),
+    lastItems: items,
+    degraded: false,
+  };
+  save();
+}
+
+export function noteSourceFailed(id, error) {
+  if (!state.sourceHealth) state.sourceHealth = {};
+  const prev = sourceHealthOf(id);
+  const failures = prev.failures + 1;
+  const degraded = failures >= SOURCE_DEGRADE_AFTER();
+  state.sourceHealth[id] = {
+    ...prev,
+    failures,
+    lastError: error ? String(error).slice(0, 300) : null,
+    lastFailAt: Date.now(),
+    degraded,
+  };
+  save();
+  return { ...state.sourceHealth[id], justDegraded: degraded && !prev.degraded };
+}
+
+function sourceRecoveryDelayMs(id) {
+  const base = SOURCE_RECOVER_AFTER_MS();
+  if (base <= 0) return 0;
+  const over = Math.max(0, sourceHealthOf(id).failures - SOURCE_DEGRADE_AFTER());
+  return Math.min(base * 2 ** over, SOURCE_RECOVER_MAX_MS());
+}
+
+/** When a stood-down source is next due a try, or null if it is not stood down. */
+export function sourceRecoveryDueAt(id) {
+  const h = sourceHealthOf(id);
+  if (!h.degraded || !h.lastFailAt) return null;
+  return h.lastFailAt + sourceRecoveryDelayMs(id);
+}
+
+/** Should this run skip the source? False once its cooldown has elapsed. */
+export function isSourceDegraded(id) {
+  const h = sourceHealthOf(id);
+  if (!h.degraded) return false;
+  const due = sourceRecoveryDueAt(id);
+  if (due !== null && Date.now() >= due) return false;
+  return true;
+}
+
+export const isSourceDegradedLatched = (id) => Boolean(sourceHealthOf(id).degraded);
+
+export function clearSourceDegraded(id) {
+  if (!state.sourceHealth?.[id]) return;
+  state.sourceHealth[id] = { ...sourceHealthOf(id), failures: 0, degraded: false };
+  save();
+}
+
+// --- per-source manual switch -------------------------------------------------
+//
+// sources.json already has `enabled`, and it stays the place a source is
+// declared on or off for good — with the probe result in its `note`, which is
+// the half that makes the registry worth reading. This is the other thing:
+// turning one off RIGHT NOW, from Telegram, without editing a file on the
+// server and restarting the bot. A feed that starts publishing something it
+// should not is a thing you want stopped in ten seconds.
+export function setSourceEnabled(id, on) {
+  if (!state.sourceOff || typeof state.sourceOff !== 'object') state.sourceOff = {};
+  if (on) delete state.sourceOff[id];
+  else state.sourceOff[id] = Date.now();
+  save();
+}
+export const isSourceOff = (id) => Boolean(state.sourceOff?.[id]);
+export const sourcesOff = () => Object.keys(state.sourceOff || {});
 
 // --- held posts --------------------------------------------------------------
 //

@@ -15,6 +15,7 @@
     "preview": "node scripts/preview.js",
     "check-sources": "node scripts/check-sources.js",
     "eval-feed": "node scripts/eval-feed.js",
+    "find-feeds": "node scripts/find-feeds.js",
     "check-cards": "node scripts/check-cards.js",
     "ig-token": "node scripts/ig-token.js",
     "tiktok-token": "node scripts/tiktok-token.js",

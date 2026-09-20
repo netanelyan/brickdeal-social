@@ -989,11 +989,77 @@ bot.command('clear_pending', (ctx) => {
   ctx.reply(`🧹 נוקו ${n} פריטים ממתינים`);
 });
 
+/**
+ * The registry, with how each feed is actually behaving.
+ *
+ * `/sources` lists them; `/sources off <id>` and `/sources on <id>` switch one
+ * without editing sources.json on the server and restarting. The declaration in
+ * the file stays the place a source is turned off FOR GOOD, with its probe
+ * result recorded; this is the switch for right now.
+ */
 bot.command('sources', (ctx) => {
   const { sources } = registry();
-  const on = sources.filter((s) => s.enabled).map((s) => `✅ ${s.id} — ${s.name}`);
+  const parts = (ctx.message?.text || '').trim().split(/\s+/);
+  const verb = parts[1]?.toLowerCase();
+  const id = parts[2];
+
+  if (verb === 'on' || verb === 'off') {
+    if (!id) return ctx.reply(`שימוש: /sources ${verb} <id>`);
+    const src = sources.find((s) => s.id === id);
+    if (!src) return ctx.reply(`אין מקור בשם "${id}" — /sources לרשימה`);
+    if (verb === 'on' && !src.enabled) {
+      return ctx.reply(
+        `"${id}" מוצהר כבוי ב-sources.json ולא ניתן להדליק אותו מכאן.\nהסיבה שנרשמה: ${src.note?.split('.')[0] || '—'}`
+      );
+    }
+    store.setSourceEnabled(id, verb === 'on');
+    if (verb === 'on') store.clearSourceDegraded(id);
+    return ctx.reply(verb === 'on' ? `✅ "${id}" הודלק` : `⬜ "${id}" כובה (זמנית, עד /sources on ${id})`);
+  }
+
+  const mark = (s) => {
+    if (store.isSourceOff(s.id)) return '⏸️';
+    if (store.isSourceDegradedLatched(s.id)) return '🔴';
+    const h = store.sourceHealth(s.id);
+    if (h.failures) return '🟡';
+    return '✅';
+  };
+
+  const on = sources
+    .filter((s) => s.enabled)
+    .map((s) => {
+      const h = store.sourceHealth(s.id);
+      const bits = [`${mark(s)} ${s.id}`];
+      if (h.lastOkAt) bits.push(`${h.lastItems ?? '?'} פריטים לפני ${notify.humanDuration(Date.now() - h.lastOkAt)}`);
+      else if (h.failures) bits.push('עוד לא הצליח');
+      if (store.isSourceDegradedLatched(s.id)) {
+        const due = store.sourceRecoveryDueAt(s.id);
+        bits.push(
+          `הושבת אחרי ${h.failures} כשלונות` +
+            (due ? `, ניסיון חוזר בעוד ${notify.humanDuration(Math.max(0, due - Date.now()))}` : '')
+        );
+      } else if (h.failures) {
+        bits.push(`${h.failures} כשלונות ברצף`);
+      }
+      const line = bits.join(' · ');
+      return h.lastError && (h.failures || store.isSourceDegradedLatched(s.id))
+        ? `${line}\n     ⛔ ${h.lastError.slice(0, 120)}`
+        : line;
+    });
+
   const off = sources.filter((s) => !s.enabled).map((s) => `⬜ ${s.id} — ${s.note?.split('.')[0] || 'כבוי'}`);
-  ctx.reply(['📚 מקורות', ...on, '', 'כבויים:', ...off].join('\n'));
+
+  ctx.reply(
+    [
+      `📚 מקורות — ${enabledSources().length} פעילים מתוך ${sources.length} מוצהרים`,
+      ...on,
+      '',
+      'מוצהרים כבויים:',
+      ...off,
+      '',
+      '/sources off <id> · /sources on <id>',
+    ].join('\n')
+  );
 });
 
 bot.command('mix', (ctx) => ctx.reply(notify.mixReport(store.recentPublished())));

@@ -19,7 +19,19 @@ export function registry() {
   return cached;
 }
 
-export const enabledSources = () => registry().sources.filter((s) => s.enabled);
+/**
+ * Sources that are on.
+ *
+ * Two switches, deliberately separate. `enabled` in sources.json is the
+ * declaration — off for good, with the probe result in its `note`, which is the
+ * half that makes the registry worth reading. The store's switch is the other
+ * kind: off right now, from Telegram, without editing a file on the server.
+ */
+export const enabledSources = () =>
+  registry().sources.filter((s) => s.enabled && !store.isSourceOff(s.id));
+
+/** Everything declared, whatever state it is in — for reporting. */
+export const allSources = () => registry().sources.slice();
 export const sourceById = (id) => registry().sources.find((s) => s.id === id) || null;
 
 /**
@@ -60,9 +72,35 @@ export async function gather({ climateLimit = 2, now = new Date() } = {}) {
   const items = [];
   const errors = [];
   const perSource = {};
+  const skipped = [];
+
+  // Resolved ONCE and indexed from that array. It used to be called again
+  // inside the result loop — `enabledSources()[i]` — which was correct only
+  // because the registry is cached and the list could not change mid-run. It
+  // can now: a source stood down or switched off between the two calls would
+  // have shifted every index after it, and attributed each feed's items to its
+  // neighbour. A silent mis-attribution is a bad thing to leave lying around.
+  const live = [];
+  for (const source of enabledSources()) {
+    // A feed that has failed repeatedly is not fetched again until its cooldown
+    // has elapsed. It is not dropped — after the cooldown exactly one run tries
+    // it, and a success clears the whole record.
+    if (store.isSourceDegraded(source.id)) {
+      const due = store.sourceRecoveryDueAt(source.id);
+      skipped.push({
+        sourceId: source.id,
+        name: source.name,
+        failures: store.sourceHealth(source.id).failures,
+        retryAt: due,
+      });
+      perSource[source.id] = 0;
+      continue;
+    }
+    live.push(source);
+  }
 
   const settled = await Promise.allSettled(
-    enabledSources().map(async (source) => {
+    live.map(async (source) => {
       if (source.kind === 'rss') {
         const got = await fetchFeed(source);
         return { source, got };
@@ -79,18 +117,29 @@ export async function gather({ climateLimit = 2, now = new Date() } = {}) {
   );
 
   for (let i = 0; i < settled.length; i++) {
-    const source = enabledSources()[i];
+    const source = live[i];
     const r = settled[i];
     if (r.status === 'fulfilled') {
       perSource[source.id] = r.value.got.length;
       items.push(...r.value.got);
+      store.noteSourceOk(source.id, r.value.got.length);
     } else {
+      const message = r.reason?.message || String(r.reason);
       perSource[source.id] = 0;
-      errors.push({ sourceId: source.id, name: source.name, message: r.reason?.message || String(r.reason) });
+      const health = store.noteSourceFailed(source.id, message);
+      errors.push({
+        sourceId: source.id,
+        name: source.name,
+        message,
+        failures: health.failures,
+        // The edge, so the caller can say "this one has now been stood down"
+        // once rather than repeating a count nobody reads.
+        justDegraded: health.justDegraded,
+      });
     }
   }
 
-  return { items, errors, perSource };
+  return { items, errors, perSource, skipped };
 }
 
 // Climate is a pull, not a feed, so it needs its own rotation: walk the
