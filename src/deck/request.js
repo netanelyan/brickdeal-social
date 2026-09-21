@@ -32,7 +32,7 @@ const SCHEMA = {
     where: {
       type: 'string',
       description:
-        'The region to search, in English, as a place a map would know: "Prague", "Dolomites", "Bernese Alps", "Kyoto". Narrow enough to have a bounding box worth searching - a country is acceptable only when the deck really is country-wide.',
+        'The region to search, in English, as a place a map would know: "Prague", "Dolomites", "Austria", "Kyoto". WHATEVER THE REQUEST NAMED - a country stays a country. Choose a region yourself only when the request names nowhere a map could resolve.',
     },
     kind: { type: 'string', enum: kindIds(), description: 'Which category of place this deck is made of' },
     want: { type: 'integer', description: 'How many places the deck should carry, 4 to 7' },
@@ -65,11 +65,20 @@ from the list, every time.
 
 THE REGION
 
-It has to be somewhere OpenStreetMap has a bounding box for, and small enough
-that the places inside it belong on one list. "The Alps" is a real answer;
-"Europe" is not. When a country is named and it is large, narrow to the part
-travellers mean: Italy + mountains is the Dolomites, Japan + temples is Kyoto,
-Switzerland + peaks is the Bernese Alps.
+USE THE REGION THE REQUEST NAMES. If it names a country, the region is that
+country. Do not substitute a smaller one you believe is meant: "Austria" is
+Austria, not Tyrol, and "Italy" is Italy, not the Dolomites.
+
+This rule used to run the other way — a named country was narrowed to the part
+travellers mean — and it was wrong about who is being served. The person typing
+the request runs the channel and has already decided where the deck is set. A
+resolver that improves on that is overruling the only person who knows what the
+post is for, silently, on the one field they were most explicit about.
+
+Narrow ONLY when the request names nothing a map can resolve: a mood, a
+continent, "somewhere warm", "a nice trip". Then choose the smallest region
+that honestly answers it, and name that region in the title so the substitution
+is visible in the thing that gets published.
 
 THE CATEGORY
 
@@ -141,7 +150,7 @@ export async function resolveRequest(arg, { today = new Date() } = {}) {
           '',
           `REQUEST: ${arg}`,
           local
-            ? `\nA plain reading of that gives region "${local.where}", category "${local.kind}". Use it unless the region is too broad to search, in which case narrow it.`
+            ? `\nA plain reading of that gives region "${local.where}", category "${local.kind}". Use it. The region was named, and it is not yours to improve on.`
             : '\nIt does not name a category outright. Work out what was meant.',
         ].join('\n'),
       },

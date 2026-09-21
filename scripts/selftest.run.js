@@ -19,6 +19,8 @@ import { renderSlideHtml, SIZES, sizeClass, INK_LUMINANCE, FACES } from '../src/
 import { renderInstagramSlideHtml } from '../src/render/deckInstagram.js';
 import { sizesFor } from '../src/deck/candidate.js';
 import { sentToDrafts } from '../src/notify.js';
+import { normaliseIdea } from '../src/deck/ideas.js';
+import { readFileSync } from 'node:fs';
 import { SCRIM_INK } from '../src/render/theme.js';
 import {
   lengthValue,
@@ -37,7 +39,6 @@ import { rotationFor, oneClause, emphasisFrom, COVER_SHAPES, COVER_VOICES } from
 import { deckPlace, namesPlace, REGIONS } from '../src/deck/region.js';
 import { __test as photoTest, scrimAlpha, underScrim } from '../src/render/photo.js';
 import { deckId } from '../src/deck/candidate.js';
-import { normaliseIdea } from '../src/deck/ideas.js';
 import { sameSite } from '../src/search.js';
 import { authorityDomains, KINDS } from '../src/sources/places.js';
 import { pick, CATEGORY_HE, canonicalKind } from '../src/sources/tiyulplus.js';
@@ -604,6 +605,29 @@ eq(
   capRows.filter((p) => p.tiktok && !p.tiktokDraft).length,
   1
 );
+
+// The proposal carries the CONTENT, not just a title. Deciding on a deck from
+// its headline alone is deciding on a headline, and the list is the post.
+const withPlaces = normaliseIdea({
+  title_he: 'טופ 5 הרים יפים באוסטריה',
+  where: 'Austria',
+  kind: 'trail',
+  want: 5,
+  places_he: ['גרוסגלוקנר', 'דכשטיין'],
+});
+eq('the planned places survive normalisation', withPlaces.places.join(','), 'גרוסגלוקנר,דכשטיין');
+eq('a long list is clamped', normaliseIdea({ title_he: 't', where: 'Austria', kind: 'trail', want: 5, places_he: Array(20).fill('x') }).places.length, 8);
+// An older idea, or a model that omitted the field, must not throw — the
+// proposal simply shows no list.
+eq('an idea without places is still usable', normaliseIdea({ title_he: 't', where: 'Austria', kind: 'trail', want: 5 }).places.length, 0);
+
+// A named region is used as named. This used to narrow a country to "the part
+// travellers mean" — Austria became Tyrol — which overruled the one field the
+// request was most explicit about, silently.
+const req = readFileSync(new URL('../src/deck/request.js', import.meta.url), 'utf8');
+ok('the resolver is told to use the region as named', /USE THE REGION THE REQUEST NAMES/.test(req));
+ok('and the old narrowing instruction is gone', !/narrow to the part\s+travellers mean/.test(req));
+ok('the schema no longer discourages a country', !/a country is acceptable only when/.test(req));
 
 /* -------------------------------------------------------------------------- */
 group('ranking — the two misfires found against live feeds');

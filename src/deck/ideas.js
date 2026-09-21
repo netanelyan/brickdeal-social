@@ -62,8 +62,13 @@ const IDEAS_SCHEMA = {
               'English search terms for finding each place page on an official site: the words that would appear in a title about the place, e.g. ["opening hours", "tickets", "visit"].',
             items: { type: 'string' },
           },
+          places_he: {
+            type: 'array',
+            description: 'The places the deck would carry, in Hebrew, in order, exactly `want` of them. Real, named, specific places a visitor could stand in - not categories and not districts. This is the PLAN shown to the owner before anything is built; the build sources its own places and may not find every one of these, so name the ones you are most confident actually exist and are known by these names.',
+            items: { type: 'string' },
+          },
         },
-        required: ['title_he', 'where', 'kind', 'want', 'angle_he', 'why_now', 'search_terms'],
+        required: ['title_he', 'where', 'kind', 'want', 'angle_he', 'why_now', 'search_terms', 'places_he'],
         additionalProperties: false,
       },
     },
@@ -428,8 +433,13 @@ const TITLE_SCHEMA = {
       description: 'English words likely to appear in the title of an official page about such a place',
       items: { type: 'string' },
     },
+    places_he: {
+      type: 'array',
+      description: 'The places the deck would carry, in Hebrew, in order, exactly `want` of them. Real, named, specific places a visitor could stand in - not categories and not districts. This is the PLAN shown to the owner before anything is built; the build sources its own places and may not find every one of these, so name the ones you are most confident actually exist and are known by these names.',
+      items: { type: 'string' },
+    },
   },
-  required: ['title_he', 'emphasis_he', 'place_he', 'eyebrow_he', 'angle_he', 'search_terms'],
+  required: ['title_he', 'emphasis_he', 'place_he', 'eyebrow_he', 'angle_he', 'search_terms', 'places_he'],
   additionalProperties: false,
 };
 
@@ -705,6 +715,7 @@ export async function titleForRequest({ where, kind, count = 5, today = new Date
     eyebrowHe: clean(parsed.eyebrow_he),
     angleHe: clean(parsed.angle_he),
     searchTerms: (parsed.search_terms || []).map(clean).filter(Boolean).slice(0, 4),
+    places: (parsed.places_he || []).map(clean).filter(Boolean).slice(0, 8),
   };
 }
 
@@ -726,5 +737,11 @@ export function normaliseIdea(raw) {
     angleHe: clean(raw.angle_he),
     whyNow: clean(raw.why_now),
     searchTerms: (raw.search_terms || []).map(clean).filter(Boolean).slice(0, 4),
+    // The places the deck INTENDS to carry, shown on the proposal so the
+    // decision you make there is about content rather than about a title. Not
+    // a promise: the build sources its own places from the site or the map, and
+    // may not find every one of these. The approval card after the build is
+    // where the real list appears.
+    places: (raw.places_he || []).map(clean).filter(Boolean).slice(0, 8),
   };
 }

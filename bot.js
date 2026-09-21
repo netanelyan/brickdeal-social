@@ -1484,6 +1484,13 @@ function proposalMessage(idea) {
     // a line and says nothing.
     narrowedFrom(idea) ? `🗣 ביקשת "${idea.asked}" — צומצם ל-${idea.where}, אזור שמפה יכולה לחפש בו` : null,
     idea.whyNow ? `🗓 ${idea.whyNow}` : null,
+    // The content, so the decision here is about the post rather than about a
+    // headline. This is the PLAN: the build sources its own places from the
+    // site or the map and may not find every one of them, which is why the
+    // last line says so rather than letting you discover it at the album.
+    idea.places?.length ? '────────────' : null,
+    ...(idea.places || []).map((p, i) => `${i + 1}. ${p}`),
+    idea.places?.length ? '\n(רשימה מתוכננת — הבנייה מאתרת את המקומות בפועל ויכולה להחליף חלק)' : null,
   ]
     .filter(Boolean)
     .join('\n');
