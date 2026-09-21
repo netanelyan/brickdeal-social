@@ -1887,9 +1887,14 @@ ok('evidence is grouped per slide, not flattened', deckEv.includes('המוזיא
 ok('with the page each quote came from', deckEv.includes('nm.cz'));
 
 const dcap = deckCaption(deckFixture.deck);
-ok('the caption opens with the angle, not the title', dcap.startsWith('מה פתוח'));
-ok('and lists the places in order', dcap.indexOf('1. המוזיאון') < dcap.indexOf('2. הגלריה'));
-ok('the title is not repeated - the cover slide already carries it', !dcap.includes('המוזיאונים של פראג'));
+// The title and the shoutout, nothing else. This used to carry the angle and
+// then every place, numbered — the deck retyped underneath the deck. Anyone
+// who wants the list swipes; what the description is for is saying what this
+// is and where to go next, and a wall of names pushes the only line that asks
+// for anything below the fold.
+ok('the caption is the title', dcap.startsWith('המוזיאונים של פראג'));
+ok('and does not list the places', !dcap.includes('1. המוזיאון'));
+ok('and drops the angle', !dcap.includes('מה פתוח'));
 
 // A deck publishes to Instagram and TikTok, and neither makes a caption link
 // tappable — so it asks for the bio, which is the only clickable route either

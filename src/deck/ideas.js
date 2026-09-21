@@ -208,6 +208,25 @@ ONE STRONG CLAUSE, and it may be any of these:
 Superlatives are welcome here. "הכי יפים בעולם" is a claim nobody can check and
 everybody understands, and it is exactly how this kind of page talks.
 
+THE CLAUSE HAS TO BE TRUE OF WHAT IS ACTUALLY ON THE SLIDES
+
+"שלא נראים אמיתיים" and "שנראים כמו סרט" are claims about how somewhere LOOKS.
+They belong to landscape. A deck of houses titled "מקומות בפורטוגל שלא נראים
+אמיתיים" is contradicted by its own first swipe, and the swipe is the proof —
+a cover is the one line a viewer checks against the pictures immediately.
+
+  mountain, waterfall, beach, trail
+      How it looks. Unreal, cinematic, the most beautiful, worth the walk.
+
+  museum, attraction, food
+      What it is worth and what you would do there. What is worth the ticket,
+      what is open on a Monday, where locals actually eat.
+      NEVER "does not look real" and never "like a film" - a museum does not
+      look unreal, it looks like a building, and the photograph will say so.
+
+If the strongest honest line for a category is quieter than you would like,
+take the quieter line. A cover that oversells is found out in one swipe.
+
 NEVER "פעם אחת בחיים" ON ITS OWN. It is always "פעם אחת בחיים לפחות" - the
 bare form promises the place is a one-time visit, and the point of the line is
 that it is worth going back to.
@@ -463,6 +482,122 @@ export async function reviseIdea(idea, instruction, { today = new Date() } = {})
   // replacing it with something half-formed that fails later during the build.
   if (!revised) throw new Error('the revision came back unusable — the idea is unchanged');
   return revised;
+}
+
+const FREEFORM_SCHEMA = {
+  type: 'object',
+  properties: {
+    title_he: {
+      type: 'string',
+      description:
+        'The cover, Hebrew, one short line, under 48 characters. Names where it is. Follows every cover rule in the brief, including that the clause must be true of what is on the slides.',
+    },
+    emphasis_he: {
+      type: 'string',
+      description: 'The phrase copied EXACTLY from title_he that is set in colour. Under 16 characters.',
+    },
+    where_en: {
+      type: 'string',
+      description: 'The region or country these places are in, in English, for the image search. "Norway", "Lofoten", "Iceland".',
+    },
+    country_he: { type: 'string', description: 'The country in Hebrew, as Israelis write it. Empty if they span countries.' },
+    places: {
+      type: 'array',
+      description:
+        'Five to seven real, named, specific places that answer the request. Somewhere a visitor can stand. NOT categories, NOT regions, NOT phenomena - for "northern lights in Norway" these are the towns and viewpoints people actually go to, not "the aurora".',
+      items: {
+        type: 'object',
+        properties: {
+          name_he: { type: 'string', description: 'The place in Hebrew, as Israelis write it' },
+          name_en: { type: 'string', description: 'The same place in English, as a map would know it - used to find a photograph' },
+          note_he: {
+            type: 'string',
+            description:
+              'At most four words, Hebrew, or empty. Something a photograph cannot say: "מעל הקוטב הצפוני". NOT a sentence and NOT a claim that needs checking - a free-form deck carries no sourced facts.',
+          },
+        },
+        required: ['name_he', 'name_en', 'note_he'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['title_he', 'emphasis_he', 'where_en', 'country_he', 'places'],
+  additionalProperties: false,
+};
+
+/**
+ * A deck from a request the categories cannot express.
+ *
+ * The ordinary route finds places by OpenStreetMap tag, which is why `kind` is
+ * one of seven: each maps to an Overpass query. "Northern lights" is not a kind
+ * of PLACE, so that route had nothing to map it to, picked the nearest category
+ * and silently built something else.
+ *
+ * Here the model names the places instead. What makes that acceptable is what
+ * the deck then carries: NAMES AND PHOTOGRAPHS, NO FACTS. Every fact on an
+ * ordinary slide is quoted from an official page because a wrong opening time
+ * is a wrong claim; a free-form slide claims nothing, so there is nothing to
+ * verify and nothing to get wrong.
+ *
+ * The one risk left is a place that does not exist, and the image curator
+ * already refuses that: it is told to answer 0 when it cannot confirm the
+ * photograph shows the named place, and a place with no photograph is dropped.
+ * An invented name therefore costs a slide rather than producing a false one.
+ */
+export async function freeformIdea(request, { today = new Date() } = {}) {
+  if (!hasApiKey()) throw new Error('ANTHROPIC_API_KEY is not set');
+  const asked = String(request || '').trim();
+  if (!asked) throw new Error('nothing was asked for');
+
+  const res = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 4000,
+    output_config: { effort: EFFORT, format: { type: 'json_schema', schema: FREEFORM_SCHEMA } },
+    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+    messages: [
+      {
+        role: 'user',
+        content: [
+          `TODAY: ${today.toISOString().slice(0, 10)}`,
+          "",
+          'THE REQUEST, VERBATIM:',
+          asked,
+          "",
+          'This deck is FREE FORM: the categories cannot express what was asked, so you',
+          'name the places yourself. It will carry names and photographs only - no opening',
+          'hours, no prices, no facts of any kind - so choose places that are worth looking',
+          'at and that a photograph will obviously be of.',
+          "",
+          'Answer the request as it was made. Do not substitute a nearby subject you find',
+          'easier: a request for the northern lights is about where to see them.',
+        ].join('\n'),
+      },
+    ],
+  });
+
+  recordUsage(res.usage, MODEL);
+  if (res.stop_reason === 'refusal') throw new Error('free-form idea refused');
+  const text = res.content.find((b) => b.type === 'text')?.text;
+  if (!text) throw new Error('free-form idea returned no text');
+
+  const parsed = JSON.parse(text);
+  const clean = (v) => String(v || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+  const places = (parsed.places || [])
+    .map((p) => ({ nameHe: clean(p.name_he), nameEn: clean(p.name_en), noteHe: clean(p.note_he) }))
+    .filter((p) => p.nameHe && p.nameEn)
+    .slice(0, 7);
+  if (places.length < 3) throw new Error(`only ${places.length} usable places came back`);
+
+  return {
+    freeform: true,
+    asked,
+    titleHe: clean(parsed.title_he),
+    emphasisHe: clean(parsed.emphasis_he),
+    whereEn: clean(parsed.where_en),
+    countryHe: clean(parsed.country_he),
+    places,
+    want: places.length,
+  };
 }
 
 const TITLE_SCHEMA = {

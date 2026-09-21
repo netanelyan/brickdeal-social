@@ -11,7 +11,7 @@ import { primaryAuthority, enabledSources, registry } from './src/sources/index.
 import { approvalMessage, decidedMessage, evidenceReport, channelCaption, instagramCaption, tiktokCaption } from './src/format.js';
 import { renderCard, closeBrowser } from './src/render/index.js';
 import { publishTelegram, publishTelegramDeck, sendForApproval } from './src/publish/telegram.js';
-import { proposeIdeas, titleForRequest, reviseIdea } from './src/deck/ideas.js';
+import { proposeIdeas, titleForRequest, reviseIdea, freeformIdea } from './src/deck/ideas.js';
 import { buildDeck } from './src/deck/build.js';
 import { toDeckCandidate, deckTopic } from './src/deck/candidate.js';
 import { placeOverCap } from './src/pillars.js';
@@ -19,6 +19,7 @@ import { canonicalKind } from './src/sources/tiyulplus.js';
 import { KINDS } from './src/sources/places.js';
 import { resolveRequest } from './src/deck/request.js';
 import { buildWithFallback, describeAttempt } from './src/deck/attempt.js';
+import { buildFreeformDeck } from './src/deck/build.js';
 import { searchConfigured, remaining as searchRemaining, dailyBudget as searchBudget } from './src/search.js';
 import { publishInstagram, instagramConfigured, remainingQuota, refreshToken, tokenDaysLeft, authMode, describeError } from './src/publish/instagram.js';
 import {
@@ -1586,6 +1587,29 @@ bot.command('deck', async (ctx) => {
   // budget: DECKS_PER_DAY paces what arrives unasked, and asking is not that.
   // It costs one model call and builds nothing — each idea still waits for its
   // own tap.
+  // `/deck free <anything>` — a deck the seven categories cannot express.
+  //
+  // Opt-in rather than a fallback, because what it produces is a different
+  // artefact: names and photographs, no sourced facts. That is the right trade
+  // for "northern lights in Norway" and the wrong one for "museums in Prague",
+  // and the difference should be something you asked for rather than something
+  // the resolver decided when it ran out of categories.
+  const free = /^free\s+(.+)$/i.exec(arg);
+  if (free) {
+    const asked = free[1].trim();
+    await ctx.reply(`⏳ ${asked}...`);
+    detach(
+      'רעיון חופשי',
+      () =>
+        runOverridden('/deck', async () => {
+          const idea = await freeformIdea(asked);
+          await proposeDeck(idea, [], ctx.chat.id);
+        }),
+      ctx.chat.id
+    );
+    return;
+  }
+
   const wanted = Number(arg);
   if (arg && Number.isInteger(wanted) && wanted > 0) {
     const n = Math.min(wanted, 8);
@@ -1678,6 +1702,21 @@ const narrowedFrom = (idea) => {
 };
 
 function proposalMessage(idea) {
+  // A free-form idea has no category and its places are already decided, so it
+  // describes itself differently — and says what it will not carry, because
+  // "no facts" is the thing to know before approving one.
+  if (idea.freeform) {
+    return [
+      `💡 ${idea.titleHe}`,
+      `📍 ${idea.whereEn} · חופשי · ${idea.places.length} מקומות`,
+      `🗣 ביקשת "${idea.asked}"`,
+      '────────────',
+      ...idea.places.map((p, i) => `${i + 1}. ${p.nameHe}${p.noteHe ? ` (${p.noteHe})` : ''}`),
+      '',
+      '(מצגת חופשית — שמות ותמונות בלבד, בלי שעות, מחירים או עובדות מאומתות)',
+    ].join('\n');
+  }
+
   return [
     `💡 ${idea.titleHe}`,
     idea.angleHe,
@@ -1839,16 +1878,21 @@ async function buildProposal(key, chatId, messageId = null, targets = ['instagra
   };
 
   try {
-    await progress(`⏳ ${idea.titleHe}\nמחפש מקורות...`);
+    await progress(`⏳ ${idea.titleHe}\n${idea.freeform ? 'מחפש תמונות' : 'מחפש מקורות'}...`);
 
-    const built = await buildWithFallback(idea, alternatives, {
-      // Said out loud, because a deck takes minutes and silence looks like a
-      // hang. "Bernese Alps came back with two slides, trying Valais" is also
-      // the most useful thing to know afterwards.
-      onAttempt: (attempt, i, why) => {
-        if (i > 0) progress(`↩️ ${idea.titleHe}\nלא הסתדר, מנסה ${describeAttempt(attempt)}...`);
-      },
-    });
+    // A free-form deck has no sources to find — its places are already named
+    // and it carries no facts — so it goes straight to the photographs. There
+    // is no fallback ladder either, because there is no region to fall back to.
+    const built = idea.freeform
+      ? await buildFreeformDeck(idea)
+      : await buildWithFallback(idea, alternatives, {
+          // Said out loud, because a deck takes minutes and silence looks like
+          // a hang. "Bernese Alps came back with two slides, trying Valais" is
+          // also the most useful thing to know afterwards.
+          onAttempt: (attempt, i, why) => {
+            if (i > 0) progress(`↩️ ${idea.titleHe}\nלא הסתדר, מנסה ${describeAttempt(attempt)}...`);
+          },
+        });
     if (!built?.slides?.length) {
       // Still a suggestion rather than a dead end: the request was understood,
       // the region just has nothing mappable in it, and the next thing to try
@@ -2059,6 +2103,7 @@ bot.command('help', (ctx) =>
       '/deck — מציע רעיון למצגת',
       '/deck 5 — חמישה רעיונות בבת אחת (עוקף את המכסה היומית)',
       '/deck Kyoto temple — רעיון על יעד מסוים',
+      '/deck free <בקשה> — מצגת חופשית: שמות ותמונות, בלי עובדות מאומתות',
       '/deck <מקום> <קטגוריה> — מצגת מוזמנת, למשל: /deck Prague museum',
       '/tiktok — חיבור טיקטוק, טוקנים ורמות פרטיות',
       '/clear_pending',

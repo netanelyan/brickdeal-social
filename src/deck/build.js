@@ -1007,6 +1007,75 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
   };
 }
 
+/**
+ * A deck whose places the model named, because the categories could not.
+ *
+ * The ordinary routes find places by OpenStreetMap tag or off our own
+ * destination pages. Both are category-shaped, which is why `kind` is one of
+ * seven — and why "northern lights in Norway" came back as Oslo museums: there
+ * is no tag for it, so the resolver picked the nearest category and built
+ * something else.
+ *
+ * WHAT MAKES THIS SAFE IS WHAT THE SLIDES DO NOT CARRY.
+ *
+ * An ordinary slide quotes its facts from an official page, because a wrong
+ * opening time is a wrong claim. These slides carry a NAME, a PHOTOGRAPH and at
+ * most four words that a photograph cannot say. No hours, no prices, no
+ * distances. Nothing is claimed, so there is nothing to verify and nothing to
+ * get wrong — which is the only honest way to build a deck whose places were
+ * not found in a dataset.
+ *
+ * The remaining risk is a place that does not exist, and fillImages already
+ * refuses it: the curator is told to answer 0 when it cannot confirm the
+ * photograph shows the named place, and a place with no photograph is dropped.
+ * An invented name costs a slide rather than producing a false one.
+ */
+export async function buildFreeformDeck(idea, { wantImages = true } = {}) {
+  const slides = idea.places.map((p, i) => ({
+    n: i + 1,
+    nameHe: p.nameHe,
+    nameEn: p.nameEn,
+    countryHe: idea.countryHe || null,
+    // One short note at most, and only when the model offered one. Rendered by
+    // the minimal style as the parenthesised aside it already draws.
+    bullets: p.noteHe ? [{ text: p.noteHe }] : [],
+    fields: [],
+    sourceUrl: null,
+    sourceHost: 'freeform',
+  }));
+
+  const coverSlot = { image: null };
+  const built = wantImages
+    ? await fillImages(slides, idea.whereEn, { want: idea.want, cover: coverSlot, about: '' })
+    : slides;
+
+  // Dropped for the reason fillImages drops anything: no photograph that is
+  // both this place and worth looking at. On this route that doubles as the
+  // existence check.
+  const kept = built.filter((sl) => !wantImages || sl.image);
+  const dropped = slides
+    .filter((sl) => !kept.includes(sl))
+    .map((sl) => ({ place: sl.nameEn, why: sl.imageMiss || 'no photograph' }));
+
+  return {
+    titleHe: idea.titleHe,
+    where: idea.whereEn,
+    // Not one of KINDS — nothing queried a tag to make this. The approval
+    // header prints it, so it says what it is.
+    category: 'free',
+    freeform: true,
+    // Names and a photograph: that is the minimal style exactly.
+    style: 'minimal',
+    slides: kept,
+    dropped,
+    coverImage: coverSlot.image,
+    idea: { ...idea, emphasisHe: idea.emphasisHe },
+    createdAt: new Date().toISOString(),
+    counts: { found: idea.places.length, withAuthority: 0, built: kept.length, asked: idea.want },
+    short: kept.length < idea.want,
+  };
+}
+
 export async function buildDeck(idea, { wantImages = true } = {}) {
   // Our own page first. The map route stays for everywhere it does not cover —
   // it is slower, thinner and needs a search budget, but it works anywhere.

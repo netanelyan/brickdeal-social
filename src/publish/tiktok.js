@@ -677,7 +677,27 @@ export function preflight(cand) {
   // A deck publishes its slides in order; a single card publishes as a
   // one-image photo post. Both are the same API call — `photo_images` is an
   // array either way — which is why there is no separate publishDeck().
-  let images = cand.deck?.urls?.tiktok?.length ? cand.deck.urls.tiktok : [cand.card?.url];
+  // A DECK publishes the 9:16 renders and nothing else.
+  //
+  // This fell back to cand.card when urls.tiktok was empty — and cand.card is
+  // rendered.preview[0], which for a deck rendered for Instagram is the
+  // 1080x1350 cover. A 4:5 image in a 9:16 feed is padded by TikTok itself and
+  // ANCHORED TO THE TOP, so the title sits under the search bar and the black
+  // sits under the picture. That is what shipped.
+  //
+  // There is no sensible fallback here: a deck with no TikTok renders is a deck
+  // that was never built for TikTok, and posting the wrong shape is worse than
+  // not posting. The card fallback stays for a single card, which is the case
+  // it was written for.
+  const deckImages = cand.deck?.urls?.tiktok || [];
+  if (cand.kind === 'deck' && !deckImages.length) {
+    throw new TikTokError(
+      'this deck has no 1080x1920 renders — it was built for another destination. ' +
+        'Rebuild it with TikTok among its targets rather than posting the 4:5 crop.',
+      { step: 'config' }
+    );
+  }
+  let images = deckImages.length ? deckImages : [cand.card?.url];
 
   const missing = images.filter((u) => !u).length;
   if (!images.length || missing === images.length) {

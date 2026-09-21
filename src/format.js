@@ -102,18 +102,19 @@ export const tiktokCaption = (cand) => publishedDescription(cand, 4000); // TikT
  * match on.
  */
 export function deckCaption(deck) {
-  const places = (deck.slides || []).map((s, i) => `${i + 1}. ${s.nameHe}`);
-  const parts = [String(deck.idea?.angleHe || '').trim(), places.join('\n')].filter(Boolean);
-
-  // The signature is RESERVED, not appended and hoped for.
+  // The title and the shoutout. Nothing else.
   //
-  // This built the whole string and sliced it to 2200, so on a long deck the
-  // call to action was the thing that fell off the end — and a deck with many
-  // places is exactly the one whose caption runs long. The truncation was
-  // invisible: the caption still read as finished, it just quietly stopped
-  // asking anyone to go anywhere.
+  // This listed the angle and then every place, numbered — which is the deck
+  // itself, retyped underneath the deck. A viewer who wants the list swipes;
+  // the description's job on a slideshow is to say what it is and where to go
+  // next, and a wall of names pushes the only line that asks for anything below
+  // the fold.
+  //
+  // The signature is RESERVED out of the limit rather than appended and hoped
+  // for: the old version built the whole string and sliced it to 2200, so on a
+  // long deck the call to action was the part that fell off the end.
   const tail = `\n\n${DECK_SIGNATURE}`;
-  const body = parts.join('\n\n').trim().slice(0, CAPTION_LIMIT - tail.length);
+  const body = String(deck.titleHe || '').trim().slice(0, CAPTION_LIMIT - tail.length);
   return `${body}${tail}`.trim();
 }
 
@@ -227,7 +228,10 @@ export function deckApprovalMessage(cand) {
     // that is why those kinds are allowed to build from Wikidata at all — so
     // this is the common case for them, not an error. Printing the raw value
     // made a normal deck look broken and told you nothing about provenance.
-    lines.push(`   ${s.nameHe}: ${s.sourceUrl || `ויקינתונים${s.qid ? ` (${s.qid})` : ''}`}`);
+    // A free-form slide has no source because it carries no claim — saying
+    // "Wikidata" there would name a source it never consulted.
+    const from = s.sourceUrl || (deck.freeform ? 'ללא מקור (מצגת חופשית)' : `ויקינתונים${s.qid ? ` (${s.qid})` : ''}`);
+    lines.push(`   ${s.nameHe}: ${from}`);
   }
 
   return lines.join('\n');
