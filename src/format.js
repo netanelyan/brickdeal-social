@@ -3,6 +3,7 @@ import { LAYOUT_HE } from './render/templates.js';
 import { provenanceHe } from './images.js';
 import { targetsHe } from './publish/targets.js';
 import { privacyHe } from './publish/tiktok.js';
+import { KINDS } from './sources/places.js';
 
 // Two different texts, for two different readers.
 //
@@ -133,7 +134,12 @@ export function deckApprovalMessage(cand) {
   // "minimal" and seeing cream-and-bronze slides means the style decision is
   // wrong, and that is otherwise invisible until the pictures load.
   const styleHe = deck.style === 'info' ? 'מידע' : 'מינימלי';
-  lines.push(`🎞️ מצגת · ${deck.category} · ${deck.where} · סגנון ${styleHe}`);
+  // The category in Hebrew, not as its internal id. "temple" and "trail" are
+  // keys in a lookup table, and printing them put an English word in the first
+  // line of an otherwise Hebrew message for no reason anyone reading it could
+  // see. The place name stays as it is — it is a proper noun and the map knows
+  // it by that name.
+  lines.push(`🎞️ מצגת · ${KINDS[deck.category]?.he || deck.category} · ${deck.where} · סגנון ${styleHe}`);
   lines.push('');
   lines.push(`🖼️ על השער: ${clean(deck.titleHe)}`);
   if (deck.idea?.emphasisHe) lines.push(`   בצבע: ${clean(deck.idea.emphasisHe)}`);

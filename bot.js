@@ -133,7 +133,7 @@ function detach(label, work, chatId = staging) {
     .then(work)
     .catch(async (e) => {
       console.error(`${label} failed:`, e?.stack || e);
-      await notify.send(bot.telegram, chatId, `❌ ${label} נכשל: ${e?.message || e}`).catch(() => {});
+      await notify.send(bot.telegram, chatId, notify.withDetail(`❌ ${label} נכשל`, e)).catch(() => {});
     });
 }
 const staging = STAGING_CHAT_ID;
@@ -163,7 +163,7 @@ bot.use(async (ctx, next) => {
     await ctx.answerCbQuery('⛔ not authorized').catch(() => {});
     return;
   }
-  await ctx.reply('⛔ not authorized').catch(() => {});
+  await ctx.reply('⛔ אין הרשאה').catch(() => {});
 });
 
 // ---------------------------------------------------------------------------
@@ -343,7 +343,8 @@ bot.action(/^db:(.+)$/, async (ctx) => {
   // the wait for you to tap a button — without this, a deck you asked for by
   // name would be judged by guards the override exists to step over.
   const chatId = ctx.chat.id;
-  detach('בניית מצגת', () => runOverridden('/deck', () => buildProposal(key, chatId)), chatId);
+  const messageId = ctx.callbackQuery.message.message_id;
+  detach('בניית מצגת', () => runOverridden('/deck', () => buildProposal(key, chatId, messageId)), chatId);
 });
 
 bot.action(/^dx:(.+)$/, async (ctx) => {
@@ -414,7 +415,7 @@ async function handleIdeaReply(ctx, key, pending) {
         // The proposal is untouched and still answerable, so the prompt goes
         // back rather than leaving a dead end — replying again retries.
         store.setPendingEdit(key, pending);
-        return bot.telegram.sendMessage(chatId, `❌ השינוי נכשל: ${e.message}`);
+        return bot.telegram.sendMessage(chatId, notify.withDetail('❌ השינוי נכשל', e));
       }
       if (!store.updateProposal(key, { idea: revised })) {
         return bot.telegram.sendMessage(chatId, 'ההצעה הזו כבר לא ממתינה');
@@ -453,7 +454,7 @@ async function handleEditReply(ctx, key) {
     updated.card = await renderCard(updated, { id: cand.id, data: cand.data, image: cand.image });
   } catch (e) {
     store.setPendingEdit(key, pending);
-    return ctx.reply(`רינדור הכרטיס נכשל: ${e.message}`);
+    return ctx.reply(notify.withDetail('❌ רינדור הכרטיס נכשל', e));
   }
   updated.channelCaption = channelCaption(updated);
   updated.instagramCaption = instagramCaption(updated);
@@ -871,17 +872,18 @@ async function maybeRefreshIgToken() {
   if (!instagramConfigured() || authMode() === 'facebook') return;
   try {
     const r = await refreshToken();
-    if (r.refreshed) {
-      console.log(`   instagram: token refreshed, ${Math.round(r.daysLeft)} days left`);
-      await notify.send(bot.telegram, staging, `🔑 טוקן אינסטגרם חודש — תקף עוד ${Math.round(r.daysLeft)} ימים`);
-    }
+    // Routine housekeeping working is not news. It notified on every successful
+    // refresh, which is a message that says "nothing needs you" — and TikTok's
+    // identical refresh has always been log-only, so the two destinations were
+    // reporting the same event at different volumes.
+    if (r.refreshed) console.log(`   instagram: token refreshed, ${Math.round(r.daysLeft)} days left`);
   } catch (e) {
+    // The failure still notifies. Left alone, publishing stops in 60 days.
     console.error('instagram: token refresh failed:', e.message);
     await notify.send(
       bot.telegram,
       staging,
-      `🔴 חידוש טוקן אינסטגרם נכשל: ${e.message}
-אם לא יחודש, הפרסום יפסיק לעבוד. הרץ npm run ig-token.`
+      notify.withDetail('🔴 חידוש טוקן אינסטגרם נכשל\nאם לא יחודש, הפרסום יפסיק לעבוד. הרץ npm run ig-token.', e)
     );
   }
 }
@@ -1342,7 +1344,7 @@ async function buildAndStageDeck(arg, chatId) {
       // complaint.
       const req = await resolveRequest(arg);
       alternatives = req.alternatives;
-      await say(`⏳ בונה מצגת: ${req.where} / ${KINDS[req.kind]?.he || req.kind}...`);
+      console.log(`deck: resolving request ${req.where} / ${req.kind}`);
       // A requested deck gets a written cover too. Naming it "Prague · museum"
       // put a filename on the front of a Hebrew slideshow.
       const cover = await titleForRequest({ where: req.where, kind: req.kind, count: req.want }).catch(() => ({
@@ -1350,7 +1352,7 @@ async function buildAndStageDeck(arg, chatId) {
       }));
       idea = { ...cover, where: req.where, kind: req.kind, want: req.want, whyNow: 'asked for directly' };
     } else {
-      await say('⏳ חושב על רעיונות...');
+      console.log('deck: proposing ideas');
       // What actually went out, in words the model can read.
       //
       // This mapped `p.headline || p.id` against a log that never stored a
@@ -1402,7 +1404,7 @@ async function buildAndStageDeck(arg, chatId) {
     return proposeDeck(idea, alternatives, chatId);
   } catch (e) {
     console.error('deck idea failed:', e);
-    return say(`❌ לא הצלחתי להציע מצגת: ${e.message}`);
+    return say(notify.withDetail('❌ לא הצלחתי להציע מצגת', e));
   }
 }
 
@@ -1439,22 +1441,35 @@ async function proposeDeck(idea, alternatives, chatId) {
  * the repeat guards, and an AsyncLocalStorage context does not survive the wait
  * for you to tap a button.
  */
-async function buildProposal(key, chatId) {
+async function buildProposal(key, chatId, messageId = null) {
   const say = (text) => notify.send(bot.telegram, chatId, text).catch(() => {});
   const proposal = store.getProposal(key);
   if (!proposal) return say('ההצעה הזו כבר לא ממתינה');
   const { idea, alternatives = [] } = proposal;
   store.clearProposal(key);
 
+  // Progress rewrites the proposal message instead of sending new ones.
+  //
+  // A deck takes minutes, and silence looks like a hang — that is why these
+  // lines existed at all. But each one was a fresh notification, so watching a
+  // deck build meant four buzzes to learn three things you could not act on.
+  // Editing one message in place keeps the reassurance and costs one
+  // notification, which is what the message already spent.
+  const progress = async (text) => {
+    console.log(`deck: ${text}`);
+    if (!messageId) return;
+    await bot.telegram.editMessageText(chatId, messageId, undefined, text).catch(() => {});
+  };
+
   try {
-    await say(`⏳ מחפש מקורות ל-${idea.where}...`);
+    await progress(`⏳ ${idea.titleHe}\nמחפש מקורות...`);
 
     const built = await buildWithFallback(idea, alternatives, {
       // Said out loud, because a deck takes minutes and silence looks like a
       // hang. "Bernese Alps came back with two slides, trying Valais" is also
       // the most useful thing to know afterwards.
       onAttempt: (attempt, i, why) => {
-        if (i > 0) say(`↩️ ${why || 'לא הצליח'} - מנסה ${describeAttempt(attempt)}`);
+        if (i > 0) progress(`↩️ ${idea.titleHe}\nלא הסתדר, מנסה ${describeAttempt(attempt)}...`);
       },
     });
     if (!built?.slides?.length) {
@@ -1476,15 +1491,21 @@ async function buildProposal(key, chatId) {
       return say(`⏭️ המצגת הזו כבר פורסמה (${cand.id}) — /deck שוב לרעיון אחר`);
     }
 
+    // The proposal message has done its job. Removing it means the deck arrives
+    // as one album and one approval card, with no stale "⏳ building" line left
+    // above them contradicting the finished thing underneath.
+    if (messageId) await bot.telegram.deleteMessage(chatId, messageId).catch(() => {});
     await stage(cand);
-    await say(
-      [
-        `✅ ${built.slides.length} שקופיות · סגנון ${built.style === 'info' ? 'מידע' : 'מינימלי'}`,
-        built.short ? `⚠️ ביקשנו ${idea.want}` : null,
-        searchConfigured() ? `🔎 ${searchRemaining()}/${searchBudget()} חיפושים נותרו היום` : 'בלי חיפוש',
-      ]
-        .filter(Boolean)
-        .join('\n')
+
+    // No summary message. It said slide count, style and search budget — and
+    // the approval card above it already carries the first two in its header,
+    // so it was a second notification to repeat what you were already reading.
+    // The budget line goes to the log, where a number you check occasionally
+    // belongs.
+    console.log(
+      `deck: staged ${built.slides.length} slides · style ${built.style}` +
+        (built.short ? ` · asked for ${idea.want}` : '') +
+        (searchConfigured() ? ` · ${searchRemaining()}/${searchBudget()} searches left today` : ' · no search')
     );
   } catch (e) {
     console.error('deck failed:', e);
@@ -1493,7 +1514,7 @@ async function buildProposal(key, chatId) {
     const why = e.deck?.dropped?.length
       ? ['', ...e.deck.dropped.slice(0, 5).map((d) => `   ✗ ${d.place}: ${String(d.why).slice(0, 90)}`)].join('\n')
       : '';
-    await say(`❌ בניית המצגת נכשלה: ${e.message}${why}`);
+    await say(notify.withDetail(`❌ בניית המצגת נכשלה${why}`, e));
   }
 }
 

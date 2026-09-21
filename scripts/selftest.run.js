@@ -38,7 +38,12 @@ import { sameSite } from '../src/search.js';
 import { authorityDomains, KINDS } from '../src/sources/places.js';
 import { pick, CATEGORY_HE, canonicalKind } from '../src/sources/tiyulplus.js';
 import { keepByName } from '../src/deck/shape.js';
-import { quietAlert, targetAbandoned as notifyTargetAbandoned, publishWaitingForSetup } from '../src/notify.js';
+import {
+  quietAlert,
+  targetAbandoned as notifyTargetAbandoned,
+  publishWaitingForSetup,
+  withDetail,
+} from '../src/notify.js';
 import { describeError, InstagramError } from '../src/publish/instagram.js';
 import { publishTargets, targetsForKind, allowedForKind, liveTargets } from '../src/publish/targets.js';
 import {
@@ -1446,6 +1451,31 @@ ok('it says the post is kept', waitMsg.includes('ממתין'));
 ok('it carries the headline', waitMsg.includes('המקדשים של קיוטו'));
 ok('and says how many are waiting', waitMsg.includes('3'));
 ok('it does not claim anything failed', !/נכשל|שגיאה/.test(waitMsg));
+
+/* -------------------------------------------------------------------------- */
+group('Hebrew first — technical detail below the line, never inside it');
+
+// Every failure read `❌ משהו נכשל: ${e.message}`, and e.message is whatever the
+// API or the runtime said: always English. A Hebrew clause and an English
+// clause on one line is hard to read in either, and genuinely hard to SKIM —
+// RTL and LTR reorder each other at the boundary, so the punctuation ends up
+// somewhere neither language put it.
+const det = withDetail('❌ בניית המצגת נכשלה', new Error('only 2 slide(s) survived sourcing'));
+eq('the first line is Hebrew and complete on its own', det.split('\n')[0], '❌ בניית המצגת נכשלה');
+ok('the technical text survives, on its own line', det.split('\n')[1].includes('only 2 slide(s)'));
+ok('and is marked as technical rather than narrated', det.includes('🔧'));
+
+// A message with nothing to add should not grow an empty footnote.
+eq('no detail means no second line', withDetail('❌ נכשל', null), '❌ נכשל');
+eq('an empty error is the same as none', withDetail('❌ נכשל', new Error('')), '❌ נכשל');
+
+// A stack in a notification is the message being replaced by its own footnote.
+const long = withDetail('❌ נכשל', 'x'.repeat(900));
+ok('a long detail is trimmed', long.length < 300);
+ok('and says it was trimmed', long.includes('…'));
+
+// Plain strings work too — not every failure arrives as an Error.
+ok('a bare string is accepted', withDetail('❌ נכשל', 'ECONNRESET').includes('ECONNRESET'));
 
 const deckFixture = {
   kind: 'deck',

@@ -152,6 +152,36 @@ export function publishHeld(headline, owed, succeeded = [], heldCount = 1) {
 }
 
 /**
+ * A Hebrew sentence, with the technical detail underneath rather than inside it.
+ *
+ * Every failure message used to read `❌ בניית המצגת נכשלה: ${e.message}`, and
+ * e.message is whatever the API or the runtime said — always English, sometimes
+ * a stack-shaped sentence. The result was a Hebrew clause and an English clause
+ * welded into one line, which is hard to read in either language and impossible
+ * to skim: RTL and LTR text on one line reorder each other at the boundary.
+ *
+ * So the two are separated. The first line says what happened, in Hebrew, and
+ * is the whole message for anyone who only wants to know that. The detail is
+ * kept — it is the thing worth pasting into a search — but it is on its own
+ * line, labelled, below.
+ *
+ * Trimmed hard. A 600-character stack in a Telegram notification is not detail,
+ * it is the message being replaced by its own footnote.
+ */
+export function withDetail(hebrew, detail, { limit = 200 } = {}) {
+  // Read `.message` when the thing HAS one, rather than falling back to the
+  // object when it is empty: `new Error('')` has an empty message, and
+  // `detail?.message || detail` then stringifies the Error itself to the word
+  // "Error" — a technical footnote carrying no technical information, which is
+  // the exact noise this function exists to remove.
+  const hasMessage = detail && typeof detail === 'object' && 'message' in detail;
+  const raw = String((hasMessage ? detail.message : detail) ?? '').trim();
+  if (!raw) return hebrew;
+  const short = raw.length > limit ? `${raw.slice(0, limit)}…` : raw;
+  return `${hebrew}\n🔧 ${short}`;
+}
+
+/**
  * The destination does not exist yet, as opposed to being broken.
  *
  * Its own message for the same reason the platform-limit one has its own:
