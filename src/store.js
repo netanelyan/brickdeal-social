@@ -627,6 +627,33 @@ export function noteTargetFailed(target, error) {
   return { ...state.targetHealth[target], justDegraded: degraded && !prev.degraded };
 }
 
+/**
+ * Stand a destination down now, without counting to three first.
+ *
+ * For failures that are certain rather than probable: a scope the connection
+ * was never granted refuses every post identically, so the usual "three strikes
+ * and it might be an outage" is three posts spending three calls each to learn
+ * what the first refusal already said.
+ *
+ * Deliberately sets `failures` to the threshold rather than inventing a second
+ * kind of degraded. Everything downstream — the cooldown, the one card let
+ * through to test it, the recovery — then behaves exactly as it does for a
+ * destination that got there the slow way, which also means a reconnect fixes
+ * it without needing /retry.
+ */
+export function degrade(target, error) {
+  const prev = healthOf(target);
+  state.targetHealth[target] = {
+    ...prev,
+    failures: Math.max(prev.failures + 1, DEGRADE_AFTER()),
+    lastError: error ? String(error).slice(0, 300) : null,
+    lastFailAt: Date.now(),
+    degraded: true,
+  };
+  save();
+  return { ...state.targetHealth[target], justDegraded: !prev.degraded };
+}
+
 // How long a degraded destination is left alone before one card is allowed
 // through to test it, and the ceiling that backoff grows to.
 //

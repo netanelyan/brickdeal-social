@@ -36,7 +36,53 @@ import { cardHostConfigured, tiktokVerifiedDomains, unverifiedTikTokHosts } from
 const API = 'https://open.tiktokapis.com';
 const AUTH_URL = 'https://www.tiktok.com/v2/auth/authorize/';
 
-export const SCOPES = ['user.info.basic', 'video.publish'];
+/**
+ * What the connection has to be granted, and why both posting scopes.
+ *
+ * TikTok splits posting in two, and the split is by POST MODE rather than by
+ * media type:
+ *
+ *   video.publish — DIRECT_POST. The client publishes to the feed itself.
+ *   video.upload  — MEDIA_UPLOAD. The client delivers to the creator's inbox
+ *                   and the creator finishes and posts it in the app.
+ *
+ * Decks go out as drafts, so video.upload is the one actually used. It was
+ * missing for the whole life of the draft feature: only video.publish was ever
+ * requested, so a token minted before this line changed carries a scope for the
+ * mode this bot no longer uses and not the one it does. TikTok's refusal was
+ * exact — "the user did not authorize the scope required for completing THIS
+ * request" — and it cost a deck to read it properly.
+ *
+ * Both are asked for. video.publish stays because direct posting is still
+ * reachable if the audit ever makes it worth using.
+ *
+ * A token granted before this changed will NOT gain the scope by refreshing.
+ * Refresh renews what was granted; only a new authorization grants more.
+ */
+export const SCOPES = ['user.info.basic', 'video.publish', 'video.upload'];
+
+/** The scope a post needs, which depends only on how it is being posted. */
+export const scopeForMode = (draft) => (draft ? 'video.upload' : 'video.publish');
+
+/**
+ * What the stored token is missing for the mode it will actually be used in.
+ *
+ * Returns the scopes that are needed and absent. An empty list means the
+ * connection can post; anything in it means every attempt will be refused at
+ * init with scope_not_authorized, no matter how many times it is retried.
+ */
+export function missingScopes({ draft = true } = {}) {
+  const granted = new Set(
+    String(store.getTikTokToken()?.scope || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+  // Nothing stored means nothing to judge — that is "not connected", which is
+  // a different message and is already reported elsewhere.
+  if (!granted.size) return [];
+  return ['user.info.basic', scopeForMode(draft)].filter((s) => !granted.has(s));
+}
 
 // Every privacy level TikTok defines, in the order we cycle them in the
 // approval message. What is actually offered comes from creatorInfo() — this is
@@ -84,7 +130,9 @@ export class TikTokError extends Error {
 // than printing it and letting you look it up.
 const CODE_HINTS = {
   access_token_invalid: 'הטוקן פג או נפסל — npm run tiktok-token',
-  scope_not_authorized: 'ההרשאה video.publish לא אושרה לאפליקציה',
+  scope_not_authorized:
+    'ההרשאה הדרושה לא ניתנה בחיבור לטיקטוק. מצגת נשלחת כטיוטה, וזה דורש video.upload — ' +
+    'טוקן שנוצר לפני כן מחזיק רק video.publish. חברו מחדש; רענון טוקן לא מוסיף הרשאות.',
   scope_permission_missed: 'ההרשאה video.publish לא נכללה בהתחברות — npm run tiktok-token',
   url_ownership_unverified: 'הדומיין של הכרטיס לא מאומת ב-Developer Portal',
   privacy_level_option_mismatch: 'רמת הפרטיות לא זמינה לחשבון הזה כרגע',
@@ -123,6 +171,29 @@ const CARD_LEVEL_CODES = new Set([
   'unaudited_client_can_only_post_to_private_accounts',
   'privacy_level_option_mismatch',
 ]);
+
+/**
+ * Codes that mean the CONNECTION is wrong, not the card and not the weather.
+ *
+ * A missing scope refuses every post identically and will refuse the next
+ * hundred. Retrying it is three wasted calls per post and a message promising
+ * something that cannot happen — "ניסיון 1/3" against a token that will never
+ * be granted more by being asked again.
+ *
+ * Separate from card-level because the card is fine: the same deck publishes
+ * perfectly once the connection is repaired, so it is held rather than
+ * abandoned. Separate from a platform limit because nothing frees up on its
+ * own; this one waits on a person.
+ */
+const CONFIG_CODES = new Set([
+  'scope_not_authorized',
+  'scope_permission_missed',
+  'access_token_invalid',
+]);
+
+/** Does this need you to go and fix the connection? */
+export const isConfigProblem = (e) =>
+  e instanceof TikTokError && (e.step === 'scope' || CONFIG_CODES.has(e.code));
 
 /**
  * Is this failure the card's fault rather than the destination's?
@@ -705,6 +776,20 @@ export async function publishTikTok(cand, { dryRun = false, draft = false } = {}
   }
 
   const { images, notes } = preflight(cand);
+
+  // Checked here rather than discovered at init. TikTok's answer is correct and
+  // unhelpful — it names "the scope required for completing this request"
+  // without naming the scope — and the mode decides which one that is, which is
+  // something only this side knows.
+  const missing = missingScopes({ draft });
+  if (missing.length) {
+    throw new TikTokError(
+      `the TikTok connection was never granted ${missing.join(', ')} — ` +
+        `${draft ? 'a draft needs video.upload' : 'a direct post needs video.publish'}. ` +
+        'Reconnect to grant it; refreshing the token cannot add a scope.',
+      { step: 'scope', code: 'scope_not_authorized' }
+    );
+  }
 
   // TikTok's limit, checked before the call rather than discovered by being
   // refused. Not bypassable by the owner override — see TIKTOK_DAILY_CAP.

@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import * as store from './store.js';
-import { exchangeCode, creatorInfo, describeError } from './publish/tiktok.js';
+import { exchangeCode, creatorInfo, describeError, missingScopes } from './publish/tiktok.js';
 
 // The last piece of connecting TikTok from a browser instead of a terminal.
 //
@@ -191,12 +191,28 @@ async function exchange(body) {
     console.warn(`tiktok oauth: token stored, but creator_info failed: ${describeError(e)}`);
   }
 
+  // What the grant did NOT include, said at connect time rather than at the
+  // first publish.
+  //
+  // scripts/tiktok-token.js has always warned about this; the browser flow did
+  // not, so connecting through the website accepted a token that could not
+  // post and said "ok". That is exactly how a deck came to fail at init with
+  // scope_not_authorized weeks later, with nothing in between to suggest the
+  // connection was only half a connection.
+  const missing = missingScopes({ draft: true });
+  if (missing.length) {
+    console.warn(`tiktok oauth: connected WITHOUT ${missing.join(', ')} — publishing will fail`);
+  }
+
   const saved = store.getTikTokToken();
   return {
     ok: true,
     open_id: token.open_id || saved?.openId || null,
     scope: token.scope || saved?.scope || null,
     username,
+    // The website shows this to whoever just connected. A connection that
+    // cannot publish should not look like a success on the page that made it.
+    missing_scopes: missing,
   };
 }
 

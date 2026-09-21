@@ -61,6 +61,10 @@ import {
   tiktokConfigured,
   describeError as describeTikTokError,
   isCardLevel as isCardLevelTikTok,
+  isConfigProblem,
+  missingScopes,
+  scopeForMode,
+  SCOPES as TK_SCOPES,
   TikTokError,
 } from '../src/publish/tiktok.js';
 import { codeFrom } from './tiktok-token.js';
@@ -1624,6 +1628,52 @@ ok('it says the post is kept', waitMsg.includes('ממתין'));
 ok('it carries the headline', waitMsg.includes('המקדשים של קיוטו'));
 ok('and says how many are waiting', waitMsg.includes('3'));
 ok('it does not claim anything failed', !/נכשל|שגיאה/.test(waitMsg));
+
+/* -------------------------------------------------------------------------- */
+group('TikTok scopes — the half-connection that looked connected');
+
+// A deck failed at init with scope_not_authorized against a token that plainly
+// carried video.publish. TikTok splits posting by MODE, not by media: a direct
+// post needs video.publish, an upload-to-inbox needs video.upload. Decks go out
+// as drafts, and only video.publish had ever been requested — so the connection
+// held a scope for the mode the bot no longer uses and not the one it does.
+eq('a draft needs the upload scope', scopeForMode(true), 'video.upload');
+eq('a direct post needs the publish scope', scopeForMode(false), 'video.publish');
+ok('and both are requested at connect time', TK_SCOPES.includes('video.upload') && TK_SCOPES.includes('video.publish'));
+
+// The exact token that was live when this failed.
+store.setTikTokToken({
+  accessToken: 't',
+  refreshToken: 'r',
+  expiresAt: Date.now() + 86_400_000,
+  refreshExpiresAt: Date.now() + 30_000_000_000,
+  openId: 'o',
+  scope: 'user.info.basic,video.publish',
+});
+eq('that token cannot send a draft', missingScopes({ draft: true }).join(','), 'video.upload');
+eq('though it could have posted directly', missingScopes({ draft: false }).length, 0);
+
+store.setTikTokToken({
+  accessToken: 't',
+  refreshToken: 'r',
+  expiresAt: Date.now() + 86_400_000,
+  refreshExpiresAt: Date.now() + 30_000_000_000,
+  openId: 'o',
+  scope: 'user.info.basic,video.publish,video.upload',
+});
+eq('reconnecting with both clears it', missingScopes({ draft: true }).length, 0);
+
+// No token is "not connected", which is a different message reported elsewhere.
+store.clearTikTokToken();
+eq('an absent token reports no missing scopes', missingScopes({ draft: true }).length, 0);
+
+// And it is no longer retried. A missing scope refuses every post identically
+// and will refuse the next hundred; "ניסיון 1/3" promised something that could
+// not happen, three calls at a time.
+ok('a scope failure is a config problem', isConfigProblem(new TikTokError('x', { code: 'scope_not_authorized' })));
+ok('so is a dead token', isConfigProblem(new TikTokError('x', { code: 'access_token_invalid' })));
+ok('a rate limit is not', !isConfigProblem(new TikTokError('x', { code: 'rate_limit_exceeded' })));
+ok('nor is an unverified image host', !isConfigProblem(new TikTokError('x', { code: 'url_ownership_unverified' })));
 
 /* -------------------------------------------------------------------------- */
 group('the same deck, drawn as cards for Instagram');

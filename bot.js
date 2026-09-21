@@ -34,6 +34,9 @@ import {
   describeError as describeTikTokError,
   isCardLevel as isCardLevelTikTok,
   isPlatformLimit as isPlatformLimitTikTok,
+  isConfigProblem as isConfigProblemTikTok,
+  missingScopes as tiktokMissingScopes,
+  SCOPES as TIKTOK_SCOPES,
   TIKTOK_DAILY_CAP,
 } from './src/publish/tiktok.js';
 import {
@@ -739,6 +742,11 @@ async function publishNext(item = null) {
   const platformLimit = {
     tiktok: isPlatformLimitTikTok,
   };
+  // And a fourth: is this destination refusing everything until somebody goes
+  // and fixes the connection?
+  const configProblem = {
+    tiktok: isConfigProblemTikTok,
+  };
 
   for (const target of live) {
     try {
@@ -779,6 +787,18 @@ async function publishNext(item = null) {
 
       if (e?.step === 'config' || cardLevel[target]?.(e)) {
         abandoned.push({ target, message: detail });
+        continue;
+      }
+
+      // The connection is wrong, and no number of attempts repairs it. Held
+      // rather than abandoned — the same deck publishes perfectly once the
+      // scope is granted — and the destination is stood down at once instead
+      // of after three posts have each spent three calls proving the same
+      // thing. `limited` is the right bucket: it means "not now, and not your
+      // fault", which is exactly this.
+      if (configProblem[target]?.(e)) {
+        store.degrade(target, detail);
+        limited.push({ target, message: detail });
         continue;
       }
 
@@ -1713,6 +1733,23 @@ bot.command('tiktok', async (ctx) => {
     );
   }
   if (refreshDays != null) local.push(`🔁 טוקן הרענון תקף עוד ${refreshDays} ימים`);
+
+  // The scopes, which nothing reported until a post failed on one. The stored
+  // token has carried them all along; they were simply never read back, so a
+  // connection that could not publish looked identical to one that could until
+  // TikTok said otherwise at init.
+  const granted = store.getTikTokToken()?.scope;
+  if (granted) {
+    local.push(`🔐 הרשאות: ${granted}`);
+    // Decks go out as drafts, so video.upload is the one that matters.
+    const missing = tiktokMissingScopes({ draft: true });
+    if (missing.length) {
+      local.push(
+        `🔴 חסר: ${missing.join(', ')} — פרסום ייכשל עד חיבור מחדש.`,
+        '   רענון טוקן לא מוסיף הרשאות; צריך אישור חדש מול טיקטוק.'
+      );
+    }
+  }
   if (health.lastOkAt) local.push(`✅ פורסם לאחרונה לפני ${notify.humanDuration(Date.now() - health.lastOkAt)}`);
   else local.push('⚪ עוד לא פורסם לטיקטוק מהמכונה הזו');
   if (health.failures) local.push(`⚠️ ${health.failures} כשלונות ברצף`);
