@@ -888,6 +888,17 @@ export async function publishTikTok(cand, { dryRun = false, draft = false } = {}
 
   const status = await waitForPublish(d.publish_id, t);
 
+  // What TikTok did with it, and the id to ask them about it with.
+  //
+  // Both were returned and neither was recorded, so "where did the deck go?"
+  // had no answer on this side at all — the two outcomes are genuinely
+  // different places (a notification in the inbox, or a post on the profile)
+  // and nothing here could say which one had happened.
+  console.log(
+    `tiktok: ${draft ? 'MEDIA_UPLOAD' : 'DIRECT_POST'} ${d.publish_id} -> ${status?.status || 'unknown'}` +
+      (draft ? ' (check the TikTok inbox, not the profile)' : '')
+  );
+
   return {
     publishId: d.publish_id,
     images,
