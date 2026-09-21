@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { record as recordUsage } from '../usage.js';
 import { KINDS, kindIds } from '../sources/places.js';
 import { namesPlace } from './region.js';
+import { loadDestinations } from '../sources/climate.js';
 
 // What deck to make. The step before any data is fetched.
 //
@@ -20,6 +21,37 @@ const EFFORT = process.env.IDEAS_EFFORT || 'medium';
 
 let client = null;
 const getClient = () => (client ??= new Anthropic());
+
+/**
+ * The destinations this channel is actually for.
+ *
+ * destinations.json is 102 places across 61 countries, chosen — its own comment
+ * says so — "for where Israelis actually fly, not for coverage of the globe".
+ * Until now only the climate adapter read it, and the idea generator, which is
+ * the one step that DECIDES where a post is set, had never seen it.
+ *
+ * That omission is most of why the feed drifted to Kyoto. Asked for a beautiful
+ * travel slideshow with nothing but its own prior to go on, a model returns the
+ * postcard answer; handed a list of places this audience books flights to, it
+ * has somewhere better to start.
+ *
+ * A preference, not a whitelist. The Dolomites are not in the file and are a
+ * perfectly good deck, and a list that forbade everything outside itself would
+ * make the file a cage rather than a starting point.
+ */
+let destinationMenu = null;
+function destinationsForPrompt() {
+  if (destinationMenu) return destinationMenu;
+  try {
+    const rows = loadDestinations();
+    destinationMenu = rows.map((d) => `  ${d.en} — ${d.he}, ${d.country}`).join('\n');
+  } catch {
+    // The file is optional as far as this call is concerned. A missing or
+    // malformed catalogue should cost the grounding, never the idea.
+    destinationMenu = '';
+  }
+  return destinationMenu;
+}
 
 const IDEAS_SCHEMA = {
   type: 'object',
@@ -97,6 +129,19 @@ walkable from the station.
 Israeli travellers are the audience. Direct flights, kosher-adjacent practicality,
 school holidays and the Jewish calendar are all legitimate reasons to choose a
 destination — but the deck itself is about the place, not about being Israeli.
+
+WHERE TO SET IT
+
+A list of destinations this channel covers is supplied with the request. START
+THERE. It is 102 places chosen for where this audience actually flies, and a
+deck set in one of them is a deck someone reading this page might book.
+
+It is a preference and not a whitelist. Somewhere not on the list is fine when
+it is genuinely better — the Dolomites are not on it and make an excellent
+deck — but "somewhere not on the list" should be a choice you could defend,
+not the first place that came to mind. Asked for a beautiful travel slideshow
+with nothing to go on, the honest answer is Kyoto every time, and a feed of
+that is a feed about one city.
 
 HARD CONSTRAINTS
 
@@ -320,7 +365,15 @@ export async function proposeIdeas({ count = 4, recent = [], today = new Date() 
     recent.length
       ? ['ALREADY PUBLISHED (do not repeat, and avoid the same city twice in a row):', ...recent.map((r) => `  ${r}`)].join('\n')
       : 'ALREADY PUBLISHED: nothing yet.',
-  ].join('\n');
+    // The catalogue, last, so it reads as the menu to choose from rather than
+    // as background. Its absence is what left the model choosing from its own
+    // prior, which for "a beautiful travel slideshow" is the postcard answer.
+    destinationsForPrompt()
+      ? ['', 'DESTINATIONS THIS CHANNEL COVERS — start here:', destinationsForPrompt()].join('\n')
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const res = await getClient().messages.create({
     model: MODEL,

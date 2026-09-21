@@ -266,6 +266,20 @@ export function cropUrl(photo, { w = CARD_W, h = CARD_H } = {}) {
     u.searchParams.set('auto', 'compress');
     u.searchParams.set('cs', 'tinysrgb');
     u.searchParams.set('fit', 'crop');
+    // Crop to the CONTENT, not to a corner.
+    //
+    // The default is not centre — it is the top. Measured by hashing the bytes
+    // back: `crop=top` and no `crop` at all return the identical image, `left`
+    // returns a different one, and `entropy`, `faces` and `edges` all return a
+    // third. So the parameter is honoured, the smart crops agree with each
+    // other, and this had been taking the top of every landscape photograph —
+    // which on a mountain is sky, and on a lake is the far shore.
+    //
+    // Unsplash has always used entropy. This is the same choice, arrived at the
+    // hard way, and it applies to the thumbnail as well as the final image
+    // because both come through here — so the curator judges the frame that
+    // actually ships.
+    u.searchParams.set('crop', 'entropy');
     u.searchParams.set('w', String(w));
     u.searchParams.set('h', String(h));
     return u.toString();
