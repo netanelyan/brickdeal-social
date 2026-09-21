@@ -158,10 +158,14 @@ ONE STRONG CLAUSE, and it may be any of these:
   a superlative     — הכי יפים בעולם, הכי טובים ל...
   a picture         — שלא נראים אמיתיים, שנראים כמו סרט
   an obligation     — שאתם חייבים לראות, שאסור לפספס
-  a time pressure   — לפני שזה מאוחר מדי, פעם אחת בחיים
+  a time pressure   — לפני שזה מאוחר מדי, פעם אחת בחיים לפחות
 
 Superlatives are welcome here. "הכי יפים בעולם" is a claim nobody can check and
 everybody understands, and it is exactly how this kind of page talks.
+
+NEVER "פעם אחת בחיים" ON ITS OWN. It is always "פעם אחת בחיים לפחות" - the
+bare form promises the place is a one-time visit, and the point of the line is
+that it is worth going back to.
 
 USE SIMPLE WORDS
 
@@ -256,7 +260,7 @@ export const COVER_SHAPES = [
     brief:
       'Plural noun + the place + שאתם חייבים לראות + a twist that puts time pressure on it. The place goes between the noun and the clause.',
     voice: 'you',
-    examples: ['מקומות בשווייץ שאתם חייבים לראות לפני שזה מאוחר מדי', 'מפלים באיסלנד שחייבים לראות פעם אחת בחיים'],
+    examples: ['מקומות בשווייץ שאתם חייבים לראות לפני שזה מאוחר מדי', 'מפלים באיסלנד שחייבים לראות פעם אחת בחיים לפחות'],
   },
   {
     id: 'best-for',

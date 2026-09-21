@@ -17,7 +17,7 @@ import { WIKIDATA_FIELDS, factsFor, countryFor, enoughFor, applyCountryVisibilit
 import { hebrewNames, isHebrew } from './hebrew.js';
 import { decideShape, keepVisitable } from './shape.js';
 import { countryOfDestination } from './where.js';
-import { deckPlace } from './region.js';
+import { deckPlace, countryMismatch } from './region.js';
 import { vocabForPrompt } from './emoji.js';
 
 // An idea becomes a deck, or it doesn't.
@@ -1195,6 +1195,34 @@ export async function buildDeck(idea, { wantImages = true } = {}) {
   if (place.scope === 'none' && !slides.some((s) => s.iso || s.countryHe)) {
     const home = await countryOfDestination(idea.where);
     if (home.he) place = { scope: 'country', he: home.he, iso: home.iso };
+  }
+
+  // The two halves of "where this deck is" have to agree.
+  //
+  // `place` above is derived from the SLIDES' own country claims, and the cover
+  // is written from it. `idea.where` is the string the map was SEARCHED with,
+  // and it is what survives onto the deck as `where` — the approval header, the
+  // published log's `place`, the geographic quota, the repeat detector.
+  //
+  // They were decoupled deliberately and never compared, so a deck went out
+  // headed "United States" carrying six Swiss peaks with Swiss flags and a
+  // Hebrew title naming שווייץ. Everything a reader saw was right; everything
+  // the bot recorded about it was wrong, which is worse — the quota that exists
+  // to stop one country dominating was filing Switzerland under America.
+  //
+  // Strict, and a throw rather than a correction. Rewriting `where` from the
+  // slides would paper over whatever produced the contradiction, and the
+  // fallback ladder already knows what to do with a build that refuses: say
+  // why, and try the next region.
+  const searched = await countryOfDestination(idea.where);
+  const mismatch = countryMismatch(slides, searched.iso);
+  if (mismatch) {
+    throw new Error(
+      `region mismatch: ${mismatch}. Searched "${idea.where}", got ${slides
+        .slice(0, 3)
+        .map((s) => s.nameEn || s.nameHe)
+        .join(', ')}`
+    );
   }
 
   // Written last, from the places that survived, exactly as on the other route.

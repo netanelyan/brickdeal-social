@@ -21,12 +21,11 @@ export async function send(telegram, chatId, text) {
 }
 
 export function startupPing({ sourceCount, queueSize, stagingSize, targets, images }) {
-  return [
-    '🟢 tiyul+ עלה',
-    `${sourceCount} מקורות פעילים · ${stagingSize} ממתינים לאישור · ${queueSize} בתור לפרסום`,
-    `מפרסם ל: ${targetsHe(targets)}`,
-    `תמונות: ${images ? 'זמינות' : 'כרטיסי טקסט בלבד'}`,
-  ].join('\n');
+  // One line. Four facts that never needed four lines, none of them something
+  // to act on — /status answers all of it on demand and in full.
+  return `🟢 עלה · ${sourceCount} מקורות · ${stagingSize} לאישור · ${queueSize} בתור · ${targetsHe(targets)}${
+    images ? '' : ' · בלי תמונות'
+  }`;
 }
 
 /** After a daily gather run — what came in, what survived, what was dropped. */
@@ -40,28 +39,26 @@ export function runReport({
   draftCalls,
   budgetExhausted,
 }) {
-  const lines = [
-    '📥 סבב איסוף הסתיים',
-    `${gathered} פריטים נאספו · ${ranked} נבדקו · ${staged} עלו לאישור · ${rejected} נפסלו`,
-  ];
-
-  if (draftCalls) lines.push(`✍️ ${draftCalls} קריאות כתיבה`);
+  // One line, plus a line for each thing that needs you.
+  //
+  // This printed a heading, four counters, a token count, and then every source
+  // that returned anything — twenty-one bullets to say that a routine gather
+  // worked. None of it is actionable: the items it found arrive as their own
+  // approval cards, which is where a decision actually gets made. The
+  // per-source breakdown is a diagnostic, and /sources is where diagnostics
+  // belong.
+  const lines = [`📥 איסוף: ${gathered} → ${ranked} נבדקו → ${staged} לאישור${rejected ? ` · ${rejected} נפסלו` : ''}`];
 
   // A run that ran out of budget looks exactly like a quiet news day unless it
   // says so. The difference matters: one means there was nothing to post, the
-  // other means we stopped looking.
-  if (budgetExhausted) {
-    lines.push('⚠️ תקציב הקריאות נגמר לפני שהושלם היעד - ייתכן שנשארו פריטים טובים');
-  }
+  // other means we stopped looking. This one stays because it changes what you
+  // would do next.
+  if (budgetExhausted) lines.push('⚠️ תקציב הקריאות נגמר — ייתכן שנשארו פריטים טובים');
 
-  const bySource = Object.entries(perSource || {})
-    .filter(([, n]) => n > 0)
-    .map(([id, n]) => `   • ${id}: ${n}`);
-  if (bySource.length) lines.push('', 'לפי מקור:', ...bySource);
-
+  // Failures stay too, named, because a source that has quietly stopped
+  // returning anything is invisible in a count that only reports successes.
   if (sourceErrors?.length) {
-    lines.push('', '⚠️ מקורות שנכשלו:');
-    for (const e of sourceErrors) lines.push(`   • ${e.name}: ${e.message}`);
+    lines.push(`⚠️ ${sourceErrors.length} מקורות נכשלו: ${sourceErrors.map((e) => e.name).join(', ')}`);
   }
 
   return lines.join('\n');
@@ -291,10 +288,15 @@ export function healthReport(rows = [], extra = []) {
  */
 export function overrideNotice(headline, overrides = []) {
   if (!overrides.length) return null;
-  const lines = ['🔓 עקיפת בקרות (בקשת בעלים)', headline, ''];
-  for (const o of overrides) lines.push(`   • ${o}`);
-  lines.push('', 'מגבלות הפלטפורמה עצמן לא נעקפות.');
-  return lines.join('\n');
+  // One line, and the guard names itself rather than being introduced.
+  //
+  // This was a heading, a blank line, a bulleted list and a closing sentence
+  // about platform limits — five lines to say "you asked for this, out of
+  // turn". The disclosure still happens, because the point of an override is
+  // that it is deliberate and deliberate means it was said out loud. But
+  // saying it at that length is how a thing meant to be noticed becomes a
+  // thing that is scrolled past.
+  return `🔓 ${headline} — ${overrides.join(' · ')}`;
 }
 
 /**

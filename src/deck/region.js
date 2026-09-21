@@ -159,6 +159,38 @@ export function deckPlace(slides = [], { kind = null } = {}) {
  * WITH the ב attached, so stripping the ה cannot accidentally match a country
  * whose name merely starts with one.
  */
+/**
+ * Do the slides actually sit where the deck says it went looking?
+ *
+ * Returns null when they agree or when either side is unknown, and a sentence
+ * when they do not. Strict on purpose: a deck headed "United States" carrying
+ * six Swiss peaks is not a cosmetic error. The header is wrong, the caption is
+ * wrong, and `place` — which the geographic quota measures and the repeat
+ * detector counts runs on — is wrong in a way that silently corrupts both.
+ *
+ * Compared on ISO codes rather than names, because the two sides get their
+ * country from different places: the slides from each place's own P17 claim,
+ * the region from geocoding the search string. Names disagree harmlessly
+ * ("USA" / "United States"); codes do not.
+ *
+ * Unknown is not mismatch. A region that would not geocode, or slides with no
+ * country claim, means there is nothing to check — and refusing a deck because
+ * a geocoder timed out would trade a rare wrong label for a common missing
+ * post.
+ */
+export function countryMismatch(slides = [], regionIso = null) {
+  const region = String(regionIso || '').toUpperCase();
+  if (!region) return null;
+
+  const place = deckPlace(slides);
+  if (place.scope !== 'country' || !place.iso) return null;
+
+  const actual = String(place.iso).toUpperCase();
+  if (actual === region) return null;
+
+  return `the slides are in ${actual} but the deck searched a region in ${region}`;
+}
+
 export function namesPlace(title, he) {
   const t = String(title || '');
   const p = String(he || '').trim();

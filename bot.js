@@ -1173,11 +1173,11 @@ bot.command('post', async (ctx) => {
   await ctx.reply(`⏳ מפרסם: ${item.headline}`);
   const sinceLast = store.lastPublishedAt() ? Date.now() - store.lastPublishedAt() : null;
   const ok = await runOverridden('/post', async () => {
-    noteOverride('סדר התור', `פורסם פריט ${n} לפני אלה שלפניו`);
+    noteOverride('סדר התור', `#${n} לפני התור`);
     if (sinceLast !== null && sinceLast < intervalMs) {
       noteOverride(
-        'מרווח בין פוסטים (POST_INTERVAL_MINUTES)',
-        `פורסם לפני ${Math.round(sinceLast / 60_000)} דק׳ במקום ${POST_INTERVAL_MINUTES}`
+        'מרווח',
+        `${Math.round(sinceLast / 60_000)}/${POST_INTERVAL_MINUTES} דק׳`
       );
     }
     return publishNext(item);
@@ -1198,8 +1198,8 @@ bot.command('next', async (ctx) => {
   const ok = await runOverridden('/next', async () => {
     if (sinceLast !== null && sinceLast < intervalMs) {
       noteOverride(
-        'מרווח בין פוסטים (POST_INTERVAL_MINUTES)',
-        `פורסם לפני ${Math.round(sinceLast / 60_000)} דק׳ במקום ${POST_INTERVAL_MINUTES}`
+        'מרווח',
+        `${Math.round(sinceLast / 60_000)}/${POST_INTERVAL_MINUTES} דק׳`
       );
     }
     return publishNext();
@@ -1512,46 +1512,10 @@ async function buildAndStageDeck(arg, chatId) {
       idea = { ...cover, where: req.where, kind: req.kind, want: req.want, whyNow: null, asked: arg };
     } else {
       console.log('deck: proposing ideas');
-      // What actually went out, in words the model can read.
-      //
-      // This mapped `p.headline || p.id` against a log that never stored a
-      // headline — recordPublished did not even accept one — so every entry
-      // fell through to `p.id`, a sha1 slice. The prompt handed the model
-      // twelve hashes under the heading "ALREADY PUBLISHED (do not repeat, and
-      // avoid the same city twice in a row)". It could not read them, so it had
-      // no memory of the feed at all and returned its prior every run. For
-      // "beautiful travel slideshow" that prior is Kyoto, and the feed became a
-      // run of Kyoto while every quota read green.
-      //
-      // Rows written before these fields existed have neither and drop out,
-      // which shortens the list rather than padding it with noise.
-      const recent = store.recentTitles();
-      const ideas = await proposeIdeas({ count: 3, recent });
-      if (!ideas.length) return say('❌ לא חזרו רעיונות');
-
-      // Being told is not a mechanism. The prompt above now says what published
-      // and asks for somewhere else, and that is worth doing — but the whole
-      // reason the quotas exist is that a model handed a list of instructions
-      // will still cheerfully hand back what it was going to say anyway.
-      //
-      // So the ideas are REORDERED, not filtered: a place already over its
-      // share of the window goes to the back rather than being dropped. Dropping
-      // would mean answering "no ideas" on a feed whose every candidate happened
-      // to be somewhere popular, and a deck about a repeated city still beats no
-      // deck at all — it just should not be the first choice, and the approval
-      // message says so either way (see deckRepeats).
-      const history = store.recentPublished();
-      const fresh = ideas.filter((i) => !placeOverCap(i.where, history));
-      const ordered = fresh.length ? [...fresh, ...ideas.filter((i) => !fresh.includes(i))] : ideas;
-      if (fresh.length && fresh[0] !== ideas[0]) {
-        console.log(`deck: "${ideas[0].where}" is over its share — starting from "${fresh[0].where}" instead`);
-      }
-      idea = ordered[0];
-      // The other two are this run's fallbacks. They were generated anyway, and
-      // they are exactly what to try when the first idea turns out to be about
-      // a region nobody has mapped. Taken from `ordered`, so a fallback reached
-      // after the first choice fails is also the less-repeated one.
-      alternatives = ordered.slice(1).map((i) => ({ where: i.where, kind: i.kind }));
+      const picked = await pickIdea();
+      if (!picked) return say('❌ לא חזרו רעיונות');
+      idea = picked.idea;
+      alternatives = picked.alternatives;
     }
 
     // The idea is now TEXT, and text is where it stops until you say otherwise.
@@ -1619,6 +1583,57 @@ const proposalButtons = (key) =>
     [Markup.button.callback('📸🎵 שניהם', `db:${key}:both`)],
     [Markup.button.callback('🤖 שנה בהוראה', `dr:${key}`), Markup.button.callback('❌ דחה', `dx:${key}`)],
   ]);
+
+/**
+ * Ask for ideas and pick the one whose place the feed has least of.
+ *
+ * Shared by /deck and the daily suggestions, so both get the same reordering
+ * and the same fallbacks. It is the cheap half of making a deck — one call, no
+ * sourcing, no renders — which is what makes suggesting a few a day reasonable.
+ */
+async function pickIdea() {
+  const ideas = await proposeIdeas({ count: 3, recent: store.recentTitles() });
+  if (!ideas.length) return null;
+
+  const history = store.recentPublished();
+  const fresh = ideas.filter((i) => !placeOverCap(i.where, history));
+  const ordered = fresh.length ? [...fresh, ...ideas.filter((i) => !fresh.includes(i))] : ideas;
+  if (fresh.length && fresh[0] !== ideas[0]) {
+    console.log(`deck: "${ideas[0].where}" is over its share — starting from "${fresh[0].where}" instead`);
+  }
+  return {
+    idea: ordered[0],
+    alternatives: ordered.slice(1).map((i) => ({ where: i.where, kind: i.kind })),
+  };
+}
+
+/**
+ * A few deck ideas a day, unasked, the way cards arrive.
+ *
+ * Only the IDEA is produced here. Nothing is sourced, drafted or rendered until
+ * you tap בנה — which is the whole reason this can run on a timer at all: a
+ * suggestion costs one model call, and a deck costs minutes and a search budget.
+ *
+ * Capped two ways. DECKS_PER_DAY is the day's budget, and a ceiling on
+ * unanswered proposals stops a week away from returning fourteen stale ideas —
+ * the same reasoning as the daily card cap, which exists because an approval
+ * queue you cannot face is a queue you stop reading.
+ */
+const DECKS_PER_DAY = Math.max(0, Number(process.env.DECKS_PER_DAY ?? '2'));
+const DECK_BACKLOG_MAX = Math.max(1, Number(process.env.DECK_BACKLOG_MAX ?? '3'));
+let deckDay = null;
+let decksToday = 0;
+let lastDeckSuggestAt = 0;
+
+async function suggestDeck() {
+  const picked = await pickIdea();
+  if (!picked) {
+    console.log('deck: no ideas came back');
+    return false;
+  }
+  await proposeDeck(picked.idea, picked.alternatives, staging);
+  return true;
+}
 
 async function proposeDeck(idea, alternatives, chatId) {
   const key = store.addProposal({ idea, alternatives, chatId });
@@ -1996,6 +2011,25 @@ function tick() {
   const inHours = hour >= Number(RUN_HOUR) && hour < Number(GATHER_UNTIL_HOUR);
   const remaining = remainingToday(day);
   const due = Date.now() - lastGatherAt >= gatherIntervalMs;
+
+  // Deck ideas, on the same rhythm as cards and in the same hours. Only the
+  // idea — nothing is built until you tap. Spaced by the gather interval so
+  // they arrive through the day rather than three at once at 08:00.
+  if (deckDay !== day) {
+    deckDay = day;
+    decksToday = 0;
+  }
+  if (
+    inHours &&
+    DECKS_PER_DAY > 0 &&
+    decksToday < DECKS_PER_DAY &&
+    store.proposalSize() < DECK_BACKLOG_MAX &&
+    Date.now() - lastDeckSuggestAt >= gatherIntervalMs
+  ) {
+    lastDeckSuggestAt = Date.now();
+    decksToday += 1;
+    suggestDeck().catch((e) => console.error('deck suggestion failed:', e.message));
+  }
 
   if (inHours && remaining > 0 && due) {
     lastGatherAt = Date.now();

@@ -22,6 +22,7 @@ import { normaliseIdea } from '../src/deck/ideas.js';
 import { readFileSync } from 'node:fs';
 import { FIELDS_BY_KIND } from '../src/deck/fields.js';
 import { cinematicQueries } from '../src/images/curate.js';
+import { countryMismatch } from '../src/deck/region.js';
 import { SCRIM_INK } from '../src/render/theme.js';
 import {
   lengthValue,
@@ -1647,6 +1648,31 @@ ok('it says the post is kept', waitMsg.includes('ממתין'));
 ok('it carries the headline', waitMsg.includes('המקדשים של קיוטו'));
 ok('and says how many are waiting', waitMsg.includes('3'));
 ok('it does not claim anything failed', !/נכשל|שגיאה/.test(waitMsg));
+
+/* -------------------------------------------------------------------------- */
+group('a deck must be where it says it is');
+
+// A deck went out headed "United States" carrying six Swiss peaks, with Swiss
+// flags and a Hebrew title naming שווייץ. Everything a reader saw was right and
+// everything the bot RECORDED was wrong — and `place` is what the geographic
+// quota measures and the repeat detector counts runs on, so the guard that
+// exists to stop one country dominating was filing Switzerland under America.
+//
+// The two halves come from different places on purpose: the cover's country
+// from each slide's own P17 claim, `where` from the string the map was searched
+// with. Nothing compared them.
+const swissSlides = [{ iso: 'CH', countryHe: 'שווייץ' }, { iso: 'CH', countryHe: 'שווייץ' }];
+ok('Swiss slides in a US search is a mismatch', countryMismatch(swissSlides, 'US'));
+eq('Swiss slides in a Swiss search is fine', countryMismatch(swissSlides, 'CH'), null);
+// Compared on ISO rather than name: the two sides name countries differently
+// and a string compare would fire on "USA" vs "United States".
+eq('case does not matter', countryMismatch(swissSlides, 'ch'), null);
+
+// Unknown is not mismatch. Refusing a deck because a geocoder timed out would
+// trade a rare wrong label for a common missing post.
+eq('no region resolved means nothing to check', countryMismatch(swissSlides, null), null);
+eq('slides with no country claim likewise', countryMismatch([{}, {}], 'US'), null);
+eq('and a deck spanning countries is not a mismatch', countryMismatch([{ iso: 'CH' }, { iso: 'IT' }], 'US'), null);
 
 /* -------------------------------------------------------------------------- */
 group('TikTok scopes — the half-connection that looked connected');
