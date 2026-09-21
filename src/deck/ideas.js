@@ -227,6 +227,21 @@ a cover is the one line a viewer checks against the pictures immediately.
 If the strongest honest line for a category is quieter than you would like,
 take the quieter line. A cover that oversells is found out in one swipe.
 
+STOP WHEN THE LINE IS DONE
+
+The commonest failure is not a bad opening, it is a good opening that keeps
+going. "המקומות הכי טובים בנורווגיה לראות את האורות הצפוניים" is finished. Any
+clause after it — what you will find there, how many there are, why now — is
+the caption's job and belongs nowhere near the cover.
+
+Read your line back and cut everything after the point where it could have
+stopped. If two clauses both earn their place, you have written two covers and
+should keep the better one.
+
+A deck about something a photograph already shows does not need the photograph
+described. An aurora deck is not "the skies that do not look real" — the sky is
+in the picture. Name the place and what the list is FOR.
+
 NEVER "פעם אחת בחיים" ON ITS OWN. It is always "פעם אחת בחיים לפחות" - the
 bare form promises the place is a one-time visit, and the point of the line is
 that it is worth going back to.
@@ -436,6 +451,17 @@ export async function reviseIdea(idea, instruction, { today = new Date() } = {})
   const said = String(instruction || '').trim();
   if (!said) throw new Error('nothing to apply — the reply was empty');
 
+  // A free-form idea is revised AS a free-form idea.
+  //
+  // This used IDEAS_SCHEMA for everything, and that schema has no concept of
+  // free form — so "fix the title" on an aurora deck came back as a category
+  // deck of attractions in Northern Norway: cable cars, a planetarium, two ice
+  // hotels. A different post, from a request that asked for one line to change.
+  //
+  // Which kind of deck this is was decided when you typed /deck free. A
+  // revision may change anything in it; it may not change what it is.
+  if (idea.freeform) return reviseFreeform(idea, said, { today });
+
   const month = today.toLocaleString('en-GB', { month: 'long' });
   const user = [
     `TODAY: ${today.toISOString().slice(0, 10)} (${month})`,
@@ -606,6 +632,72 @@ export async function freeformIdea(request, { today = new Date() } = {}) {
     countryHe: clean(parsed.country_he),
     places,
     want: places.length,
+  };
+}
+
+/**
+ * Revise a free-form idea without turning it into something else.
+ *
+ * Same schema it was made with, so what comes back is still names, photographs
+ * and a subject. The places are handed back in and kept unless the instruction
+ * is about them — "fix the title" should cost the title and nothing else.
+ */
+async function reviseFreeform(idea, said, { today = new Date() } = {}) {
+  const res = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 4000,
+    output_config: { effort: EFFORT, format: { type: 'json_schema', schema: FREEFORM_SCHEMA } },
+    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+    messages: [
+      {
+        role: 'user',
+        content: [
+          `TODAY: ${today.toISOString().slice(0, 10)}`,
+          "",
+          'THE ORIGINAL REQUEST, VERBATIM:',
+          idea.asked,
+          "",
+          'THE FREE-FORM DECK AS IT STANDS:',
+          `  title_he: ${idea.titleHe}`,
+          `  emphasis_he: ${idea.emphasisHe}`,
+          `  where_en: ${idea.whereEn}`,
+          `  subject_en: ${idea.subjectEn}`,
+          ...idea.places.map((p, i) => `  ${i + 1}. ${p.nameHe} / ${p.nameEn}${p.noteHe ? ` (${p.noteHe})` : ''}`),
+          "",
+          'WHAT THE OWNER REPLIED, VERBATIM:',
+          said,
+          "",
+          'Change what was asked and keep everything else EXACTLY as it is. A reply',
+          'about the title changes the title and leaves the places alone, in order,',
+          'with their notes. This stays a free-form deck: names and photographs, no',
+          'facts.',
+        ].join('\n'),
+      },
+    ],
+  });
+
+  recordUsage(res.usage, MODEL);
+  if (res.stop_reason === 'refusal') throw new Error('revision refused');
+  const text = res.content.find((b) => b.type === 'text')?.text;
+  if (!text) throw new Error('revision returned no text');
+
+  const parsed = JSON.parse(text);
+  const clean = (v) => String(v || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+  const places = (parsed.places || [])
+    .map((p) => ({ nameHe: clean(p.name_he), nameEn: clean(p.name_en), noteHe: clean(p.note_he) }))
+    .filter((p) => p.nameHe && p.nameEn)
+    .slice(0, 7);
+
+  return {
+    ...idea,
+    titleHe: clean(parsed.title_he) || idea.titleHe,
+    emphasisHe: clean(parsed.emphasis_he) || idea.emphasisHe,
+    whereEn: clean(parsed.where_en) || idea.whereEn,
+    subjectEn: clean(parsed.subject_en) || idea.subjectEn,
+    // Fewer than three back means the revision lost the deck rather than
+    // changing it — keep what was there.
+    places: places.length >= 3 ? places : idea.places,
+    want: places.length >= 3 ? places.length : idea.want,
   };
 }
 
