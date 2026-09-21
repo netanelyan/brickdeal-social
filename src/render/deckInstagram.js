@@ -1,4 +1,4 @@
-import { baseCss, escapeHtml as e, palette, pillarAccent, siteMark } from './theme.js';
+import { baseCss, escapeHtml as e, palette, pillarAccent, siteMark, SCRIM_INK } from './theme.js';
 import { emojiHtml } from './emojiArt.js';
 
 // The same deck, drawn as a carousel of cards.
@@ -82,11 +82,11 @@ function scrimCss(scrim) {
   return `
   .scrim-top {
     position: absolute; inset: 0 0 auto 0; height: 34%;
-    background: linear-gradient(to bottom, rgba(16,32,31,${top}) 0%, rgba(16,32,31,0) 100%);
+    background: linear-gradient(to bottom, rgba(${SCRIM_INK},${top}) 0%, rgba(${SCRIM_INK},0) 100%);
   }
   .scrim-bottom {
     position: absolute; inset: auto 0 0 0; height: 58%;
-    background: linear-gradient(to top, rgba(16,32,31,${bottom}) 0%, rgba(16,32,31,0.86) 34%, rgba(16,32,31,0) 100%);
+    background: linear-gradient(to top, rgba(${SCRIM_INK},${bottom}) 0%, rgba(${SCRIM_INK},0.86) 34%, rgba(${SCRIM_INK},0) 100%);
   }`;
 }
 

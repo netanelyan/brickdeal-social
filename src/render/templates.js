@@ -1,4 +1,4 @@
-import { baseCss, escapeHtml as e, palette, pillarAccent, siteMark, CARD_W, CARD_H } from './theme.js';
+import { baseCss, escapeHtml as e, palette, pillarAccent, siteMark, SCRIM_INK, CARD_W, CARD_H } from './theme.js';
 
 // The layout set.
 //
@@ -114,7 +114,7 @@ export const SCRIM_FALLBACK = { bottom: 0.97, top: 0.72 };
 const photoCss = (scrim = null) => {
   const b = scrim?.bottom ?? SCRIM_FALLBACK.bottom;
   const t = scrim?.top ?? SCRIM_FALLBACK.top;
-  const at = (share) => `rgba(16,32,31,${(b * share).toFixed(3)})`;
+  const at = (share) => `rgba(${SCRIM_INK},${(b * share).toFixed(3)})`;
   return `
   .photo-card { padding: 0; }
   .bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
@@ -126,11 +126,11 @@ const photoCss = (scrim = null) => {
     position: absolute; left: 0; right: 0; bottom: 0; height: 52%;
     background: linear-gradient(to top,
       ${at(1)} 0%, ${at(0.97)} 34%,
-      ${at(0.64)} 66%, rgba(16,32,31,0) 100%);
+      ${at(0.64)} 66%, rgba(${SCRIM_INK},0) 100%);
   }
   .scrim-top {
     position: absolute; left: 0; right: 0; top: 0; height: 22%;
-    background: linear-gradient(to bottom, rgba(16,32,31,${t.toFixed(3)}), rgba(16,32,31,0));
+    background: linear-gradient(to bottom, rgba(${SCRIM_INK},${t.toFixed(3)}), rgba(${SCRIM_INK},0));
   }
   .layer { position: relative; z-index: 2; display: flex; flex-direction: column; height: 100%; }
 `;
@@ -170,7 +170,7 @@ function photoBandCard(d, accent, image) {
     .pb-chip {
       position: absolute; z-index: 2; top: 44px; right: 48px;
       display: flex; align-items: center; gap: 18px;
-      background: rgba(16,32,31,0.82); backdrop-filter: blur(2px);
+      background: rgba(${SCRIM_INK},0.82); backdrop-filter: blur(2px);
       padding: 14px 26px; border-radius: 999px;
     }
     /* The chip is a pill, so the stacked brand is scaled down rather than

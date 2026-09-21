@@ -20,6 +20,21 @@ export const palette = {
   line: 'rgba(242, 236, 224, 0.14)',
 };
 
+/**
+ * What a scrim over a photograph is made of, as "r,g,b" for interpolation.
+ *
+ * NOT palette.ink, and that is the whole point. The ink is a near-black with a
+ * deliberate green cast, which is right for a flat card ground — it is a colour
+ * rather than an absence of one. Laid over a photograph at 80-97% opacity it
+ * stops being a ground and becomes a filter: every shadow in the picture picks
+ * up the cast, and a snowfield under the headline goes faintly green.
+ *
+ * Same hue, same lightness, roughly a third of the saturation. Enough that the
+ * scrim still belongs to the palette rather than being a generic black, little
+ * enough that it reads as shadow instead of as a colour somebody chose.
+ */
+export const SCRIM_INK = '21,27,26';
+
 // Per-pillar accent, so a run of cards reads as one system while still being
 // distinguishable at a glance in the channel.
 export const pillarAccent = {
