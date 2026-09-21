@@ -7,7 +7,7 @@ import { safeStem } from '../src/render/index.js';
 import { htmlToText, stripBoilerplate, decodeEntities, fetchReadable, FetchError } from '../src/fetchPage.js';
 import { parseFeed } from '../src/sources/rss.js';
 import { monthlyNormals, verdictFor } from '../src/sources/climate.js';
-import { quotaBlock } from '../src/pillars.js';
+import { quotaBlock, placeOverCap } from '../src/pillars.js';
 import { scoreItem, rank } from '../src/score.js';
 import * as store from '../src/store.js';
 import { candidateId, tripGap } from '../src/candidate.js';
@@ -407,6 +407,31 @@ ok('a candidate with no source is not capped by one', quotaBlock({ pillar: 'rout
 // Records written before sourceId was stored count toward nobody's share, so the
 // cap loosens for a window rather than blocking real posts over a missing field.
 ok('history from before the field existed blocks nothing', quotaBlock({ pillar: 'route', tags: [], sourceId: 'smithsonian-volcano' }, hist(20, 0)) === null);
+
+// The axis none of the three caps above could see. A feed can satisfy every one
+// of them and still be entirely about one city: decks file as pillar `day` with
+// no sourceId, so only the 40% pillar cap could bite a run of Kyoto, and it did
+// not. This is the cap that measures where a post is actually about.
+const placeHist = (n, atPlace, place = 'Kyoto') =>
+  Array.from({ length: n }, (_, i) => ({
+    pillar: i % 2 ? 'inCity' : 'timing',
+    tags: [],
+    place: i < atPlace ? place : `Elsewhere-${i}`,
+  }));
+
+ok('one city cannot become the feed', quotaBlock({ pillar: 'route', tags: [], place: 'Kyoto' }, placeHist(20, 6)) !== null);
+ok('a city under its share still publishes', quotaBlock({ pillar: 'route', tags: [], place: 'Kyoto' }, placeHist(20, 2)) === null);
+ok('a candidate with no place is not capped by one', quotaBlock({ pillar: 'route', tags: [] }, placeHist(20, 20)) === null);
+// Case and stray space are the same city; nothing beyond that is guessed at,
+// because merging "Dolomites" into "Italian Dolomites" would cap two genuinely
+// different destinations as one.
+ok('case and space do not defeat the cap', placeOverCap('  kyoto ', placeHist(20, 6)) !== null);
+ok('a different city is a different bucket', placeOverCap('Vienna', placeHist(20, 20)) === null);
+// Same forgiveness the source cap gets: rows written before `place` existed
+// count toward nobody's share rather than blocking real posts over a field that
+// was never written.
+ok('history from before the field existed blocks nothing', placeOverCap('Kyoto', hist(20, 0)) === null);
+ok('below the sample floor nothing is capped', placeOverCap('Kyoto', placeHist(4, 4)) === null);
 
 /* -------------------------------------------------------------------------- */
 group('what the idea prompt remembers — the list that was twelve hashes');

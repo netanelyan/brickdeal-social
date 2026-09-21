@@ -14,6 +14,7 @@ import { publishTelegram, publishTelegramDeck, sendForApproval } from './src/pub
 import { proposeIdeas, titleForRequest } from './src/deck/ideas.js';
 import { buildDeck } from './src/deck/build.js';
 import { toDeckCandidate, deckTopic } from './src/deck/candidate.js';
+import { placeOverCap } from './src/pillars.js';
 import { canonicalKind } from './src/sources/tiyulplus.js';
 import { KINDS } from './src/sources/places.js';
 import { resolveRequest } from './src/deck/request.js';
@@ -1224,11 +1225,30 @@ async function buildAndStageDeck(arg, chatId) {
       const recent = store.recentTitles();
       const ideas = await proposeIdeas({ count: 3, recent });
       if (!ideas.length) return say('❌ לא חזרו רעיונות');
-      idea = ideas[0];
+
+      // Being told is not a mechanism. The prompt above now says what published
+      // and asks for somewhere else, and that is worth doing — but the whole
+      // reason the quotas exist is that a model handed a list of instructions
+      // will still cheerfully hand back what it was going to say anyway.
+      //
+      // So the ideas are REORDERED, not filtered: a place already over its
+      // share of the window goes to the back rather than being dropped. Dropping
+      // would mean answering "no ideas" on a feed whose every candidate happened
+      // to be somewhere popular, and a deck about a repeated city still beats no
+      // deck at all — it just should not be the first choice, and the approval
+      // message says so either way (see deckRepeats).
+      const history = store.recentPublished();
+      const fresh = ideas.filter((i) => !placeOverCap(i.where, history));
+      const ordered = fresh.length ? [...fresh, ...ideas.filter((i) => !fresh.includes(i))] : ideas;
+      if (fresh.length && fresh[0] !== ideas[0]) {
+        console.log(`deck: "${ideas[0].where}" is over its share — starting from "${fresh[0].where}" instead`);
+      }
+      idea = ordered[0];
       // The other two are this run's fallbacks. They were generated anyway, and
       // they are exactly what to try when the first idea turns out to be about
-      // a region nobody has mapped.
-      alternatives = ideas.slice(1).map((i) => ({ where: i.where, kind: i.kind }));
+      // a region nobody has mapped. Taken from `ordered`, so a fallback reached
+      // after the first choice fails is also the less-repeated one.
+      alternatives = ordered.slice(1).map((i) => ({ where: i.where, kind: i.kind }));
       // `say`, not ctx.reply — this function runs detached from the update that
       // started it and there is no ctx here. It threw a ReferenceError on every
       // bare /deck, which is why that path appeared to hang.

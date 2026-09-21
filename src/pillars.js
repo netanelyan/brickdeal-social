@@ -96,10 +96,50 @@ export const quotaConfig = () => ({
   // pillar cap asks "is the feed varied?"; this asks "is it varied because more
   // than one source is feeding it?".
   sourceMaxShare: capShare('SOURCE_MAX_SHARE', 0.25),
+  // And no single PLACE. The three caps above are all about what a post is
+  // filed as; none of them can see where it is about, and a feed can satisfy
+  // every one of them while being entirely about one city.
+  //
+  // Which is what happened. Decks file as pillar `day` with no sourceId, so
+  // only the 40% pillar cap could ever bite them and a run of Kyoto cleared it
+  // comfortably. One post in five is already a lot for a single city on a feed
+  // that covers Europe, America and Asia.
+  placeMaxShare: capShare('PLACE_MAX_SHARE', 0.2),
   // Below this many published posts the shares are statistical noise — a cap of
   // 0.15 would block the very first kosher post forever on an empty feed.
   minSampleSize: Math.max(1, Number(process.env.QUOTA_MIN_SAMPLE ?? '8')),
 });
+
+/**
+ * A place, in a form two records can be compared on.
+ *
+ * Case and surrounding space only. Nothing clever: "Kyoto" and "kyoto" are one
+ * city, and anything beyond that — stripping a country suffix, matching
+ * "Dolomites" against "Italian Dolomites" — is a guess that would quietly merge
+ * two genuinely different destinations into one capped bucket.
+ */
+const placeKey = (s) => String(s || '').trim().toLowerCase();
+
+/**
+ * Is this place already over its share of the window?
+ *
+ * Separate from quotaBlock because the deck path needs it on its own: decks
+ * never reach quotaBlock, and the useful moment for them is when an idea is
+ * being CHOSEN, not after one has been built.
+ *
+ * Returns a reason string, or null when the place is fine or the window is too
+ * small to say. Rows with no `place` — everything published before the field
+ * existed — count toward nobody's share, the same way an absent sourceId does.
+ */
+export function placeOverCap(place, history = recentPublished()) {
+  const { placeMaxShare, minSampleSize } = quotaConfig();
+  if (history.length < minSampleSize) return null;
+  const key = placeKey(place);
+  if (!key) return null;
+  const share = history.filter((p) => placeKey(p.place) === key).length / history.length;
+  if (share < placeMaxShare) return null;
+  return `place "${place}" share ${(share * 100).toFixed(0)}% >= cap ${(placeMaxShare * 100).toFixed(0)}%`;
+}
 
 /**
  * Would publishing this candidate breach a quota?
@@ -138,6 +178,10 @@ export function quotaBlock(cand, history = recentPublished()) {
       return `source "${cand.sourceId}" share ${(share * 100).toFixed(0)}% >= cap ${(sourceMaxShare * 100).toFixed(0)}%`;
     }
   }
+
+  // Last, because it is the one a reader notices first.
+  const place = placeOverCap(cand.place, history);
+  if (place) return place;
 
   return null;
 }

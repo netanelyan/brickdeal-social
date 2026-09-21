@@ -132,7 +132,9 @@ async function build(item, { render = true } = {}) {
   //    pipeline, not from the person who owns it — but it gives way loudly:
   //    what it measured and what the cap was travel with the candidate to the
   //    approval card and to Telegram before anything publishes.
-  const quotaCand = { ...d, sourceId: item.sourceId };
+  // `place` is lifted off the trip because that is where a card carries it, and
+  // the geographic cap has to read the same field the published log records.
+  const quotaCand = { ...d, sourceId: item.sourceId, place: d.trip?.where || null };
   const blocked = quotaBlock(quotaCand);
   if (blocked && !noteOverride('מכסת נושאים', blocked)) {
     throw new RejectedError('quota', blocked);
