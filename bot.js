@@ -856,12 +856,14 @@ async function publishNext(item = null) {
       // A deck handed to your inbox did not publish, and saying it did is the
       // one wrong thing to say here: you would read "posted" and not open the
       // app, which is the only place the last step can happen.
+      // Which of the destinations took a draft rather than a post. Passed
+      // through rather than decided here, so a deck that went to both is
+      // reported honestly on each: Instagram published, TikTok is waiting.
+      const drafted = cand.tiktokDraft && succeeded.includes('tiktok') ? ['tiktok'] : [];
       await notify.send(
         bot.telegram,
         staging,
-        cand.tiktokDraft && succeeded.length === 1 && succeeded[0] === 'tiktok'
-          ? notify.sentToDrafts(cand.headline)
-          : notify.published({ headline: cand.headline, succeeded, failed: [] })
+        notify.published({ headline: cand.headline, succeeded, failed: [], drafted })
       );
     }
     return true;

@@ -221,7 +221,14 @@ export function deckApprovalMessage(cand) {
 
   lines.push('');
   lines.push('🔗 מקורות:');
-  for (const s of deck.slides) lines.push(`   ${s.nameHe}: ${s.sourceUrl}`);
+  for (const s of deck.slides) {
+    // A slide with no page prints where its facts DID come from, rather than
+    // the word "null". Mountains and waterfalls mostly have no official site —
+    // that is why those kinds are allowed to build from Wikidata at all — so
+    // this is the common case for them, not an error. Printing the raw value
+    // made a normal deck look broken and told you nothing about provenance.
+    lines.push(`   ${s.nameHe}: ${s.sourceUrl || `ויקינתונים${s.qid ? ` (${s.qid})` : ''}`}`);
+  }
 
   return lines.join('\n');
 }

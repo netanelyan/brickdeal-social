@@ -18,7 +18,6 @@ import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, evidence
 import { renderSlideHtml, SIZES, sizeClass, INK_LUMINANCE, FACES } from '../src/render/deckTemplates.js';
 import { renderInstagramSlideHtml } from '../src/render/deckInstagram.js';
 import { sizesFor } from '../src/deck/candidate.js';
-import { sentToDrafts } from '../src/notify.js';
 import { normaliseIdea } from '../src/deck/ideas.js';
 import { readFileSync } from 'node:fs';
 import { FIELDS_BY_KIND } from '../src/deck/fields.js';
@@ -49,6 +48,7 @@ import {
   quietAlert,
   targetAbandoned as notifyTargetAbandoned,
   publishWaitingForSetup,
+  published,
   withDetail,
 } from '../src/notify.js';
 import { describeError, InstagramError } from '../src/publish/instagram.js';
@@ -618,11 +618,30 @@ eq('a draft still renders the TikTok size', sizesFor(['tiktok']).join(','), 'tik
 
 // The message must not say "published". Nothing in the process can see whether
 // the app was ever opened, so this is the last honest thing it can report.
-const drafted = sentToDrafts('המקדשים של קיוטו');
-ok('it says where the deck is', drafted.includes('טיוטות'));
-ok('it carries the headline', drafted.includes('המקדשים של קיוטו'));
-ok('it says the post is NOT live', drafted.includes('לא באוויר'));
-ok('and never claims it published', !drafted.includes('פורסם'));
+// Reported per DESTINATION, not per post. A deck sent to both said
+// "פורסם לאינסטגרם וטיקטוק" — half true, and false in the direction that
+// matters: you read "posted", never open the app, and the app is the only
+// place a draft becomes a post.
+const bothMsg = published({ headline: 'המקדשים של קיוטו', succeeded: ['instagram', 'tiktok'], drafted: ['tiktok'] });
+ok('Instagram is reported as published', /פורסם לאינסטגרם/.test(bothMsg));
+ok('TikTok is reported as a draft', /טיקטוק.*טיוטות/.test(bothMsg));
+ok('and never as published', !/פורסם.*טיקטוק/.test(bothMsg));
+ok('it says the TikTok half is not live', bothMsg.includes('לא באוויר'));
+ok('it carries the headline', bothMsg.includes('המקדשים של קיוטו'));
+// Where it actually is. An upload is an inbox notification, not the Drafts
+// folder on the profile — the first place anybody looks, and the one place it
+// will not be.
+ok('it says to look in the inbox', bothMsg.includes('Inbox'));
+
+// TikTok alone: nothing published, so no posted line at all.
+const only = published({ headline: 'מסלולים באירופה', succeeded: ['tiktok'], drafted: ['tiktok'] });
+ok('a draft-only post claims nothing published', !only.includes('📤'));
+ok('and still says where it is', only.includes('טיוטות'));
+
+// And an ordinary post is untouched.
+const plain = published({ headline: 'כרטיס', succeeded: ['instagram'] });
+ok('a normal publish still reads as published', plain.includes('📤 פורסם לאינסטגרם'));
+ok('with no draft line', !plain.includes('טיוטות'));
 
 // The 24h cap counts posts PUBLISHED through the API. A draft publishes
 // nothing, so charging it against the cap would spend a limit never touched.

@@ -109,8 +109,23 @@ export function targetAbandoned(headline, abandoned = []) {
   ].join('\n');
 }
 
-export function published({ headline, succeeded, failed = [] }) {
-  const lines = [`📤 פורסם ל${targetsHe(succeeded)}`, headline];
+export function published({ headline, succeeded, failed = [], drafted = [] }) {
+  // A destination that took a DRAFT did not publish, and must not be listed as
+  // though it did. This reported per POST rather than per destination, so a
+  // deck sent to both said "פורסם לאינסטגרם וטיקטוק" — half true, and false in
+  // the direction that matters: you read "posted", never open the app, and the
+  // app is the only place a draft becomes a post.
+  const posted = succeeded.filter((t) => !drafted.includes(t));
+  const lines = [];
+  if (posted.length) lines.push(`📤 פורסם ל${targetsHe(posted)}`);
+  if (drafted.length) lines.push(`📥 ${targetsHe(drafted)}: נשלח לטיוטות — עוד לא באוויר`);
+  lines.push(headline);
+  // Where it actually is. An upload arrives as an INBOX NOTIFICATION, not in
+  // the Drafts folder on the profile — which is the first place anyone looks,
+  // and the one place it will not be.
+  if (drafted.length) {
+    lines.push('פתחו את טיקטוק ← תיבת ההודעות (Inbox) ← ההתראה על תוכן שהועלה. שם בוחרים סאונד ומפרסמים.');
+  }
   for (const f of failed) {
     lines.push(`⚠️ ${TARGET_HE[f.target] || f.target} נכשל: ${f.message}`);
   }
@@ -179,23 +194,6 @@ export function withDetail(hebrew, detail, { limit = 200 } = {}) {
   if (!raw) return hebrew;
   const short = raw.length > limit ? `${raw.slice(0, limit)}…` : raw;
   return `${hebrew}\n🔧 ${short}`;
-}
-
-/**
- * It reached your TikTok inbox. It is not posted.
- *
- * Its own message because "📤 פורסם לטיקטוק" would be false, and falsely in the
- * direction that matters: the whole point of a draft is that the last step is
- * yours, and a notification saying it went out is one you would read and then
- * not act on. Nothing in this process can see whether you ever open the app, so
- * this is the last thing it can honestly tell you about that deck.
- */
-export function sentToDrafts(headline) {
-  return [
-    '📥 נשלח לטיוטות בטיקטוק — ממתין לך באפליקציה',
-    headline,
-    'פתחו את טיקטוק, בחרו סאונד ופרסמו. עד אז הפוסט לא באוויר.',
-  ].join('\n');
 }
 
 /**
