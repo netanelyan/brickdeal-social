@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { verifySource, verifyEvidence, verifyDraftText, RejectedError } from './verify.js';
 import { draft as draftPost } from './draft.js';
 import { quotaBlock, describeRepeats } from './pillars.js';
-import { noteOverride, noteDisclosure, overrideActive, overrideNotes } from './override.js';
+import { noteOverride, overrideActive, overrideNotes } from './override.js';
 import { findImage, imageQueries, imagesEnabled } from './images.js';
 import { renderCard } from './render/index.js';
 import { isPhotoLayout, PHOTO_FALLBACK } from './render/templates.js';
@@ -142,7 +142,18 @@ async function build(item, { render = true } = {}) {
 
   //    Said whether or not a quota fired, because a share over thirty days is
   //    the wrong instrument for "the last three were all the same".
-  if (overrideActive()) for (const note of describeRepeats(quotaCand)) noteDisclosure(note);
+  //
+  //    And said whether or not an override is active. This was gated on
+  //    overrideActive(), so on the ordinary path — which is nearly every path —
+  //    the repeat was computed for nobody. The one sentence worth having, "this
+  //    is the third in a row", reached you only on the runs where you had
+  //    already decided to step over the guards.
+  //
+  //    It stays out of `overrides` rather than being added to both: that block
+  //    is headed "controls bypassed", and a repeat is an observation, not a
+  //    bypass. Carried on the candidate as `notes` and rendered under its own
+  //    heading, so an overridden run says each thing exactly once.
+  const repeats = describeRepeats(quotaCand);
 
   // 5. Image, if any provider is configured. v1 runs with none, so this is null
   //    and the layout choice already assumed as much.
@@ -196,6 +207,9 @@ async function build(item, { render = true } = {}) {
     // bypass happens during a gather and the post goes out hours later — the
     // sentence has to survive the wait to be worth anything.
     overrides: overrideActive() ? overrideNotes() : [],
+    // What about this one repeats what just went out. Always present, never a
+    // block — see the note at the quota check above.
+    notes: repeats,
   };
 
   // 6. Render last — it is the only step that costs a browser.

@@ -7,7 +7,8 @@ import { safeStem } from '../src/render/index.js';
 import { htmlToText, stripBoilerplate, decodeEntities, fetchReadable, FetchError } from '../src/fetchPage.js';
 import { parseFeed } from '../src/sources/rss.js';
 import { monthlyNormals, verdictFor } from '../src/sources/climate.js';
-import { quotaBlock, placeOverCap } from '../src/pillars.js';
+import { quotaBlock, placeOverCap, describeRepeats } from '../src/pillars.js';
+import { deckRepeats } from '../src/deck/candidate.js';
 import { scoreItem, rank } from '../src/score.js';
 import * as store from '../src/store.js';
 import { candidateId, tripGap } from '../src/candidate.js';
@@ -432,6 +433,47 @@ ok('a different city is a different bucket', placeOverCap('Vienna', placeHist(20
 // was never written.
 ok('history from before the field existed blocks nothing', placeOverCap('Kyoto', hist(20, 0)) === null);
 ok('below the sample floor nothing is capped', placeOverCap('Kyoto', placeHist(4, 4)) === null);
+
+// A streak is not a share, and the place streak was measured by nothing at all.
+const runHist = (places) => places.map((place) => ({ pillar: 'day', tags: [], place }));
+
+ok(
+  'three about one city in a row is said out loud',
+  describeRepeats({ pillar: 'day', tags: [], place: 'Kyoto' }, runHist(['Kyoto', 'Kyoto', 'Lisbon'])).some((n) =>
+    n.includes('Kyoto')
+  )
+);
+ok(
+  'a single previous post about it is not a streak',
+  !describeRepeats({ pillar: 'day', tags: [], place: 'Kyoto' }, runHist(['Kyoto', 'Lisbon', 'Porto'])).some((n) =>
+    n.includes('Kyoto')
+  )
+);
+ok(
+  'the streak is broken by anywhere else',
+  !describeRepeats({ pillar: 'day', tags: [], place: 'Kyoto' }, runHist(['Lisbon', 'Kyoto', 'Kyoto'])).some((n) =>
+    n.includes('Kyoto')
+  )
+);
+
+// The gap that let the run through: deckTopic is "<where> · <category>", so
+// Kyoto temples then Kyoto food then Kyoto gardens is three different topics.
+// The topic run breaks at the first change and reports nothing, while the feed
+// reads as three Kyoto posts running — which it is.
+const kyotoDeck = { where: 'Kyoto', category: 'garden', slides: [] };
+const mixedKyoto = [
+  { topic: 'Kyoto · food', place: 'Kyoto' },
+  { topic: 'Kyoto · temple', place: 'Kyoto' },
+  { topic: 'Lisbon · city', place: 'Lisbon' },
+];
+eq('the topic run sees nothing across categories', deckRepeats({ ...kyotoDeck }, mixedKyoto).filter((n) => n.includes('חוזר על')).length, 0);
+ok('but the place run catches it', deckRepeats({ ...kyotoDeck }, mixedKyoto).some((n) => n.includes('אותו מקום')));
+// Decks never reach quotaBlock, so for them saying it IS the intervention.
+ok(
+  'a deck over its place share says so',
+  deckRepeats({ ...kyotoDeck }, placeHist(20, 6)).some((n) => n.includes('share'))
+);
+ok('a deck about somewhere fresh says nothing', deckRepeats({ where: 'Porto', category: 'city', slides: [] }, mixedKyoto).length === 0);
 
 /* -------------------------------------------------------------------------- */
 group('what the idea prompt remembers — the list that was twelve hashes');

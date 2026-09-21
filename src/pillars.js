@@ -226,6 +226,15 @@ export function describeRepeats(cand, history = recentPublished(), { streak = 5 
     notes.push(`אותו מקור (${cand.sourceId}) — ${sourceRun + 1} ברצף`);
   }
 
+  // The run that is most obvious to a reader and was measured by nothing. Same
+  // threshold as the other two, and for the same reason a streak is counted
+  // separately from a share: three posts about one city out of forty is 7% of
+  // the window, under every cap, and the only thing anybody notices.
+  const placeRun = runLength((p) => placeKey(p.place), placeKey(cand.place));
+  if (placeRun >= 2) {
+    notes.push(`אותו מקום (${cand.place}) — ${placeRun + 1} ברצף`);
+  }
+
   if ((cand.tags || []).includes('kosher')) {
     const share = history.filter((p) => (p.tags || []).includes('kosher')).length;
     if (share) notes.push(`תגית kosher — ${share} מתוך ${history.length} בחלון`);

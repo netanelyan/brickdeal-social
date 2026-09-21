@@ -4,6 +4,7 @@ import { deckCaption } from '../format.js';
 import { targetsForKind } from '../publish/targets.js';
 import { overrideActive, overrideNotes } from '../override.js';
 import { recentPublished } from '../store.js';
+import { placeOverCap } from '../pillars.js';
 
 /** How many decks in a row have been about this same place and category. */
 export const deckTopic = (deck) => `${deck.where} · ${deck.category}`;
@@ -17,14 +18,40 @@ export const deckTopic = (deck) => `${deck.where} · ${deck.category}`;
  * is the only thing anybody notices.
  */
 export function deckRepeats(deck, history = recentPublished()) {
+  const notes = [];
+
   const topic = deckTopic(deck);
   let run = 0;
   for (const p of history) {
     if (p.topic !== topic) break;
     run++;
   }
-  if (run < 1) return [];
-  return [`חוזר על "${topic}" — ${run + 1} מצגות ברצף`];
+  if (run >= 1) notes.push(`חוזר על "${topic}" — ${run + 1} מצגות ברצף`);
+
+  // The same run counted on the PLACE alone, because the topic above is
+  // "<where> · <category>" and that is too specific to catch the thing it was
+  // written for. Kyoto temples, then Kyoto food, then Kyoto gardens is three
+  // different topics: the run breaks at the first one and reports nothing,
+  // while the feed reads as three Kyoto posts running. Which it is.
+  const place = String(deck.where || '').trim().toLowerCase();
+  if (place) {
+    let placeRun = 0;
+    for (const p of history) {
+      if (String(p.place || '').trim().toLowerCase() !== place) break;
+      placeRun++;
+    }
+    if (placeRun >= 1 && placeRun !== run) {
+      notes.push(`אותו מקום (${deck.where}) — ${placeRun + 1} ברצף`);
+    }
+  }
+
+  // And the share, which a run cannot see. Decks never reach quotaBlock, so
+  // unlike a card this is not blocked anywhere — saying it is the whole
+  // intervention, and it needs to be said before you tap approve.
+  const over = placeOverCap(deck.where, history);
+  if (over) notes.push(over);
+
+  return notes;
 }
 
 // A built deck becomes something the approval queue can carry.
@@ -101,7 +128,14 @@ export async function toDeckCandidate(built, { minSlides = Number(process.env.DE
     createdAt: deck.createdAt,
     // Same as a card: whatever the owner's request stepped over travels with
     // the deck so it can be said before it publishes, not discovered after.
-    overrides: overrideActive() ? [...overrideNotes(), ...deckRepeats(deck)] : [],
+    overrides: overrideActive() ? overrideNotes() : [],
+    // Repeats are NOT overrides and no longer ride along with them. They were
+    // only computed when an override was active, so on the ordinary path —
+    // every path, almost always — nobody was ever told "the third Kyoto deck in
+    // a row", which is precisely when being told is useful. And folding them
+    // into `overrides` filed them under "controls bypassed" when no control had
+    // been bypassed at all.
+    notes: deckRepeats(deck),
   };
 
   // Both platforms get the same words, for the same reason the card does: the

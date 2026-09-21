@@ -179,6 +179,18 @@ export function deckApprovalMessage(cand) {
     for (const o of cand.overrides) lines.push(`   • ${o}`);
   }
 
+  // Its own heading, and unconditional. These used to be folded into the block
+  // above, which meant two wrong things at once: they only appeared when an
+  // override was active, and when they did they were filed as controls that had
+  // been bypassed. A repeat bypasses nothing. It is the sentence that changes
+  // whether you tap approve on a slideshow that is fine on its own and is the
+  // third about the same city.
+  if (cand.notes?.length) {
+    lines.push('');
+    lines.push('👀 שימו לב:');
+    for (const n of cand.notes) lines.push(`   • ${n}`);
+  }
+
   lines.push('');
   lines.push('🔗 מקורות:');
   for (const s of deck.slides) lines.push(`   ${s.nameHe}: ${s.sourceUrl}`);
@@ -277,6 +289,14 @@ export function approvalMessage(cand) {
     lines.push('');
     lines.push('🔓 נעקפו בקרות:');
     for (const o of cand.overrides) lines.push(`   • ${o}`);
+  }
+
+  // What repeats what just went out — see the same block in the deck message.
+  // Always computed, never a block, and deliberately not filed under "bypassed".
+  if (cand.notes?.length) {
+    lines.push('');
+    lines.push('👀 שימו לב:');
+    for (const n of cand.notes) lines.push(`   • ${n}`);
   }
 
   // The rule is "the source URL is always in the approval message", so it is
