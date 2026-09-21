@@ -1915,8 +1915,7 @@ const dcap = deckCaption(deckFixture.deck);
 // Two descriptions, because one platform has a title field and the other does
 // not. Repeating the title in TikTok's description spends the first line of the
 // only place a link can be asked for on a line already read two centimetres up.
-eq('TikTok gets the shoutout alone', deckTiktokCaption().split('
-')[0], 'למתכנן טיולים חכם בביו שלנו');
+eq('TikTok gets the shoutout alone', deckTiktokCaption().split('\n')[0], 'למתכנן טיולים חכם בביו שלנו');
 ok('and never the title', !deckTiktokCaption().includes('פראג'));
 ok('the caption is the title', dcap.startsWith('המוזיאונים של פראג'));
 ok('and does not list the places', !dcap.includes('1. המוזיאון'));
