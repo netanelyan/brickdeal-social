@@ -38,6 +38,7 @@ import {
 import { publishTargets, targetsHe, allowedForKind } from './src/publish/targets.js';
 import { imagesEnabled } from './src/images.js';
 import { runOverridden, noteOverride, overrideNotes } from './src/override.js';
+import { startOAuthServer, stopOAuthServer } from './src/oauthServer.js';
 import { reasonHe } from './src/verify.js';
 import { LAYOUT_HE } from './src/render/templates.js';
 
@@ -1530,6 +1531,10 @@ async function main() {
   console.log(`   publishing to: ${publishTargets().join(' + ')}`);
   if (!CHANNEL_ID) console.log('   telegram: approval only (no CHANNEL_ID set, nothing posts to a channel)');
   console.log(`   images: ${imagesEnabled() ? 'a provider is configured' : 'text-led cards only'}`);
+  // Connecting TikTok from a browser instead of pasting a code into a terminal.
+  // In this process rather than a service of its own, so pm2 supervises it and
+  // so the token it writes goes through the same store this process holds open.
+  startOAuthServer();
   console.log(`   daily run at ${RUN_HOUR}:00 · target ${dailyTarget()} · drip every ${POST_INTERVAL_MINUTES} min`);
 
   await maybeRefreshIgToken();
@@ -1565,6 +1570,11 @@ main().catch((e) => {
 });
 
 const shutdown = async (sig) => {
+  // Release the port before anything slower. pm2 restart sends SIGTERM and then
+  // starts the replacement; a socket still held here greets the new process
+  // with EADDRINUSE, and the connect endpoint would be the one thing that did
+  // not come back from a routine restart.
+  await stopOAuthServer();
   await closeBrowser();
   bot.stop(sig);
 };

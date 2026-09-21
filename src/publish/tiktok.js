@@ -270,13 +270,21 @@ function persist(t) {
   });
 }
 
-/** First connection: the code from the redirect URL becomes a stored token. */
-export async function exchangeCode(code) {
+/**
+ * First connection: the code from the redirect URL becomes a stored token.
+ *
+ * `redirectUri` overrides TIKTOK_REDIRECT_URI for callers who were told which
+ * one the code was issued against — the browser flow in src/oauthServer.js is
+ * handed it by the callback page. TikTok requires the value here to match the
+ * one used at authorize time exactly, so the caller that knows it should say
+ * so; everything else keeps getting the configured default.
+ */
+export async function exchangeCode(code, { redirectUri } = {}) {
   const t = await token(
     {
       code,
       grant_type: 'authorization_code',
-      redirect_uri: process.env.TIKTOK_REDIRECT_URI || '',
+      redirect_uri: redirectUri || process.env.TIKTOK_REDIRECT_URI || '',
     },
     'exchange_code'
   );
