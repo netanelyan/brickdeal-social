@@ -38,7 +38,7 @@ import { sameSite } from '../src/search.js';
 import { authorityDomains, KINDS } from '../src/sources/places.js';
 import { pick, CATEGORY_HE, canonicalKind } from '../src/sources/tiyulplus.js';
 import { keepByName } from '../src/deck/shape.js';
-import { quietAlert, targetAbandoned as notifyTargetAbandoned } from '../src/notify.js';
+import { quietAlert, targetAbandoned as notifyTargetAbandoned, publishWaitingForSetup } from '../src/notify.js';
 import { describeError, InstagramError } from '../src/publish/instagram.js';
 import { publishTargets, targetsForKind, allowedForKind, liveTargets } from '../src/publish/targets.js';
 import {
@@ -1423,6 +1423,29 @@ withEnv({ ...IG, CHANNEL_ID: '@c', TIKTOK_CLIENT_KEY: 'k', TIKTOK_CLIENT_SECRET:
   ok('Instagram is live for cards', liveTargets().includes('instagram'));
   ok('Telegram is still not live', !liveTargets().includes('telegram'));
 });
+
+// The condition publishNext holds on. Before each kind had exactly ONE
+// destination, "no destination at all" needed two things switched off at once
+// and was a genuine edge case. Now an unconnected TikTok means every approved
+// deck reaches it — and the branch it used to fall into recorded the post as
+// published and dropped it. Silently, one slideshow at a time, at the drip
+// interval.
+withEnv({ ...IG, CHANNEL_ID: '@c' }, () => {
+  eq('with TikTok unconnected a deck has nowhere to go', targetsForKind('deck').length, 0);
+  ok('which is what makes it wait rather than be consumed', targetsForKind('deck').length === 0);
+  ok('while cards are unaffected and still publish', targetsForKind('card').length > 0);
+});
+
+// Its own message, not the outage one. "Held until TikTok comes back to work"
+// is the wrong sentence for an account that has never been connected, and a bot
+// that reports a setup step in the vocabulary of an outage teaches you to read
+// real outages as setup steps.
+const waitMsg = publishWaitingForSetup('המקדשים של קיוטו', ['tiktok'], 3);
+ok('it names the destination being waited on', waitMsg.includes('טיקטוק'));
+ok('it says the post is kept', waitMsg.includes('ממתין'));
+ok('it carries the headline', waitMsg.includes('המקדשים של קיוטו'));
+ok('and says how many are waiting', waitMsg.includes('3'));
+ok('it does not claim anything failed', !/נכשל|שגיאה/.test(waitMsg));
 
 const deckFixture = {
   kind: 'deck',

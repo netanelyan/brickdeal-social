@@ -152,6 +152,26 @@ export function publishHeld(headline, owed, succeeded = [], heldCount = 1) {
 }
 
 /**
+ * The destination does not exist yet, as opposed to being broken.
+ *
+ * Its own message for the same reason the platform-limit one has its own:
+ * "held until Instagram comes back to work" is the wrong sentence for an
+ * account that has never been connected, and a bot that reports a setup step it
+ * is waiting on in the vocabulary of an outage teaches you to read real outages
+ * as setup steps.
+ *
+ * The post is kept, not dropped. Nothing is wrong with it — there is simply
+ * nowhere to put it yet, and there will be.
+ */
+export function publishWaitingForSetup(headline, owed, heldCount = 1) {
+  return [
+    `⏸️ ${targetsHe(owed)} עוד לא מחובר — הפוסט ממתין ולא ירד לטמיון`,
+    headline,
+    `📥 ${heldCount} מוחזקים · /held לרשימה · /retry אחרי שהיעד יחובר`,
+  ].join('\n');
+}
+
+/**
  * A platform said "not now", and it meant it.
  *
  * Deliberately not the same message as a failure or a hold. TikTok allows an

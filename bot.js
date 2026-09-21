@@ -606,9 +606,33 @@ async function publishNext() {
     );
   }
 
-  // Nothing to do — the destination was reconfigured away while this sat in the
-  // queue. Recording it stops it looping forever as a card that owes nothing.
+  // Nothing to do, and two reasons for it that must not be treated alike.
   if (!owed.length) {
+    // The kind has no destination configured AT ALL — TikTok not connected yet,
+    // Instagram not set up. That is a fact about the install and a temporary
+    // one, not a fact about this post, so the post waits for the destination to
+    // arrive rather than being consumed by its absence.
+    //
+    // This became load-bearing the moment each kind got exactly one
+    // destination. Before that, "no destination at all" needed two things to be
+    // switched off at once and was genuinely an edge case; now an unconnected
+    // TikTok means EVERY approved deck lands here, and the branch below would
+    // record each one as published and drop it. Silently, at the drip interval,
+    // one slideshow at a time.
+    if (!targetsForKind(cand.kind).length) {
+      store.hold(cand, allowed, `no destination configured for a ${cand.kind || 'card'} yet`);
+      console.log(`publish: holding ${cand.kind || 'card'} — ${allowed.join(', ')} not configured yet`);
+      await notify.send(
+        bot.telegram,
+        staging,
+        notify.publishWaitingForSetup(cand.headline, allowed, store.heldCount())
+      );
+      return false;
+    }
+
+    // Otherwise the destination really was reconfigured away while this sat in
+    // the queue, and the kind still has somewhere to go in general. Recording it
+    // stops it looping forever as a card that owes nothing.
     store.recordPublished(publishedFacts(cand));
     return false;
   }
