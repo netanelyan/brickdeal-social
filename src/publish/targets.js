@@ -17,12 +17,22 @@ export const TARGET_HE = { telegram: 'טלגרם', instagram: 'אינסטגרם'
  *
  * Not a config value, an editorial rule: a news card is written for a feed and
  * a deck is written for a scroll, and posting either one in the other's place
- * is what makes a channel look automated. A card never goes to TikTok. A deck
- * goes to both, because the same slides read correctly in a carousel.
+ * is what makes a channel look automated.
+ *
+ * One destination each, and nothing to Telegram. A card is a feed post and
+ * belongs on Instagram; a deck is a vertical scroll and belongs on TikTok. The
+ * earlier arrangement sent both kinds to two or three places at once, which
+ * made every account a copy of the others — and a follower who sees the same
+ * post three times is being given two reasons to unfollow.
+ *
+ * Telegram keeps its real job. It is where cards are APPROVED, and that path
+ * does not go through here at all: approval runs on STAGING_CHAT_ID, publishing
+ * on CHANNEL_ID, and only the second one is a destination. Nothing about the
+ * DMs you approve in changes because the channel stopped receiving posts.
  */
 const ALLOWED_BY_KIND = {
-  card: ['telegram', 'instagram'],
-  deck: ['telegram', 'instagram', 'tiktok'],
+  card: ['instagram'],
+  deck: ['tiktok'],
 };
 
 /**
@@ -38,6 +48,23 @@ export const allowedForKind = (kind = 'card') => [...(ALLOWED_BY_KIND[kind] || A
 export function targetsForKind(kind = 'card', env = process.env) {
   const allowed = allowedForKind(kind);
   return publishTargets(env).filter((t) => allowed.includes(t));
+}
+
+/**
+ * Every destination that can actually receive something, across all kinds.
+ *
+ * Not the same as publishTargets(), and the difference is load-bearing now that
+ * the editorial rule routes each kind to exactly one place. publishTargets()
+ * answers "what is configured", which still counts a Telegram channel — but
+ * nothing routes to it any more, so its last-success timestamp stays null
+ * forever. Anything watching for a destination that has gone quiet would read
+ * that as Telegram being permanently dark and alarm about it every hour.
+ *
+ * So health, alarms and status read this instead: the union of where each kind
+ * is actually allowed to go.
+ */
+export function liveTargets(env = process.env) {
+  return [...new Set(Object.keys(ALLOWED_BY_KIND).flatMap((kind) => targetsForKind(kind, env)))];
 }
 
 /** Currently-configured destinations, in publish order. */

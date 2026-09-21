@@ -40,7 +40,7 @@ import { pick, CATEGORY_HE, canonicalKind } from '../src/sources/tiyulplus.js';
 import { keepByName } from '../src/deck/shape.js';
 import { quietAlert, targetAbandoned as notifyTargetAbandoned } from '../src/notify.js';
 import { describeError, InstagramError } from '../src/publish/instagram.js';
-import { publishTargets, targetsForKind, allowedForKind } from '../src/publish/targets.js';
+import { publishTargets, targetsForKind, allowedForKind, liveTargets } from '../src/publish/targets.js';
 import {
   defaultPrivacy,
   nextPrivacy,
@@ -1393,13 +1393,35 @@ eq('the TikTok description is the same text as the Instagram one', tiktokCaption
 /* -------------------------------------------------------------------------- */
 group('decks - a slideshow is not a card, and goes somewhere else');
 
-// The editorial rule, in code: a news card is written for a feed and never
-// reaches TikTok; a deck is written for a scroll and reaches both.
+// The editorial rule, in code: one destination each. A news card is written for
+// a feed and goes to Instagram; a deck is written for a vertical scroll and goes
+// to TikTok. Sending both kinds to several places at once made every account a
+// copy of the others.
 withEnv({ ...IG, CHANNEL_ID: '@c' }, () => {
-  ok('a card never goes to TikTok', !targetsForKind('card').includes('tiktok'));
-  eq('a card goes to the channel and Instagram', targetsForKind('card').join(','), 'telegram,instagram');
-  ok('a deck is permitted to reach TikTok', allowedForKind('deck').includes('tiktok'));
-  ok('a card is not, whatever is configured', !allowedForKind('card').includes('tiktok'));
+  eq('a card goes to Instagram and nowhere else', targetsForKind('card').join(','), 'instagram');
+  ok('a card never goes to TikTok', !allowedForKind('card').includes('tiktok'));
+  ok('a deck goes to TikTok', allowedForKind('deck').includes('tiktok'));
+  ok('and a deck no longer goes to Instagram', !allowedForKind('deck').includes('instagram'));
+  // CHANNEL_ID is set in this env and still nothing routes to it. Telegram is
+  // where posts are APPROVED; that path runs on STAGING_CHAT_ID and never comes
+  // through here.
+  ok('nothing publishes to Telegram, even with a channel configured', !allowedForKind('card').includes('telegram'));
+  ok('not even a deck', !allowedForKind('deck').includes('telegram'));
+
+  // The distinction health and the quiet alarm depend on. publishTargets says
+  // what is CONFIGURED and still counts a Telegram channel; liveTargets says
+  // what can actually receive something. Reading the first one would have left
+  // Telegram with a lastOkAt of null for ever, reported dark from boot onwards,
+  // with no possible way to clear it.
+  ok('a configured channel still counts as configured', publishTargets().includes('telegram'));
+  ok('but is not a live destination', !liveTargets().includes('telegram'));
+  eq('and the live set is exactly where the two kinds go', liveTargets().sort().join(','), 'instagram');
+});
+
+// With TikTok connected too, both kinds have somewhere to go and both show up.
+withEnv({ ...IG, CHANNEL_ID: '@c', TIKTOK_CLIENT_KEY: 'k', TIKTOK_CLIENT_SECRET: 's' }, () => {
+  ok('Instagram is live for cards', liveTargets().includes('instagram'));
+  ok('Telegram is still not live', !liveTargets().includes('telegram'));
 });
 
 const deckFixture = {

@@ -36,7 +36,7 @@ import {
   isPlatformLimit as isPlatformLimitTikTok,
   TIKTOK_DAILY_CAP,
 } from './src/publish/tiktok.js';
-import { publishTargets, targetsHe, allowedForKind } from './src/publish/targets.js';
+import { publishTargets, targetsForKind, liveTargets, targetsHe, allowedForKind } from './src/publish/targets.js';
 import { imagesEnabled } from './src/images.js';
 import { runOverridden, noteOverride, overrideNotes } from './src/override.js';
 import { startOAuthServer, stopOAuthServer } from './src/oauthServer.js';
@@ -75,14 +75,20 @@ if (!TG_BOT_TOKEN) {
   console.error('Set TG_BOT_TOKEN in .env');
   process.exit(1);
 }
-// At least one publish destination, or approving something sends it nowhere.
-// CHANNEL_ID alone, Instagram alone, or both — but not neither. Telegram being
-// approval-only (no channel) is a supported setup; silently having nowhere to
-// publish is not.
-if (!publishTargets().length) {
+// At least one KIND has to have somewhere to go, or approving something sends
+// it nowhere.
+//
+// Asked per kind rather than globally, which matters now that nothing publishes
+// to Telegram. A global check counts CHANNEL_ID as a destination, so a box with
+// a channel configured and neither Instagram nor TikTok would start cleanly and
+// then silently eat everything approved — which is the exact failure this guard
+// was written to prevent, surviving as a check that no longer measures it.
+if (!targetsForKind('card').length && !targetsForKind('deck').length) {
   console.error(
-    'No publish destination configured. Set CHANNEL_ID for a Telegram channel, ' +
-      'or IG_USER_ID + IG_ACCESS_TOKEN + CARD_PUBLIC_BASE_URL for Instagram, or both.'
+    'No publish destination configured. Cards go to Instagram ' +
+      '(IG_USER_ID + IG_ACCESS_TOKEN + CARD_PUBLIC_BASE_URL) and decks go to TikTok ' +
+      '(npm run tiktok-token, or connect it from the browser). Set up at least one.\n' +
+      'CHANNEL_ID no longer counts: Telegram is where you approve posts, not where they publish.'
   );
   process.exit(1);
 }
@@ -1073,7 +1079,7 @@ bot.command('clear_held', async (ctx) => {
   // The point of the command. Un-degrading is what lets the NEXT post reach
   // the destination, and it is the half that /retry could not deliver on its
   // own here.
-  for (const t of publishTargets()) store.clearDegraded(t);
+  for (const t of liveTargets()) store.clearDegraded(t);
 
   await ctx.reply(
     [
@@ -1098,7 +1104,7 @@ bot.command('retry', async (ctx) => {
   const targets = new Set();
   for (const h of rows) for (const t of h.targets) targets.add(t);
   // Also clear anything degraded but with nothing held behind it.
-  for (const t of publishTargets()) targets.add(t);
+  for (const t of liveTargets()) targets.add(t);
   for (const t of targets) store.clearDegraded(t);
 
   for (const h of rows) store.enqueue({ ...h.cand, publishAttempts: 0, pendingTargets: h.targets });
@@ -1224,8 +1230,8 @@ bot.command('status', async (ctx) => {
       dailyTarget: dailyTarget(),
       nextGatherInMin: Math.max(0, Math.round((gatherIntervalMs - (Date.now() - lastGatherAt)) / 60000)),
       heldCount: store.heldCount(),
-      targetHealth: Object.fromEntries(publishTargets().map((t) => [t, store.targetHealth(t)])),
-      targets: publishTargets(),
+      targetHealth: Object.fromEntries(liveTargets().map((t) => [t, store.targetHealth(t)])),
+      targets: liveTargets(),
     })
   );
 });
@@ -1520,7 +1526,7 @@ bot.command('tiktok', async (ctx) => {
  * than vanishing from the list that would have explained it.
  */
 bot.command('health', (ctx) => {
-  const targets = [...new Set([...publishTargets(), ...store.healthTargets()])];
+  const targets = [...new Set([...liveTargets(), ...store.healthTargets()])];
   const rows = targets.map((target) => ({
     target,
     ...store.targetHealth(target),
@@ -1634,7 +1640,10 @@ function quietCheck() {
   // A destination with no success on record has never worked on this install, so
   // it measures from boot rather than opting out — never-worked is the loudest
   // case, not an exemption.
-  const darkTargets = publishTargets()
+  // liveTargets, not publishTargets: a configured Telegram channel receives
+  // nothing now, so its lastOkAt is null forever and it would be reported dark
+  // from boot onwards, every hour, with no way to ever clear it.
+  const darkTargets = liveTargets()
     .map((target) => {
       const okAt = store.lastOkAt(target);
       return { target, ago: Date.now() - (okAt ?? bootedAt), ever: okAt != null };
@@ -1732,8 +1741,12 @@ async function main() {
   console.log(`bot live (@${me.username})`);
   console.log(`   owner lock: ON (only ${OWNER_ID})`);
   console.log(`   sources: ${enabledSources().length} enabled`);
-  console.log(`   publishing to: ${publishTargets().join(' + ')}`);
-  if (!CHANNEL_ID) console.log('   telegram: approval only (no CHANNEL_ID set, nothing posts to a channel)');
+  // Per kind, because that is now the whole rule and a combined list would be a
+  // lie in both directions: it would name Telegram, which receives nothing, and
+  // it would not say that a card and a deck go to different places.
+  console.log(`   cards to: ${targetsForKind('card').join(' + ') || 'NOWHERE (Instagram not configured)'}`);
+  console.log(`   decks to: ${targetsForKind('deck').join(' + ') || 'NOWHERE (TikTok not connected)'}`);
+  console.log('   telegram: approval only — nothing publishes to a channel');
   console.log(`   images: ${imagesEnabled() ? 'a provider is configured' : 'text-led cards only'}`);
   // Connecting TikTok from a browser instead of pasting a code into a terminal.
   // In this process rather than a service of its own, so pm2 supervises it and
@@ -1762,7 +1775,7 @@ async function main() {
       sourceCount: enabledSources().length,
       queueSize: store.queueSize(),
       stagingSize: store.stagingSize(),
-      targets: publishTargets(),
+      targets: liveTargets(),
       images: imagesEnabled(),
     })
   );
