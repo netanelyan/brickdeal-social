@@ -21,7 +21,16 @@ import { resolveRequest } from './src/deck/request.js';
 import { buildWithFallback, describeAttempt } from './src/deck/attempt.js';
 import { buildFreeformDeck } from './src/deck/build.js';
 import { searchConfigured, remaining as searchRemaining, dailyBudget as searchBudget } from './src/search.js';
-import { publishInstagram, instagramConfigured, remainingQuota, refreshToken, tokenDaysLeft, authMode, describeError } from './src/publish/instagram.js';
+import {
+  publishInstagram,
+  instagramConfigured,
+  remainingQuota,
+  refreshToken,
+  tokenDaysLeft,
+  authMode,
+  describeError,
+  isPlatformLimit as isPlatformLimitInstagram,
+} from './src/publish/instagram.js';
 import {
   publishTikTok,
   tiktokConfigured,
@@ -785,6 +794,10 @@ async function publishNext(item = null) {
   // right now, rather than refusing this card or being broken?
   const platformLimit = {
     tiktok: isPlatformLimitTikTok,
+    // Graph throttles clear by themselves. Retried as failures they cost three
+    // attempts each and then degrade Instagram, which is the wrong answer to a
+    // busy afternoon.
+    instagram: isPlatformLimitInstagram,
   };
   // And a fourth: is this destination refusing everything until somebody goes
   // and fixes the connection?
@@ -1213,9 +1226,19 @@ bot.command('queue', (ctx) => {
   // backlog of thirty is a different problem and /status is where it shows.
   const SHOWN = 12;
   const lines = rows.slice(0, SHOWN).map((c, i) => {
-    const where = targetsHe(c.pendingTargets?.length ? c.pendingTargets : c.publishTargets || []);
+    // What it will ACTUALLY publish to: the pending list filtered by what this
+    // kind is allowed. A card queued before the routing rule changed still
+    // carries telegram, and printing it promises a destination that will be
+    // dropped at publish time.
+    const owed = (c.pendingTargets?.length ? c.pendingTargets : c.publishTargets || []).filter((t) =>
+      allowedForKind(c.kind).includes(t)
+    );
+    const where = targetsHe(owed);
     const kind = c.kind === 'deck' ? '🎞️' : '📰';
-    const draft = c.tiktokDraft ? ' · טיוטה' : '';
+    // Only when TikTok is still owed. Approval sends the draft immediately and
+    // queues the rest, so the remainder is Instagram-only — and calling that
+    // "draft" describes a handoff that already happened.
+    const draft = c.tiktokDraft && owed.includes('tiktok') ? ' · טיוטה' : '';
     return `${i + 1}. ${kind} ${c.headline}\n   ${where || 'אין יעד'}${draft}`;
   });
 

@@ -58,6 +58,33 @@ export class InstagramError extends Error {
   }
 }
 
+/**
+ * Codes that mean "not now" rather than "broken" or "not this card".
+ *
+ * Graph throttles by app, by user and by page, and every one of those clears on
+ * its own within the hour. Treated as a failure they cost three publish
+ * attempts each and then degrade the destination — so a busy afternoon ends
+ * with Instagram marked down and a backlog held behind it, at the exact moment
+ * nothing was wrong.
+ *
+ * TikTok has had this distinction since its daily cap was implemented; the same
+ * argument applies here and the code simply never made it across.
+ *
+ *   4    application request limit reached
+ *   17   user request limit reached
+ *   32   page request limit reached
+ *   613  calls to this api have exceeded the rate limit
+ *
+ * 2207051 is the publishing-specific subcode Graph returns with code 4, and is
+ * the one that actually turned up.
+ */
+const RATE_LIMIT_CODES = new Set([4, 17, 32, 613]);
+const RATE_LIMIT_SUBCODES = new Set([2207051]);
+
+export const isPlatformLimit = (e) =>
+  e instanceof InstagramError &&
+  (RATE_LIMIT_CODES.has(Number(e.code)) || RATE_LIMIT_SUBCODES.has(Number(e.subcode)));
+
 // Graph error codes worth naming, because the message alone does not say what to
 // do. Deliberately short: a wrong guess about what an unknown code means is
 // worse than printing the code and letting you look it up.

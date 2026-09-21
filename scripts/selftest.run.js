@@ -52,7 +52,7 @@ import {
   published,
   withDetail,
 } from '../src/notify.js';
-import { describeError, InstagramError } from '../src/publish/instagram.js';
+import { describeError, InstagramError, isPlatformLimit as isPlatformLimitInstagram } from '../src/publish/instagram.js';
 import { publishTargets, targetsForKind, allowedForKind, liveTargets } from '../src/publish/targets.js';
 import {
   defaultPrivacy,
@@ -1693,6 +1693,26 @@ ok('it says the destination is not connected', waitMsg.includes('לא מחובר
 ok('it carries the headline', waitMsg.includes('המקדשים של קיוטו'));
 ok('and says how many are waiting', waitMsg.includes('3'));
 ok('it does not claim anything failed', !/נכשל|שגיאה/.test(waitMsg));
+
+/* -------------------------------------------------------------------------- */
+group('a throttle is not a breakage');
+
+// "Application request limit reached" came back on a publish and was retried
+// three times, then counted against Instagram's health. Graph throttles by app,
+// by user and by page, and every one clears on its own within the hour — so a
+// busy afternoon ended with the destination marked down and a backlog held
+// behind it at the exact moment nothing was wrong.
+//
+// TikTok has had this distinction since its daily cap; the code never made it
+// across.
+ok('the code that actually turned up is a limit', isPlatformLimitInstagram(new InstagramError('x', { code: 4, subcode: 2207051 })));
+ok('so is a user throttle', isPlatformLimitInstagram(new InstagramError('x', { code: 17 })));
+ok('and a page throttle', isPlatformLimitInstagram(new InstagramError('x', { code: 32 })));
+// A dead token and a rejected image are NOT throttles: one needs you, the other
+// needs a different card, and holding either as "not now" would wait forever.
+ok('a dead token is not', !isPlatformLimitInstagram(new InstagramError('x', { code: 190 })));
+ok('nor an unfetchable image', !isPlatformLimitInstagram(new InstagramError('x', { code: 9004 })));
+ok('nor a non-Graph failure', !isPlatformLimitInstagram(new Error('network')));
 
 /* -------------------------------------------------------------------------- */
 group('a deck must be where it says it is');
