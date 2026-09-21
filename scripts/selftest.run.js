@@ -17,6 +17,8 @@ import { assertGenericAiPrompt, ImagePolicyError, imageQueries } from '../src/im
 import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, evidenceReport, deckApprovalMessage } from '../src/format.js';
 import { renderSlideHtml, SIZES, sizeClass, INK_LUMINANCE, FACES } from '../src/render/deckTemplates.js';
 import { renderInstagramSlideHtml } from '../src/render/deckInstagram.js';
+import { sizesFor } from '../src/deck/candidate.js';
+import { SCRIM_INK } from '../src/render/theme.js';
 import {
   lengthValue,
   yearValue,
@@ -551,6 +553,23 @@ eq('a reply to anything else routes nowhere', store.findPendingEditByPrompt(999)
 // /clear_pending means everything awaiting a tap, not just the built ones.
 store.clearStaging();
 eq('clearing what is pending takes proposals too', store.proposalSize(), 0);
+
+// The destination is chosen at the proposal, which is the only point at which
+// choosing it saves anything: a deck renders twelve slides across two aspect
+// ratios, and picking the platform first halves that.
+eq('an Instagram deck renders one size', sizesFor(['instagram']).join(','), 'instagram');
+eq('a TikTok deck renders the other', sizesFor(['tiktok']).join(','), 'tiktok');
+eq('both still works, in the order given', sizesFor(['tiktok', 'instagram']).join(','), 'tiktok,instagram');
+eq('telegram is not a render size', sizesFor(['telegram', 'instagram']).join(','), 'instagram');
+eq('and nothing sensible is asked for nothing', sizesFor([]).join(','), '');
+
+// The button carries the destination in its callback data, so the two buttons
+// route to the same builder with different targets. The key never contains a
+// colon, which is what lets the target be appended with one.
+const cb = /^db:(.+):(instagram|tiktok)$/;
+ok('the Instagram button parses', cb.exec('db:a1b2c3d:instagram')?.[2] === 'instagram');
+ok('the TikTok button parses', cb.exec('db:a1b2c3d:tiktok')?.[2] === 'tiktok');
+ok('and a bare build tap no longer matches anything', !cb.test('db:a1b2c3d'));
 
 /* -------------------------------------------------------------------------- */
 group('ranking — the two misfires found against live feeds');
@@ -2580,13 +2599,16 @@ const lit = renderHtml(
   { pillar: 'discover', layout: 'photoFull', headline: 'כותרת', place: 'ונציה' },
   { image: { src: 'data:image/jpeg;base64,x', scrim: { bottom: 0.4, top: 0.2 } } }
 );
-ok('a measured scrim reaches the gradient', lit.includes('rgba(16,32,31,0.400)'), lit.match(/scrim-bottom[\s\S]{0,180}/)?.[0]);
-ok('and so does the top one', lit.includes('rgba(16,32,31,0.200)'));
+ok('a measured scrim reaches the gradient', lit.includes(`rgba(${SCRIM_INK},0.400)`), lit.match(/scrim-bottom[\s\S]{0,180}/)?.[0]);
+ok('and so does the top one', lit.includes(`rgba(${SCRIM_INK},0.200)`));
 const unlit = renderHtml(
   { pillar: 'discover', layout: 'photoFull', headline: 'כותרת', place: 'ונציה' },
   { image: { src: 'data:image/jpeg;base64,x' } }
 );
-ok('an unmeasured card falls back to the constants', unlit.includes(`rgba(16,32,31,${SCRIM_FALLBACK.bottom.toFixed(3)})`));
+ok('an unmeasured card falls back to the constants', unlit.includes(`rgba(${SCRIM_INK},${SCRIM_FALLBACK.bottom.toFixed(3)})`));
+// The scrim is NOT the ink. Over a photograph at 97% the ink's deliberate green
+// cast stops being a ground and becomes a filter on every shadow in the picture.
+ok('and the scrim is not the flat-card ink', SCRIM_INK !== '16,32,31');
 ok('rather than to no scrim at all', unlit.includes('scrim-bottom'));
 
 // TikTok draws a caption in white across the foot of the frame and a search bar

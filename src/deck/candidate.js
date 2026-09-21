@@ -77,13 +77,30 @@ export function deckId(deck) {
 }
 
 /**
+ * Which render sizes a set of destinations needs.
+ *
+ * One each, deduplicated, in the order the destinations were given — so the
+ * first one is what the approval message previews.
+ */
+export const sizesFor = (targets) => [
+  ...new Set((targets || []).filter((t) => t === 'instagram' || t === 'tiktok')),
+];
+
+/**
  * Render a built deck and wrap it for approval.
  *
  * Rendering happens here rather than in build.js for the same reason the card
  * pipeline renders last: it is the only step that costs a browser, and a deck
  * that lost too many slides to be worth publishing should not have paid for it.
+ *
+ * `targets` is the destination chosen at the proposal, and it decides which
+ * sizes are rendered at all — a deck bound for Instagram does not pay for the
+ * TikTok crop of itself.
  */
-export async function toDeckCandidate(built, { minSlides = Number(process.env.DECK_MIN_SLIDES || 3) } = {}) {
+export async function toDeckCandidate(
+  built,
+  { minSlides = Number(process.env.DECK_MIN_SLIDES || 3), targets = targetsForKind('deck') } = {}
+) {
   if (built.slides.length < minSlides) {
     const err = new Error(
       `only ${built.slides.length} slide(s) survived sourcing, needs ${minSlides} — ` +
@@ -95,7 +112,7 @@ export async function toDeckCandidate(built, { minSlides = Number(process.env.DE
 
   const id = deckId(built);
   const deck = { ...built, id };
-  const rendered = await renderDeck(deck);
+  const rendered = await renderDeck(deck, { sizes: sizesFor(targets) });
 
   // Drop the photographs now that they are baked into the JPEGs.
   //
@@ -124,7 +141,9 @@ export async function toDeckCandidate(built, { minSlides = Number(process.env.DE
     pillar: 'day',
     tags: [],
     deck: { ...deck, ...rendered },
-    publishTargets: targetsForKind('deck'),
+    // Chosen at the proposal, not derived here: the owner picked the platform
+    // before the build, and that choice is what the slides were rendered for.
+    publishTargets: targets,
     createdAt: deck.createdAt,
     // Same as a card: whatever the owner's request stepped over travels with
     // the deck so it can be said before it publishes, not discovered after.

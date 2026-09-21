@@ -36,7 +36,14 @@ import {
   isPlatformLimit as isPlatformLimitTikTok,
   TIKTOK_DAILY_CAP,
 } from './src/publish/tiktok.js';
-import { publishTargets, targetsForKind, liveTargets, targetsHe, allowedForKind } from './src/publish/targets.js';
+import {
+  publishTargets,
+  targetsForKind,
+  liveTargets,
+  targetsHe,
+  TARGET_HE,
+  allowedForKind,
+} from './src/publish/targets.js';
 import { imagesEnabled } from './src/images.js';
 import { runOverridden, noteOverride, overrideNotes } from './src/override.js';
 import { startOAuthServer, stopOAuthServer } from './src/oauthServer.js';
@@ -331,10 +338,17 @@ bot.action(/^edit:(.+)$/, async (ctx) => {
 
 // --- deck proposals (the text stage, before anything is built) ---------------
 
-bot.action(/^db:(.+)$/, async (ctx) => {
+bot.action(/^db:(.+):(instagram|tiktok)$/, async (ctx) => {
   const key = ctx.match[1];
+  const target = ctx.match[2];
   if (!store.getProposal(key)) return ctx.answerCbQuery('כבר טופל');
-  await ctx.answerCbQuery('⏳ בונה');
+
+  // Said at the tap, not after the build. Choosing a destination that is not
+  // connected is allowed — the deck is built and held until it is — but
+  // learning that after waiting minutes for twelve renders is the wrong order
+  // to find it out in.
+  const ready = targetsForKind('deck').includes(target);
+  await ctx.answerCbQuery(ready ? '⏳ בונה' : `⏳ בונה — ${TARGET_HE[target]} עוד לא מחובר, הפוסט ימתין`);
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
 
   // Detached for the same reason the command was: a build is minutes of work
@@ -344,7 +358,11 @@ bot.action(/^db:(.+)$/, async (ctx) => {
   // name would be judged by guards the override exists to step over.
   const chatId = ctx.chat.id;
   const messageId = ctx.callbackQuery.message.message_id;
-  detach('בניית מצגת', () => runOverridden('/deck', () => buildProposal(key, chatId, messageId)), chatId);
+  detach(
+    'בניית מצגת',
+    () => runOverridden('/deck', () => buildProposal(key, chatId, messageId, target)),
+    chatId
+  );
 });
 
 bot.action(/^dx:(.+)$/, async (ctx) => {
@@ -1420,10 +1438,18 @@ function proposalMessage(idea) {
     .join('\n');
 }
 
+// The destination is chosen here, before anything is built — which is the only
+// point at which choosing it saves anything. A deck renders twelve slides
+// across two aspect ratios; picking the platform first halves that, and the
+// approval card then previews the crop that is actually going out rather than
+// the other platform's.
 const proposalButtons = (key) =>
   Markup.inlineKeyboard([
-    [Markup.button.callback('✅ בנה', `db:${key}`), Markup.button.callback('❌ דחה', `dx:${key}`)],
-    [Markup.button.callback('🤖 שנה בהוראה', `dr:${key}`)],
+    [
+      Markup.button.callback('📸 בנה לאינסטגרם', `db:${key}:instagram`),
+      Markup.button.callback('🎵 בנה לטיקטוק', `db:${key}:tiktok`),
+    ],
+    [Markup.button.callback('🤖 שנה בהוראה', `dr:${key}`), Markup.button.callback('❌ דחה', `dx:${key}`)],
   ]);
 
 async function proposeDeck(idea, alternatives, chatId) {
@@ -1441,7 +1467,7 @@ async function proposeDeck(idea, alternatives, chatId) {
  * the repeat guards, and an AsyncLocalStorage context does not survive the wait
  * for you to tap a button.
  */
-async function buildProposal(key, chatId, messageId = null) {
+async function buildProposal(key, chatId, messageId = null, target = 'instagram') {
   const say = (text) => notify.send(bot.telegram, chatId, text).catch(() => {});
   const proposal = store.getProposal(key);
   if (!proposal) return say('ההצעה הזו כבר לא ממתינה');
@@ -1485,7 +1511,8 @@ async function buildProposal(key, chatId, messageId = null) {
       );
     }
 
-    const cand = await toDeckCandidate(built);
+    // Rendered for the chosen destination only, and staged owing just that one.
+    const cand = await toDeckCandidate(built, { targets: [target] });
 
     if (store.hasPublished(cand.id)) {
       return say(`⏭️ המצגת הזו כבר פורסמה (${cand.id}) — /deck שוב לרעיון אחר`);

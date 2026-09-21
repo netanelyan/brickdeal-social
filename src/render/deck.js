@@ -178,18 +178,29 @@ export async function renderDeckSize(deck, { size = 'tiktok', outDir = cardOutpu
  * public URL. A null url means CARD_PUBLIC_BASE_URL is unset, and both
  * publishers refuse on that rather than posting a broken image.
  */
-export async function renderDeck(deck, { outDir = cardOutputDir() } = {}) {
-  const tiktok = await renderDeckSize(deck, { size: 'tiktok', outDir });
-  const instagram = await renderDeckSize(deck, { size: 'instagram', outDir });
+export async function renderDeck(deck, { outDir = cardOutputDir(), sizes = ['instagram', 'tiktok'] } = {}) {
+  // Only the sizes that will actually be posted.
+  //
+  // Both were rendered unconditionally, which was right when every deck went to
+  // both platforms. Now the destination is chosen before the build, and
+  // rendering the other platform's set is twelve screenshots nobody will ever
+  // look at — on the one step of the pipeline that costs a browser.
+  const want = sizes.filter((s) => SIZES[s]);
+  if (!want.length) throw new Error(`renderDeck: no known size in [${sizes.join(', ')}]`);
+
+  const out = {};
+  for (const size of want) out[size] = await renderDeckSize(deck, { size, outDir });
+
   return {
-    tiktok,
-    instagram,
-    // Convenience for the approval message, which shows the TikTok shape
-    // because that is the platform the deck is designed for.
-    preview: tiktok,
+    tiktok: out.tiktok || [],
+    instagram: out.instagram || [],
+    // What the approval message shows you is what is about to be published —
+    // the first requested size, which is the destination that was chosen. A
+    // deck bound for Instagram should not be reviewed in the TikTok crop.
+    preview: out[want[0]],
     urls: {
-      tiktok: tiktok.map((s) => s.url),
-      instagram: instagram.map((s) => s.url),
+      tiktok: (out.tiktok || []).map((s) => s.url),
+      instagram: (out.instagram || []).map((s) => s.url),
     },
   };
 }
