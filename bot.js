@@ -605,8 +605,12 @@ const publishedFacts = (cand) => ({
   tiktokDraft: Boolean(cand.tiktokDraft),
 });
 
-async function publishNext() {
-  const cand = store.dequeue();
+async function publishNext(item = null) {
+  // `item` is a post already taken out of the queue — /post hands one in after
+  // pulling it by position. Everything below is identical either way: a post
+  // published out of turn is still the same post, with the same destinations,
+  // the same guards and the same retry behaviour.
+  const cand = item || store.dequeue();
   if (!cand) return false;
 
   const configured = publishTargets();
@@ -1084,7 +1088,79 @@ bot.command('pending', (ctx) =>
       .join('\n')
   )
 );
-bot.command('queue', (ctx) => ctx.reply(`📦 ${store.queueSize()} בתור לפרסום`));
+/**
+ * What is waiting, in the order it will go out.
+ *
+ * It used to answer with a count, which tells you there are four posts and
+ * nothing about whether you want all four. The list is numbered because the
+ * numbers are what /post takes — printing a list nobody can act on is half a
+ * command.
+ */
+bot.command('queue', (ctx) => {
+  const rows = store.queuedItems();
+  if (!rows.length) return ctx.reply('📦 התור ריק');
+
+  // Long enough to see the near future, short enough to stay one message. A
+  // backlog of thirty is a different problem and /status is where it shows.
+  const SHOWN = 12;
+  const lines = rows.slice(0, SHOWN).map((c, i) => {
+    const where = targetsHe(c.pendingTargets?.length ? c.pendingTargets : c.publishTargets || []);
+    const kind = c.kind === 'deck' ? '🎞️' : '📰';
+    const draft = c.tiktokDraft ? ' · טיוטה' : '';
+    return `${i + 1}. ${kind} ${c.headline}\n   ${where || 'אין יעד'}${draft}`;
+  });
+
+  ctx.reply(
+    [
+      `📦 ${rows.length} בתור לפרסום:`,
+      '',
+      ...lines,
+      rows.length > SHOWN ? `\n…ועוד ${rows.length - SHOWN}` : null,
+      '',
+      '/post 2 לפרסם אחד מסוים · /next לפרסם את הבא',
+    ]
+      .filter((l) => l !== null)
+      .join('\n')
+  );
+});
+
+/**
+ * Publish one specific queued post, now, out of turn.
+ *
+ * The same act as /next with a choice attached, so it carries the same
+ * disclosure: publishing ahead of the drip steps over POST_INTERVAL_MINUTES,
+ * and how far over is worth saying out loud. It adds one of its own — this
+ * post jumped the queue, which is a thing you did on purpose and which the
+ * posts behind it did not.
+ */
+bot.command('post', async (ctx) => {
+  const arg = (ctx.message.text || '').replace(/^\/post(@\S+)?\s*/, '').trim();
+  const n = Number(arg);
+  if (!arg || !Number.isInteger(n) || n < 1) {
+    return ctx.reply('שימוש: /post 2 — המספר מהרשימה ב-/queue');
+  }
+
+  // Taken out BEFORE publishing, so a slow publish cannot have the drip pick
+  // the same post up underneath it. If publishing then fails, the post follows
+  // the ordinary failure path — held or requeued — exactly as it would have
+  // from the drip.
+  const item = store.takeQueuedAt(n);
+  if (!item) return ctx.reply(`אין פריט ${n} בתור — /queue לרשימה`);
+
+  await ctx.reply(`⏳ מפרסם: ${item.headline}`);
+  const sinceLast = store.lastPublishedAt() ? Date.now() - store.lastPublishedAt() : null;
+  const ok = await runOverridden('/post', async () => {
+    noteOverride('סדר התור', `פורסם פריט ${n} לפני אלה שלפניו`);
+    if (sinceLast !== null && sinceLast < intervalMs) {
+      noteOverride(
+        'מרווח בין פוסטים (POST_INTERVAL_MINUTES)',
+        `פורסם לפני ${Math.round(sinceLast / 60_000)} דק׳ במקום ${POST_INTERVAL_MINUTES}`
+      );
+    }
+    return publishNext(item);
+  });
+  await ctx.reply(ok ? '📤 פורסם' : 'לא פורסם — ראו את ההודעה שלמעלה');
+});
 
 /**
  * Publish the next queued post now, rather than at the next drip.
@@ -1705,7 +1781,10 @@ bot.command('help', (ctx) =>
       '/redo — שכח מה כבר נראה והרץ שוב (לבדיקת שינויים בעיצוב/נוסח)',
       '/status — סטטוס מלא',
       '/health — בריאות כל יעד בנפרד, והשגיאה האחרונה',
-      '/pending /queue /next',
+      '/pending — ממתינים לאישור ולבנייה',
+      '/queue — מה בתור, לפי הסדר, ממוספר',
+      '/next — מפרסם את הבא בתור',
+      '/post <מספר> — מפרסם אחד מסוים מהתור, מדלג על הסדר',
       '/held — פוסטים מאושרים שממתינים ליעד שנפל',
       '/retry — אחרי שתיקנת: מחזיר אותם לתור',
       '/clear_held — מוותר על המוחזקים ומסמן את היעדים כתקינים',

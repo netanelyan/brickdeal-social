@@ -554,6 +554,32 @@ eq('a reply routes to its own proposal', store.findPendingEditByPrompt(777), pro
 eq('and carries the marker that says which stage it is', store.getPendingEdit(propKey2).kind, 'idea');
 eq('a reply to anything else routes nowhere', store.findPendingEditByPrompt(999), null);
 
+// Picking one post out of the queue by the number /queue printed. 1-based,
+// because the list a person reads from starts at 1 and asking them to subtract
+// one is how the wrong post gets published.
+store.enqueue({ headline: 'ראשון' });
+store.enqueue({ headline: 'שני' });
+store.enqueue({ headline: 'שלישי' });
+eq('the queue lists in publish order', store.queuedItems().map((c) => c.headline).join(','), 'ראשון,שני,שלישי');
+eq('taking 2 takes the second', store.takeQueuedAt(2).headline, 'שני');
+eq('and the rest close up', store.queuedItems().map((c) => c.headline).join(','), 'ראשון,שלישי');
+
+// Out of range returns null rather than clamping. Clamping would publish item 5
+// when 6 was asked for — precisely the case where the person misread the list,
+// and the last moment to confidently pick a neighbour.
+eq('past the end is nothing', store.takeQueuedAt(9), null);
+eq('zero is nothing', store.takeQueuedAt(0), null);
+eq('nonsense is nothing', store.takeQueuedAt('abc'), null);
+eq('and none of that disturbed the queue', store.queueSize(), 2);
+
+// The listing hands out copies, so a caller cannot edit the queue by accident.
+const listed = store.queuedItems();
+listed[0].headline = 'נדרס';
+eq('the listing is a copy', store.queuedItems()[0].headline, 'ראשון');
+store.takeQueuedAt(1);
+store.takeQueuedAt(1);
+eq('emptied', store.queueSize(), 0);
+
 // /clear_pending means everything awaiting a tap, not just the built ones.
 store.clearStaging();
 eq('clearing what is pending takes proposals too', store.proposalSize(), 0);

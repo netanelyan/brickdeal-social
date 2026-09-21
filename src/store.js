@@ -397,6 +397,29 @@ export function dequeue() {
 export const queueSize = () => state.queue.length;
 export const peekQueue = () => state.queue.slice(0, 10);
 
+/** Everything waiting, in publish order, for listing it. */
+export const queuedItems = () => state.queue.map((c) => ({ ...c }));
+
+/**
+ * Take one specific post out of the queue, by its 1-based position.
+ *
+ * The position is the one /queue printed, which is why it is 1-based: the list
+ * a person is reading from starts at 1, and asking them to subtract one is how
+ * the wrong post gets published.
+ *
+ * Returns null for anything out of range rather than clamping. Clamping would
+ * publish item 5 when 6 was asked for, which is precisely the case where the
+ * person has misread the list and the last thing they need is for the bot to
+ * confidently pick a neighbour.
+ */
+export function takeQueuedAt(n) {
+  const i = Number(n) - 1;
+  if (!Number.isInteger(i) || i < 0 || i >= state.queue.length) return null;
+  const [item] = state.queue.splice(i, 1);
+  save();
+  return item;
+}
+
 // --- published log (drives the pillar quotas) -------------------------------
 /**
  * Record that a card went out, or that it reached one more destination.
