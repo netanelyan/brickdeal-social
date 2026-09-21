@@ -46,7 +46,17 @@ export const WIKIDATA_FIELDS = {
     { key: 'range', labelHe: 'רכס', emoji: '🧭', prop: 'P4552', as: 'entity' },
   ],
   waterfall: [{ key: 'drop', labelHe: 'גובה', emoji: '🌊', prop: 'P2044', as: 'length', unit: 'm' }],
-  trail: [{ key: 'length', labelHe: 'אורך', emoji: '📏', prop: 'P2043', as: 'length', unit: 'km' }],
+  // `distance` / מרחק, NOT `length` / אורך — the same words fields.js uses.
+  //
+  // Both specs are live for a trail deck: a place with an official page gets
+  // its fields drafted from that page (fields.js), a place without one gets
+  // them from Wikidata (here). So one deck could carry "מרחק: 12.5 ק״מ" on one
+  // slide and "אורך: 9 ק״מ" on the next — the same measurement, under two
+  // names, with the same ruler emoji beside both. fields.js already says the
+  // labels are fixed centrally because "a slide whose fields differ from its
+  // neighbour's reads as improvised"; it was right, and this file was quietly
+  // disagreeing with it.
+  trail: [{ key: 'distance', labelHe: 'מרחק', emoji: '📏', prop: 'P2043', as: 'length', unit: 'km' }],
   museum: [{ key: 'inception', labelHe: 'נפתח', emoji: '📅', prop: 'P571', as: 'year' }],
   attraction: [{ key: 'inception', labelHe: 'נבנה', emoji: '📅', prop: 'P571', as: 'year' }],
 };

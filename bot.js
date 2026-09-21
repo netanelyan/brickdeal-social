@@ -343,26 +343,30 @@ bot.action(/^edit:(.+)$/, async (ctx) => {
 
 // --- deck proposals (the text stage, before anything is built) ---------------
 
-bot.action(/^db:(.+):(instagram|tiktok|tiktokdraft)$/, async (ctx) => {
+bot.action(/^db:(.+):(instagram|tiktok|both)$/, async (ctx) => {
   const key = ctx.match[1];
-  // `tiktokdraft` is the same DESTINATION with a different relationship to it:
-  // the slides go to your inbox and you post them. So it resolves to the tiktok
-  // target plus a flag, rather than pretending to be a fourth place to publish.
-  const draft = ctx.match[2] === 'tiktokdraft';
-  const target = draft ? 'tiktok' : ctx.match[2];
+  const choice = ctx.match[2];
+  // Instagram first in the pair, because it is the one that publishes by
+  // itself — the approval message previews whichever size comes first, and
+  // previewing the crop that needs no further action from you is the useful
+  // way round.
+  const targets = choice === 'both' ? ['instagram', 'tiktok'] : [choice];
+  // Reaching TikTok always means a draft. See the button.
+  const draft = targets.includes('tiktok');
   if (!store.getProposal(key)) return ctx.answerCbQuery('כבר טופל');
 
   // Said at the tap, not after the build. Choosing a destination that is not
   // connected is allowed — the deck is built and held until it is — but
   // learning that after waiting minutes for twelve renders is the wrong order
   // to find it out in.
-  const ready = targetsForKind('deck').includes(target);
+  const configured = targetsForKind('deck');
+  const missing = targets.filter((t) => !configured.includes(t));
   await ctx.answerCbQuery(
-    ready
-      ? draft
-        ? '⏳ בונה — יחכה לך בטיוטות בטיקטוק'
+    missing.length
+      ? `⏳ בונה — ${targetsHe(missing)} עוד לא מחובר, הפוסט ימתין`
+      : draft
+        ? '⏳ בונה — טיקטוק יחכה לך בטיוטות'
         : '⏳ בונה'
-      : `⏳ בונה — ${TARGET_HE[target]} עוד לא מחובר, הפוסט ימתין`
   );
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
 
@@ -375,7 +379,7 @@ bot.action(/^db:(.+):(instagram|tiktok|tiktokdraft)$/, async (ctx) => {
   const messageId = ctx.callbackQuery.message.message_id;
   detach(
     'בניית מצגת',
-    () => runOverridden('/deck', () => buildProposal(key, chatId, messageId, target, draft)),
+    () => runOverridden('/deck', () => buildProposal(key, chatId, messageId, targets, draft)),
     chatId
   );
 });
@@ -1504,13 +1508,16 @@ function proposalMessage(idea) {
 const proposalButtons = (key) =>
   Markup.inlineKeyboard([
     [
-      Markup.button.callback('📸 בנה לאינסטגרם', `db:${key}:instagram`),
-      Markup.button.callback('🎵 בנה לטיקטוק', `db:${key}:tiktok`),
+      Markup.button.callback('📸 אינסטגרם', `db:${key}:instagram`),
+      // TikTok is ALWAYS a draft now. There were two buttons and the direct one
+      // had nothing to recommend it: the API cannot name a sound, so a direct
+      // post gets whatever TikTok picks and can never be changed afterwards —
+      // sound is the one thing not editable after publishing. A draft costs one
+      // tap in the app and buys the sound, the cover and the caption. It is
+      // also not subject to the audit, which the direct path is.
+      Markup.button.callback('🎵 טיקטוק (טיוטה)', `db:${key}:tiktok`),
     ],
-    // The third way to send a deck to TikTok, and the only one that lets you
-    // choose the sound. It lands in your TikTok inbox instead of the feed, and
-    // you finish it in the app.
-    [Markup.button.callback('📥 טיוטה לטיקטוק (בוחרים סאונד)', `db:${key}:tiktokdraft`)],
+    [Markup.button.callback('📸🎵 שניהם', `db:${key}:both`)],
     [Markup.button.callback('🤖 שנה בהוראה', `dr:${key}`), Markup.button.callback('❌ דחה', `dx:${key}`)],
   ]);
 
@@ -1529,7 +1536,7 @@ async function proposeDeck(idea, alternatives, chatId) {
  * the repeat guards, and an AsyncLocalStorage context does not survive the wait
  * for you to tap a button.
  */
-async function buildProposal(key, chatId, messageId = null, target = 'instagram', draft = false) {
+async function buildProposal(key, chatId, messageId = null, targets = ['instagram'], draft = false) {
   const say = (text) => notify.send(bot.telegram, chatId, text).catch(() => {});
   const proposal = store.getProposal(key);
   if (!proposal) return say('ההצעה הזו כבר לא ממתינה');
@@ -1574,7 +1581,7 @@ async function buildProposal(key, chatId, messageId = null, target = 'instagram'
     }
 
     // Rendered for the chosen destination only, and staged owing just that one.
-    const cand = await toDeckCandidate(built, { targets: [target], tiktokDraft: draft });
+    const cand = await toDeckCandidate(built, { targets, tiktokDraft: draft });
 
     if (store.hasPublished(cand.id)) {
       return say(`⏭️ המצגת הזו כבר פורסמה (${cand.id}) — /deck שוב לרעיון אחר`);

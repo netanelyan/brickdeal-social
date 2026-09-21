@@ -139,7 +139,10 @@ tries another search and then drops the place, which is the correct outcome.`;
  * a 0-based index, or null when none of them is good enough — which the caller
  * treats as "try another query", not as an error.
  */
-export async function pickCinematic(thumbs, { place = '', where = '', placeEn = '', types = [] } = {}) {
+export async function pickCinematic(
+  thumbs,
+  { place = '', where = '', placeEn = '', about = '', types = [] } = {}
+) {
   if (!thumbs.length) return null;
 
   const content = [
@@ -149,9 +152,17 @@ export async function pickCinematic(thumbs, { place = '', where = '', placeEn = 
         `PLACE: ${place || placeEn || 'unknown'}${placeEn && place !== placeEn ? ` (${placeEn})` : ''}${
           where ? `, ${where}` : ''
         }`,
+        // The category, which the chooser was never given. Without it, a photo
+        // of the town beside a walking route is "the right place" and scores
+        // well — it genuinely IS Bodensee. With it, the question becomes
+        // whether the frame shows a TRAIL, and a harbour promenade plainly
+        // does not.
+        about ? `THIS DECK IS ABOUT: ${about}. The photograph must show one of those.` : null,
         `${thumbs.length} candidate${thumbs.length === 1 ? '' : 's'} follow${thumbs.length === 1 ? 's' : ''}, numbered from 1.`,
         'Pick the one that shows THIS PLACE, large in the frame, and would stop a thumb.',
-      ].join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n'),
     },
   ];
 
@@ -217,14 +228,24 @@ export const CINEMATIC_TERMS = ['golden hour', 'sunrise', 'landscape', 'viewpoin
  * curator's own light-and-depth rubric is what earns the cinematic result — it
  * does not need the query to beg for one.
  */
-export function cinematicQueries(nameEn, where) {
+export function cinematicQueries(nameEn, where, subject = '') {
   // Deduped: a cover asks for the city by name and the region IS the city, so
   // without this every cover query read "Prague Prague golden hour".
   const base = [...new Set([nameEn, where].filter(Boolean).flatMap((s) => s.split(/\s+/)))].join(' ');
   if (!base.trim()) return [];
 
   const bare = String(nameEn || '').trim();
-  // The name on its own, then the name with the region for disambiguation,
-  // then the cinematic variants for a place that returned nothing usable.
-  return [...new Set([bare, base, ...CINEMATIC_TERMS.map((t) => `${base} ${t}`)].filter(Boolean))];
+  // What the deck is ABOUT, in the query itself. A route named after the lake
+  // it circles — "Bodensee-Rundweg" — searched on its name alone returns the
+  // lakefront town, because that is what photographers point a camera at
+  // there. The picture was of the right place and the wrong subject, on a
+  // slide in a deck about trails.
+  const subj = String(subject || '').trim();
+  const withSubject = subj ? [`${bare} ${subj}`, `${base} ${subj}`] : [];
+  // Name plus subject first, then the name alone, then the name with the
+  // region for disambiguation, then the cinematic variants for a place that
+  // returned nothing usable.
+  return [
+    ...new Set([...withSubject, bare, base, ...CINEMATIC_TERMS.map((t) => `${base} ${t}`)].filter(Boolean)),
+  ];
 }

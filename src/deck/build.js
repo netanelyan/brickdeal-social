@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { record as recordUsage } from '../usage.js';
-import { shortlist, authorityDomains, KINDS } from '../sources/places.js';
+import { shortlist, authorityDomains, KINDS, subjectEn } from '../sources/places.js';
 import { searchConfigured, findOnAny, remaining as searchRemaining } from '../search.js';
 import { fetchReadable } from '../fetchPage.js';
 import { verifyEvidence, RejectedError } from '../verify.js';
@@ -562,7 +562,7 @@ export async function draftSlideFromEntry(place, pageText) {
  *
  * `used` is shared across a deck so the same photograph cannot appear twice.
  */
-async function cinematicImage({ nameEn, where, used, label }) {
+async function cinematicImage({ nameEn, where, used, label, about = '' }) {
   const libraries = [unsplash, pexels].filter((lib) => lib.configured());
   if (!libraries.length) return null;
 
@@ -583,7 +583,7 @@ async function cinematicImage({ nameEn, where, used, label }) {
   const MAX_QUERIES = Number(process.env.DECK_IMAGE_QUERIES || 3);
 
   for (const lib of libraries) {
-    for (const q of cinematicQueries(nameEn, where).slice(0, MAX_QUERIES)) {
+    for (const q of cinematicQueries(nameEn, where, about).slice(0, MAX_QUERIES)) {
       let pool = [];
       try {
         pool = await lib.candidates(q, { n: 8, w: 440, h: 780 });
@@ -601,6 +601,9 @@ async function cinematicImage({ nameEn, where, used, label }) {
           place: label,
           placeEn: nameEn,
           where,
+          // What the deck is about, so "the right place" is not enough on its
+          // own. A harbour promenade IS Bodensee; it is not a trail.
+          about,
           types: fresh.map((c) => c.thumbType),
         });
       } catch (e) {
@@ -654,13 +657,15 @@ async function cinematicImage({ nameEn, where, used, label }) {
  *
  * Returns the slides that have photographs, in order.
  */
-export async function fillImages(slides, where, { want = slides.length, cover = null } = {}) {
+export async function fillImages(slides, where, { want = slides.length, cover = null, about = '' } = {}) {
   const used = new Set();
 
   // The cover is claimed first so it cannot end up with slide one's
   // photograph. A deck that opens on the same picture it shows you next looks
   // like it ran out of material before it started.
   if (cover) {
+    // The cover is a picture OF THE REGION, so it is not constrained to the
+    // deck's category — a trails deck may perfectly well open on the valley.
     const shot = await cinematicImage({ nameEn: where, where, used, label: where });
     if (shot) cover.image = shot;
   }
@@ -674,6 +679,7 @@ export async function fillImages(slides, where, { want = slides.length, cover = 
       where,
       used,
       label: slide.nameHe,
+      about,
     });
     slide.image = picked;
     if (picked) {
@@ -917,7 +923,7 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
     // Takes the next candidate whenever one has no usable photograph, rather
     // than shortening the deck by one. Everything it did not reach is reported
     // as a near-miss rather than as a failure.
-    built = await fillImages(slides, idea.where, { want: idea.want, cover: coverSlot });
+    built = await fillImages(slides, idea.where, { want: idea.want, cover: coverSlot, about: subjectEn(idea.kind) });
     for (const s of slides) {
       if (s.image || !s.imageMiss) continue;
       dropped.push({ place: s.nameHe, why: s.imageMiss, url });
@@ -1166,7 +1172,7 @@ export async function buildDeck(idea, { wantImages = true } = {}) {
   // photograph cannot be found, or cannot be trusted to be that place, leaves.
   if (wantImages) {
     const coverSlot = {};
-    const built = await fillImages(slides, idea.where, { want: idea.want, cover: coverSlot });
+    const built = await fillImages(slides, idea.where, { want: idea.want, cover: coverSlot, about: subjectEn(idea.kind) });
     for (const s of slides) {
       if (s.image || !s.imageMiss) continue;
       dropped.push({ place: s.nameEn, why: s.imageMiss });

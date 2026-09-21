@@ -119,6 +119,31 @@ export const KINDS = {
 
 export const kindIds = () => Object.keys(KINDS);
 
+/**
+ * What the deck is about, in English, for a photo search and for the chooser.
+ *
+ * Not the key. "trail" as a search term returns a forest path anywhere on
+ * earth; "hiking trail" with the route's own name returns the route. And the
+ * phrasing matters to the vision call too — it is told THIS DECK IS ABOUT
+ * <this>, and has to judge whether the frame shows one.
+ *
+ * The failure this exists for: a deck of trails around Lake Constance put a
+ * photograph of the Bodensee harbour promenade on a slide named
+ * "Bodensee-Rundweg". The picture was of the right place, and of the wrong
+ * subject, and nothing in the pipeline knew the deck was about walking.
+ */
+export const KIND_SUBJECT_EN = {
+  trail: 'hiking trail',
+  museum: 'museum building',
+  attraction: 'landmark',
+  beach: 'beach',
+  food: 'food market',
+  mountain: 'mountain peak',
+  waterfall: 'waterfall',
+};
+
+export const subjectEn = (kind) => KIND_SUBJECT_EN[kind] || '';
+
 // The public Overpass instance answers 429 when it is busy and 504 when a query
 // outlives its slot, and both are routine rather than exceptional — a first
 // attempt failing says nothing about whether the query is good. Wikidata and

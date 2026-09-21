@@ -21,6 +21,8 @@ import { sizesFor } from '../src/deck/candidate.js';
 import { sentToDrafts } from '../src/notify.js';
 import { normaliseIdea } from '../src/deck/ideas.js';
 import { readFileSync } from 'node:fs';
+import { FIELDS_BY_KIND } from '../src/deck/fields.js';
+import { cinematicQueries } from '../src/images/curate.js';
 import { SCRIM_INK } from '../src/render/theme.js';
 import {
   lengthValue,
@@ -40,7 +42,7 @@ import { deckPlace, namesPlace, REGIONS } from '../src/deck/region.js';
 import { __test as photoTest, scrimAlpha, underScrim } from '../src/render/photo.js';
 import { deckId } from '../src/deck/candidate.js';
 import { sameSite } from '../src/search.js';
-import { authorityDomains, KINDS } from '../src/sources/places.js';
+import { authorityDomains, KINDS, subjectEn } from '../src/sources/places.js';
 import { pick, CATEGORY_HE, canonicalKind } from '../src/sources/tiyulplus.js';
 import { keepByName } from '../src/deck/shape.js';
 import {
@@ -628,6 +630,54 @@ const req = readFileSync(new URL('../src/deck/request.js', import.meta.url), 'ut
 ok('the resolver is told to use the region as named', /USE THE REGION THE REQUEST NAMES/.test(req));
 ok('and the old narrowing instruction is gone', !/narrow to the part\s+travellers mean/.test(req));
 ok('the schema no longer discourages a country', !/a country is acceptable only when/.test(req));
+
+// Reaching TikTok always means a draft now. The direct button had nothing to
+// recommend it: the API cannot name a sound, so a direct post takes whatever
+// TikTok picks — and sound is the one thing not editable after publishing.
+const cb3 = /^db:(.+):(instagram|tiktok|both)$/;
+eq('instagram parses', cb3.exec('db:k:instagram')?.[2], 'instagram');
+eq('tiktok parses', cb3.exec('db:k:tiktok')?.[2], 'tiktok');
+eq('both parses', cb3.exec('db:k:both')?.[2], 'both');
+ok('and the old separate draft button is gone', !cb3.test('db:k:tiktokdraft'));
+// "both" is two destinations and one draft flag, not a third place to publish.
+const destinationsFor = (c) => (c === 'both' ? ['instagram', 'tiktok'] : [c]);
+eq('both means two destinations', destinationsFor('both').join(','), 'instagram,tiktok');
+ok('and anything touching tiktok is a draft', destinationsFor('both').includes('tiktok'));
+eq('both renders both sizes', sizesFor(destinationsFor('both')).join(','), 'instagram,tiktok');
+
+/* -------------------------------------------------------------------------- */
+group('one deck, one vocabulary — and a photo of what the deck is about');
+
+// The screenshot that prompted this: one slide read "מרחק", the next "אורך",
+// same measurement, same ruler emoji. Two field specs are live for a trail — a
+// place with an official page gets its fields drafted from it, a place without
+// gets them from Wikidata — and the two files disagreed on the word.
+const allKinds = new Set([...Object.keys(FIELDS_BY_KIND), ...Object.keys(WIKIDATA_FIELDS)]);
+for (const k of allKinds) {
+  const specs = [...(FIELDS_BY_KIND[k] || []), ...(WIKIDATA_FIELDS[k] || [])];
+  const byEmoji = new Map();
+  const byKey = new Map();
+  for (const f of specs) {
+    if (!byEmoji.has(f.emoji)) byEmoji.set(f.emoji, new Set());
+    byEmoji.get(f.emoji).add(f.labelHe);
+    if (!byKey.has(f.key)) byKey.set(f.key, new Set());
+    byKey.get(f.key).add(f.labelHe);
+  }
+  for (const [emoji, labels] of byEmoji)
+    ok(`${k}: ${emoji} means one thing`, labels.size === 1, [...labels].join(' vs '));
+  for (const [key, labels] of byKey)
+    ok(`${k}: ${key} is named once`, labels.size === 1, [...labels].join(' vs '));
+}
+
+// The photo. "Bodensee-Rundweg" searched on its name alone returns the lakefront
+// town — the right place, the wrong subject, on a slide in a deck about trails.
+ok('every kind has an English subject for the search', [...Object.keys(KINDS)].every((k) => subjectEn(k)));
+const qs = cinematicQueries('Bodensee-Rundweg', 'Austria', subjectEn('trail'));
+ok('the subject leads the queries', qs[0].includes('hiking trail'));
+ok('the bare name is still tried', qs.includes('Bodensee-Rundweg'));
+// Without a subject the behaviour is exactly what it was, so a cover — which is
+// a picture of the region and not of the category — is unaffected.
+eq('no subject means the old queries', cinematicQueries('Prague', 'Prague')[0], 'Prague');
 
 /* -------------------------------------------------------------------------- */
 group('ranking — the two misfires found against live feeds');
