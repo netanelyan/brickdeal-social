@@ -1418,6 +1418,22 @@ ok('the caption opens with the angle, not the title', dcap.startsWith('מה פת
 ok('and lists the places in order', dcap.indexOf('1. המוזיאון') < dcap.indexOf('2. הגלריה'));
 ok('the title is not repeated - the cover slide already carries it', !dcap.includes('המוזיאונים של פראג'));
 
+// A deck publishes to Instagram and TikTok, and neither makes a caption link
+// tappable — so it asks for the bio, which is the only clickable route either
+// platform offers. The card signature still points at the URL; a card's caption
+// is read somewhere a URL is worth printing.
+ok('a deck caption asks for the bio', dcap.includes('בביו'));
+ok('and still carries the domain for recall', dcap.includes('www.tiyulplus.com'));
+
+// The "always" in "always ends with the call to action", which the old version
+// could not keep. It built the whole string and sliced it to 2200, so on a long
+// deck the signature was what fell off the end — and a deck with many places is
+// exactly the one that runs long. The truncation read as a finished caption
+// that had simply stopped asking anyone to go anywhere.
+const longCap = deckCaption({ idea: { angleHe: 'א'.repeat(2500) }, slides: [{ nameHe: 'מקדש א' }] });
+ok('a caption over the limit is still within it', longCap.length <= 2200);
+ok('and the call to action survives being over the limit', longCap.endsWith('בביו שלנו\nwww.tiyulplus.com'));
+
 // A slide is a numbered NAME, and fields only where the category has them.
 // Never a sentence: prose on a slide is what made these read like a guidebook,
 // and it survived every typographic fix because it was never typographic.

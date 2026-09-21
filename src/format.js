@@ -53,6 +53,18 @@ export function channelCaption(cand) {
 // the wording is fixed and reviewable in one place.
 const SIGNATURE = ['לסוכן הטיולים החכם שלנו:', 'www.tiyulplus.com'].join('\n');
 
+// The same line for a slideshow, pointing at the bio rather than at a URL.
+//
+// Decks publish to Instagram and TikTok, and neither makes a link in a caption
+// tappable. "www.tiyulplus.com" under a carousel is a string somebody has to
+// retype; the bio link is the only clickable route either platform offers, so
+// that is what a deck asks for. The domain stays on the second line because it
+// is the brand and it is what someone searching later will remember.
+const DECK_SIGNATURE = ['למתכנן טיולים חכם בביו שלנו', 'www.tiyulplus.com'].join('\n');
+
+// Instagram's caption limit, and the shortest of the three a deck publishes to.
+const CAPTION_LIMIT = 2200;
+
 function publishedDescription(cand, limit) {
   // The subhead is deliberately absent from the rendered card, so this is the
   // only place it appears. Putting it first means the description opens by
@@ -91,7 +103,17 @@ export const tiktokCaption = (cand) => publishedDescription(cand, 4000); // TikT
 export function deckCaption(deck) {
   const places = (deck.slides || []).map((s, i) => `${i + 1}. ${s.nameHe}`);
   const parts = [String(deck.idea?.angleHe || '').trim(), places.join('\n')].filter(Boolean);
-  return [parts.join('\n\n'), '', SIGNATURE].join('\n').trim().slice(0, 2200);
+
+  // The signature is RESERVED, not appended and hoped for.
+  //
+  // This built the whole string and sliced it to 2200, so on a long deck the
+  // call to action was the thing that fell off the end — and a deck with many
+  // places is exactly the one whose caption runs long. The truncation was
+  // invisible: the caption still read as finished, it just quietly stopped
+  // asking anyone to go anywhere.
+  const tail = `\n\n${DECK_SIGNATURE}`;
+  const body = parts.join('\n\n').trim().slice(0, CAPTION_LIMIT - tail.length);
+  return `${body}${tail}`.trim();
 }
 
 /**
