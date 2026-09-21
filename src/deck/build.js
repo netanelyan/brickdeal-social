@@ -657,7 +657,11 @@ async function cinematicImage({ nameEn, where, used, label, about = '' }) {
  *
  * Returns the slides that have photographs, in order.
  */
-export async function fillImages(slides, where, { want = slides.length, cover = null, about = '' } = {}) {
+export async function fillImages(
+  slides,
+  where,
+  { want = slides.length, cover = null, about = '', coverAbout = '' } = {}
+) {
   const used = new Set();
 
   // The cover is claimed first so it cannot end up with slide one's
@@ -666,7 +670,12 @@ export async function fillImages(slides, where, { want = slides.length, cover = 
   if (cover) {
     // The cover is a picture OF THE REGION, so it is not constrained to the
     // deck's category — a trails deck may perfectly well open on the valley.
-    const shot = await cinematicImage({ nameEn: where, where, used, label: where });
+    //
+    // A free-form deck is the exception and passes coverAbout: there the
+    // subject IS the post. An aurora deck that opens on a daytime fjord has
+    // spent its first slide, the one that decides whether anybody swipes, on
+    // something other than what it promised.
+    const shot = await cinematicImage({ nameEn: where, where, used, label: where, about: coverAbout });
     if (shot) cover.image = shot;
   }
 
@@ -1046,7 +1055,15 @@ export async function buildFreeformDeck(idea, { wantImages = true } = {}) {
 
   const coverSlot = { image: null };
   const built = wantImages
-    ? await fillImages(slides, idea.whereEn, { want: idea.want, cover: coverSlot, about: '' })
+    ? await fillImages(slides, idea.whereEn, {
+        want: idea.want,
+        cover: coverSlot,
+        // The subject reaches BOTH the query and the curator. "Tromso northern
+        // lights" finds the aurora; "Tromso" finds the harbour in daylight,
+        // which is what shipped.
+        about: idea.subjectEn || '',
+        coverAbout: idea.subjectEn || '',
+      })
     : slides;
 
   // Dropped for the reason fillImages drops anything: no photograph that is

@@ -500,6 +500,11 @@ const FREEFORM_SCHEMA = {
       type: 'string',
       description: 'The region or country these places are in, in English, for the image search. "Norway", "Lofoten", "Iceland".',
     },
+    subject_en: {
+      type: 'string',
+      description:
+        'What the PHOTOGRAPHS have to show, in English, two or three words. This is added to every image search and the chooser is told to reject a frame that does not show it. For "northern lights in Norway" it is "northern lights" - NOT "Norway" and NOT "landscape". Name the thing a viewer came to look at.',
+    },
     country_he: { type: 'string', description: 'The country in Hebrew, as Israelis write it. Empty if they span countries.' },
     places: {
       type: 'array',
@@ -521,7 +526,7 @@ const FREEFORM_SCHEMA = {
       },
     },
   },
-  required: ['title_he', 'emphasis_he', 'where_en', 'country_he', 'places'],
+  required: ['title_he', 'emphasis_he', 'where_en', 'subject_en', 'country_he', 'places'],
   additionalProperties: false,
 };
 
@@ -594,6 +599,10 @@ export async function freeformIdea(request, { today = new Date() } = {}) {
     titleHe: clean(parsed.title_he),
     emphasisHe: clean(parsed.emphasis_he),
     whereEn: clean(parsed.where_en),
+    // What the pictures must be OF. A deck about the northern lights whose
+    // slides are daytime fjords is a deck about fjords — the names were right
+    // and every photograph answered a different question.
+    subjectEn: clean(parsed.subject_en),
     countryHe: clean(parsed.country_he),
     places,
     want: places.length,
