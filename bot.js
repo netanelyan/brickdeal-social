@@ -1712,31 +1712,38 @@ async function buildProposal(key, chatId, messageId = null, targets = ['instagra
 }
 
 /**
- * The authorization link, built from the scopes this bot actually needs.
+ * What a working connection needs, and the two ways to get one.
  *
- * The website serves /tiktok/connect and builds its own authorize URL, which
- * means the scope list lives in two places — and they drifted. The bot switched
- * every deck to MEDIA_UPLOAD and started needing video.upload; the website's
- * page went on requesting the two it was written with, so connecting through it
- * produced a token that could not send a draft and said nothing was wrong.
+ * NOT a link. An earlier version of this printed an authorize URL built here,
+ * and it could never have worked: the website's callback mints its own `state`,
+ * stores it, and checks the one that comes back matches. A link built anywhere
+ * else carries a state that callback never issued, so it lands on
+ * "הבקשה לא אומתה" every time — which is the callback doing its job.
  *
- * This is the same link with the right scopes on it. It does not replace the
- * website — the callback is still what receives the code — it only removes the
- * website from the business of deciding what to ask for, which was never
- * information it had.
+ * So the bot cannot hand out a browser link. What it can do is say precisely
+ * which scopes it needs, because that is the fact that lives on this side: the
+ * post mode decides the scope, and the bot is what chooses the post mode.
  */
 bot.command('tiktok_connect', (ctx) => {
   const missing = tiktokMissingScopes({ draft: true });
   ctx.reply(
     [
-      '🔗 פתחו את הקישור, אשרו, והחיבור יסתיים מעצמו:',
+      missing.length
+        ? `🔴 החיבור הנוכחי חסר: ${missing.join(', ')}`
+        : '✅ החיבור הנוכחי כולל את כל ההרשאות הדרושות',
       '',
-      authorizeUrl(),
+      'ההרשאות הדרושות, בדיוק כך:',
+      TIKTOK_SCOPES.join(','),
       '',
-      `הרשאות שיתבקשו: ${TIKTOK_SCOPES.join(', ')}`,
-      missing.length ? `כרגע חסר: ${missing.join(', ')}` : 'החיבור הנוכחי כולל את כל הדרוש',
+      'דרך 1 - לתקן את הדף באתר:',
+      'ב-/tiktok/connect, הפרמטר scope בקישור ההרשאה צריך להיות המחרוזת שלמעלה.',
+      'רק האתר יכול לייצר state שה-callback שלו יקבל, ולכן רק הוא יכול לסיים חיבור בדפדפן.',
       '',
-      'שימו לב: הדף באתר מבקש רשימה משלו ויכול להיות מיושן — הקישור הזה הוא הנכון.',
+      'דרך 2 - מהטרמינל ב-VPS, עובד עכשיו:',
+      'npm run tiktok-token',
+      'הסקריפט מדפיס קישור עם ההרשאות הנכונות. פתחו, אשרו, ואז העתיקו את כל',
+      'הכתובת מהדפדפן והדביקו בטרמינל. דף ה-callback יראה שגיאת state - זה צפוי,',
+      'והקוד עדיין תקף כי הדף לא עשה בו שימוש.',
     ].join('\n'),
     { link_preview_options: { is_disabled: true } }
   );
