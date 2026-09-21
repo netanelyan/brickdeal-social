@@ -559,6 +559,51 @@ eq('a reply routes to its own proposal', store.findPendingEditByPrompt(777), pro
 eq('and carries the marker that says which stage it is', store.getPendingEdit(propKey2).kind, 'idea');
 eq('a reply to anything else routes nowhere', store.findPendingEditByPrompt(999), null);
 
+// The drip alternates kinds. Approve five decks and then five cards and a
+// plain FIFO posts five slideshows in a row, then five news cards — which
+// reads as two accounts taking turns rather than one feed.
+const kindTag = (c) => (c.kind === 'deck' ? 'D' : 'C') + c.n;
+const drainQueue = () => {
+  const out = [];
+  for (;;) {
+    const i = store.dequeue();
+    if (!i) break;
+    out.push(kindTag(i));
+  }
+  return out.join(' ');
+};
+
+for (let n = 1; n <= 3; n++) store.enqueue({ kind: 'deck', n });
+for (let n = 1; n <= 3; n++) store.enqueue({ kind: 'card', n });
+eq('the list shows the running order, not the array', store.queuedItems().map(kindTag).join(' '), 'D1 C1 D2 C2 D3 C3');
+eq('and that is the order they publish in', drainQueue(), 'D1 C1 D2 C2 D3 C3');
+
+// Alternation is a preference about ORDER and never a reason to hold a post
+// back: a queue of one kind publishes all of it, in order.
+for (let n = 1; n <= 4; n++) store.enqueue({ kind: 'deck', n });
+eq('one kind alone still drains', drainQueue(), 'D1 D2 D3 D4');
+
+// Uneven queues alternate as far as they can and then continue.
+store.enqueue({ kind: 'card', n: 1 });
+for (let n = 1; n <= 3; n++) store.enqueue({ kind: 'deck', n });
+eq('uneven alternates then continues', drainQueue(), 'C1 D1 D2 D3');
+
+// A queued item from before `kind` existed counts as a card rather than
+// breaking the comparison.
+store.enqueue({ n: 1 });
+store.enqueue({ kind: 'deck', n: 1 });
+store.enqueue({ n: 2 });
+eq('kind-less items count as cards', drainQueue(), 'C1 D1 C2');
+
+// /post takes the number printed, which is a position in the RUNNING order.
+// Splicing the array at that index would publish a different post.
+for (let n = 1; n <= 2; n++) store.enqueue({ kind: 'deck', n });
+for (let n = 1; n <= 2; n++) store.enqueue({ kind: 'card', n });
+eq('shown order', store.queuedItems().map(kindTag).join(' '), 'D1 C1 D2 C2');
+eq('/post 2 takes the second LINE', kindTag(store.takeQueuedAt(2)), 'C1');
+store.clearStaging();
+while (store.dequeue());
+
 // Picking one post out of the queue by the number /queue printed. 1-based,
 // because the list a person reads from starts at 1 and asking them to subtract
 // one is how the wrong post gets published.

@@ -56,6 +56,11 @@ const empty = {
   // accumulate enough silence to notice it is silent.
   lastStagedAt: null,
   lastPublishedAt: null,
+  // Which KIND went out last, so the drip can alternate card, deck, card.
+  // Persisted for the same reason lastPublishedAt is: the drip fires every few
+  // hours and the process restarts between posts, so holding this in memory
+  // would reset the alternation to "whatever is at the front" on every deploy.
+  lastPublishedKind: null,
   // Per destination: consecutive failures, the last error, and when it last
   // actually worked. A global "something published" is not enough — Telegram
   // succeeding while Instagram is blocked looks identical to a healthy day.
@@ -389,16 +394,58 @@ export function enqueue(item) {
   state.queue.push(item);
   save();
 }
+
+/**
+ * Which item to publish next, alternating between the two kinds.
+ *
+ * Approve five decks and then five cards and a plain queue posts five decks in
+ * a row — a day of nothing but slideshows followed by a day of nothing but
+ * news, which reads as two different accounts taking turns. The feed should
+ * alternate whatever order you happened to approve things in.
+ *
+ * The head of the queue when nothing has published yet, or when every waiting
+ * item is the same kind as the last one. That fallback is the important half:
+ * alternation is a preference about ORDER, never a reason to hold a post back.
+ * A queue of six decks publishes six decks.
+ */
+function nextIndex(queue, lastKind) {
+  if (!queue.length) return -1;
+  if (!lastKind) return 0;
+  const other = queue.findIndex((c) => (c?.kind || 'card') !== lastKind);
+  return other === -1 ? 0 : other;
+}
+
 export function dequeue() {
-  const item = state.queue.shift() || null;
-  if (item) save();
+  const i = nextIndex(state.queue, state.lastPublishedKind);
+  if (i === -1) return null;
+  const [item] = state.queue.splice(i, 1);
+  state.lastPublishedKind = item?.kind || 'card';
+  save();
   return item;
 }
 export const queueSize = () => state.queue.length;
 export const peekQueue = () => state.queue.slice(0, 10);
 
-/** Everything waiting, in publish order, for listing it. */
-export const queuedItems = () => state.queue.map((c) => ({ ...c }));
+/**
+ * Everything waiting, in the order it will actually go out.
+ *
+ * Not the array order. The drip alternates kinds, so the array and the running
+ * order are different things — and a list that showed one while /post acted on
+ * the other would be a list that publishes the wrong post. The alternation is
+ * replayed here rather than approximated.
+ */
+export function queuedItems() {
+  const rest = state.queue.map((c, i) => ({ item: c, at: i }));
+  let last = state.lastPublishedKind;
+  const out = [];
+  while (rest.length) {
+    const i = nextIndex(rest.map((r) => r.item), last);
+    const [row] = rest.splice(i, 1);
+    last = row.item?.kind || 'card';
+    out.push({ ...row.item, queuedAt: row.at });
+  }
+  return out;
+}
 
 /**
  * Take one specific post out of the queue, by its 1-based position.
@@ -415,7 +462,13 @@ export const queuedItems = () => state.queue.map((c) => ({ ...c }));
 export function takeQueuedAt(n) {
   const i = Number(n) - 1;
   if (!Number.isInteger(i) || i < 0 || i >= state.queue.length) return null;
-  const [item] = state.queue.splice(i, 1);
+  // Indexed against the order /queue PRINTED, which is the running order rather
+  // than the array's. Splicing state.queue[i] directly would publish whatever
+  // happened to sit at that array position — a different post from the one on
+  // the line you read.
+  const target = queuedItems()[i];
+  const [item] = state.queue.splice(target.queuedAt, 1);
+  state.lastPublishedKind = item?.kind || 'card';
   save();
   return item;
 }
