@@ -660,7 +660,7 @@ async function cinematicImage({ nameEn, where, used, label, about = '' }) {
 export async function fillImages(
   slides,
   where,
-  { want = slides.length, cover = null, about = '', coverAbout = '' } = {}
+  { want = slides.length, cover = null, about = '', coverAbout = '', onProgress = null } = {}
 ) {
   const used = new Set();
 
@@ -691,6 +691,11 @@ export async function fillImages(
       about,
     });
     slide.image = picked;
+    // Said as it happens. This is the slowest stretch of a build — up to three
+    // queries per place, across two libraries, each ending in a vision call —
+    // and on a route with no fallback ladder nothing else reports anything, so
+    // a working build and a hung one look identical from outside.
+    await onProgress?.({ done: kept.length + (picked ? 1 : 0), of: want, name: slide.nameHe, ok: Boolean(picked) });
     if (picked) {
       kept.push(slide);
       continue;
@@ -1039,7 +1044,7 @@ export async function buildDeckFromSite(idea, { wantImages = true } = {}) {
  * photograph shows the named place, and a place with no photograph is dropped.
  * An invented name costs a slide rather than producing a false one.
  */
-export async function buildFreeformDeck(idea, { wantImages = true } = {}) {
+export async function buildFreeformDeck(idea, { wantImages = true, onProgress = null } = {}) {
   const slides = idea.places.map((p, i) => ({
     n: i + 1,
     nameHe: p.nameHe,
@@ -1063,6 +1068,7 @@ export async function buildFreeformDeck(idea, { wantImages = true } = {}) {
         // which is what shipped.
         about: idea.subjectEn || '',
         coverAbout: idea.subjectEn || '',
+        onProgress,
       })
     : slides;
 

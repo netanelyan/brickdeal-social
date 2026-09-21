@@ -1884,7 +1884,13 @@ async function buildProposal(key, chatId, messageId = null, targets = ['instagra
     // and it carries no facts — so it goes straight to the photographs. There
     // is no fallback ladder either, because there is no region to fall back to.
     const built = idea.freeform
-      ? await buildFreeformDeck(idea)
+      ? await buildFreeformDeck(idea, {
+          // Rewrites the same message, so a seven-place image hunt reports
+          // itself without costing seven notifications.
+          onProgress: ({ done, of, name, ok }) =>
+            progress(`⏳ ${idea.titleHe}
+${done}/${of} · ${ok ? '📷' : '✗'} ${name}`),
+        })
       : await buildWithFallback(idea, alternatives, {
           // Said out loud, because a deck takes minutes and silence looks like
           // a hang. "Bernese Alps came back with two slides, trying Valais" is

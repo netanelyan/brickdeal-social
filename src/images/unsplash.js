@@ -121,8 +121,11 @@ export async function candidates(query, { n = 6, timeoutMs = 15_000 } = {}) {
 
   let json;
   try {
+    // See the note in pexels.js: compared against a small floor rather than
+    // the ceiling, so a niche query does one search instead of two.
+    const ENOUGH_PORTRAIT = Math.min(3, n);
     json = await search('portrait');
-    if ((json.results || []).length < n) {
+    if ((json.results || []).length < ENOUGH_PORTRAIT) {
       const wide = await search(null).catch(() => ({ results: [] }));
       const seen = new Set((json.results || []).map((p) => p.id));
       json = { results: [...(json.results || []), ...(wide.results || []).filter((p) => !seen.has(p.id))] };

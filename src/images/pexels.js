@@ -102,8 +102,14 @@ export async function candidates(query, { n = 6, timeoutMs = 15_000, w = 440, h 
     }
   };
 
+  // Fall back only when portrait came back genuinely thin, not merely short
+  // of the ceiling. `n` is 8 and a niche query — "Honningsvag northern lights"
+  // — rarely returns eight portrait frames, so comparing against it ran a
+  // second search on nearly every query and doubled the slowest phase of a
+  // build. Three good candidates is plenty for the curator to choose from.
+  const ENOUGH_PORTRAIT = Math.min(3, n);
   let json = await search('portrait');
-  if ((json.photos || []).length < n) {
+  if ((json.photos || []).length < ENOUGH_PORTRAIT) {
     const wide = await search(null).catch(() => ({ photos: [] }));
     const seen = new Set((json.photos || []).map((p) => p.id));
     json = { photos: [...(json.photos || []), ...(wide.photos || []).filter((p) => !seen.has(p.id))] };
