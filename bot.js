@@ -284,10 +284,34 @@ bot.action(/^ok:(.+)$/, async (ctx) => {
   const cand = store.takeStaging(key);
   if (!cand) return ctx.answerCbQuery('כבר טופל');
   store.clearPendingEdit(key);
-  store.enqueue(cand);
+
+  // A draft is a handoff, not a publish, so there is nothing for the drip to
+  // pace. It goes to your TikTok inbox now and waits there for you; the
+  // interval exists so the FEED does not arrive in bursts, and an inbox is not
+  // a feed. Holding a draft in a queue for four hours delays only the moment
+  // you could have started working on it.
+  //
+  // Instagram is a real post and keeps its place in the queue.
+  const targets = cand.pendingTargets?.length ? cand.pendingTargets : cand.publishTargets || [];
+  const draftNow = Boolean(cand.tiktokDraft) && targets.includes('tiktok');
+  const queued = draftNow ? targets.filter((t) => t !== 'tiktok') : targets;
+
+  if (queued.length) store.enqueue({ ...cand, pendingTargets: queued });
   const pos = store.queueSize();
-  await ctx.answerCbQuery(`✅ אושר — ${pos} בתור`);
-  await markDecided(ctx, `✅ אושר — ${pos} בתור`, cand);
+  const said = draftNow
+    ? queued.length
+      ? `✅ טיוטה לטיקטוק · ${pos} בתור לאינסטגרם`
+      : '✅ נשלח לטיוטות בטיקטוק'
+    : `✅ אושר — ${pos} בתור`;
+
+  await ctx.answerCbQuery(said);
+  await markDecided(ctx, said, cand);
+
+  // After the card is settled, so a slow upload cannot leave the message
+  // looking undecided while it runs.
+  if (draftNow) {
+    detach('טיוטה לטיקטוק', () => publishNext({ ...cand, pendingTargets: ['tiktok'] }), ctx.chat.id);
+  }
 });
 
 bot.action(/^no:(.+)$/, async (ctx) => {
@@ -1268,6 +1292,40 @@ bot.command('next', async (ctx) => {
   await ctx.reply(ok ? '📤 פורסם הפריט הבא' : 'התור ריק');
 });
 
+/**
+ * Send a queued post to TikTok drafts now, without waiting for the drip.
+ *
+ * The same act approval performs automatically, available for anything already
+ * in the queue — a post approved before this existed, or one whose TikTok half
+ * was requeued after a failure. Numbered against /queue, like /post.
+ *
+ * Only the TikTok half moves. Anything else the post still owes goes back on
+ * the queue and keeps its turn, because that half is a real publish and the
+ * drip exists for it.
+ */
+bot.command('draft', async (ctx) => {
+  const arg = (ctx.message.text || '').replace(/^\/draft(@\S+)?\s*/, '').trim();
+  const n = Number(arg);
+  if (!arg || !Number.isInteger(n) || n < 1) return ctx.reply('שימוש: /draft 2 — המספר מהרשימה ב-/queue');
+
+  const item = store.takeQueuedAt(n);
+  if (!item) return ctx.reply(`אין פריט ${n} בתור — /queue לרשימה`);
+
+  const targets = item.pendingTargets?.length ? item.pendingTargets : item.publishTargets || [];
+  if (!targets.includes('tiktok')) {
+    // Put it back exactly as it was. Taking a post out of the queue to tell you
+    // it was the wrong one would be a worse answer than the error.
+    store.enqueue(item);
+    return ctx.reply(`הפריט הזה לא מיועד לטיקטוק (${targetsHe(targets) || 'אין יעד'})`);
+  }
+
+  const rest = targets.filter((t) => t !== 'tiktok');
+  if (rest.length) store.enqueue({ ...item, pendingTargets: rest });
+
+  await ctx.reply(`⏳ שולח לטיוטות: ${item.headline}`);
+  detach('טיוטה לטיקטוק', () => publishNext({ ...item, pendingTargets: ['tiktok'] }), ctx.chat.id);
+});
+
 bot.command('held', (ctx) => {
   const rows = store.heldItems();
   if (!rows.length) return ctx.reply('✅ אין פוסטים מוחזקים');
@@ -1989,6 +2047,7 @@ bot.command('help', (ctx) =>
       '/queue — מה בתור, לפי הסדר, ממוספר',
       '/next — מפרסם את הבא בתור',
       '/post <מספר> — מפרסם אחד מסוים מהתור, מדלג על הסדר',
+      '/draft <מספר> — שולח את החצי של טיקטוק לטיוטות עכשיו',
       '/held — פוסטים מאושרים שממתינים ליעד שנפל',
       '/retry — אחרי שתיקנת: מחזיר אותם לתור',
       '/clear_held — מוותר על המוחזקים ומסמן את היעדים כתקינים',
