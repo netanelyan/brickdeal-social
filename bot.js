@@ -1460,6 +1460,25 @@ bot.command('igquota', async (ctx) => {
 bot.command('deck', async (ctx) => {
   const arg = (ctx.message.text || '').replace(/^\/deck(@\S+)?\s*/, '').trim();
 
+  // `/deck 5` — five SUGGESTIONS, the same convention /run 7 uses for cards.
+  //
+  // A bare number cannot be a region, so it is unambiguous, and it is the
+  // shape already in the muscle memory. Like /run it steps over the daily
+  // budget: DECKS_PER_DAY paces what arrives unasked, and asking is not that.
+  // It costs one model call and builds nothing — each idea still waits for its
+  // own tap.
+  const wanted = Number(arg);
+  if (arg && Number.isInteger(wanted) && wanted > 0) {
+    const n = Math.min(wanted, 8);
+    await ctx.reply(`⏳ ${n} רעיונות...`);
+    detach(
+      'רעיונות למצגות',
+      () => runOverridden('/deck', () => suggestDecks(n, ctx.chat.id)),
+      ctx.chat.id
+    );
+    return;
+  }
+
   if (!searchConfigured()) {
     await ctx.reply(
       '⚠️ חיפוש לא מוגדר (GOOGLE_CSE_KEY, GOOGLE_CSE_CX) — נשתמש רק בעמוד הראשי של כל מקום, מה שבדרך כלל לא מספיק לעובדות'
@@ -1624,6 +1643,36 @@ const DECK_BACKLOG_MAX = Math.max(1, Number(process.env.DECK_BACKLOG_MAX ?? '3')
 let deckDay = null;
 let decksToday = 0;
 let lastDeckSuggestAt = 0;
+
+/**
+ * N ideas at once, each its own proposal card.
+ *
+ * One model call for the lot rather than N calls, which is most of why asking
+ * for five is reasonable. They are reordered by place share the same way a
+ * single suggestion is, so five at once cannot come back as five Kyotos.
+ *
+ * Each still waits for its own tap: this produces five things to decide about,
+ * not five decks.
+ */
+async function suggestDecks(n, chatId) {
+  const ideas = await proposeIdeas({ count: n, recent: store.recentTitles() });
+  if (!ideas.length) return notify.send(bot.telegram, chatId, '❌ לא חזרו רעיונות');
+
+  const history = store.recentPublished();
+  const fresh = ideas.filter((i) => !placeOverCap(i.where, history));
+  const ordered = fresh.length ? [...fresh, ...ideas.filter((i) => !fresh.includes(i))] : ideas;
+
+  for (const idea of ordered) {
+    // Alternatives are the OTHER ideas — each proposal keeps its own fallbacks
+    // for when its region turns out to be thin.
+    const alternatives = ordered
+      .filter((o) => o !== idea)
+      .slice(0, 2)
+      .map((o) => ({ where: o.where, kind: o.kind }));
+    await proposeDeck(idea, alternatives, chatId);
+  }
+  return true;
+}
 
 async function suggestDeck() {
   const picked = await pickIdea();
@@ -1886,7 +1935,9 @@ bot.command('help', (ctx) =>
       '/sources — רשימת המקורות',
       '/igquota — מכסת אינסטגרם',
       '/tiktok_connect — קישור חיבור לטיקטוק עם ההרשאות הנכונות',
-      '/deck — בונה מצגת לטיקטוק (רעיון, מקורות, שקופיות)',
+      '/deck — מציע רעיון למצגת',
+      '/deck 5 — חמישה רעיונות בבת אחת (עוקף את המכסה היומית)',
+      '/deck Kyoto temple — רעיון על יעד מסוים',
       '/deck <מקום> <קטגוריה> — מצגת מוזמנת, למשל: /deck Prague museum',
       '/tiktok — חיבור טיקטוק, טוקנים ורמות פרטיות',
       '/clear_pending',
