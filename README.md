@@ -2,8 +2,11 @@
 
 A Hebrew travel-content pipeline for Israeli travellers. It reads primary
 sources, drafts a post, renders a card, sends it to one person on Telegram for
-approval, and publishes to Instagram and TikTok only when that person taps
-approve.
+approval, and publishes only when that person taps approve.
+
+One destination per kind of post: a news **card** goes to Instagram, a
+slideshow **deck** goes to TikTok. Telegram is where posts are approved, not
+somewhere they publish.
 
 Nothing publishes without a human tap. No claim is made without a source that
 was fetched, right then, from a domain on an allowlist.
@@ -23,7 +26,7 @@ Earth Observatory piece, and ten years of ERA5 climate normals.</em></p>
 
 ```
 sources → rank → draft (Claude) → verify → render → Telegram → you tap ✅ → Instagram
-                                    ↑                              ↓        + TikTok
+                                    ↑                              ↓
                               reject with a reason            queue, drip out
 ```
 
@@ -39,19 +42,31 @@ sources → rank → draft (Claude) → verify → render → Telegram → you t
 6. **Approve.** A Telegram DM with the card, the source URL, where the image
    came from, how many quotes were checked, and — when TikTok is a destination —
    the privacy level it would publish at, with a button to change it.
-7. **Publish.** Instagram Graph API and the TikTok Content Posting API. One post
-   drips out every four hours; a destination that fails is retried on its own,
-   without re-posting to the one that worked.
+7. **Publish.** Instagram Graph API for cards; the TikTok Content Posting API
+   for decks. One post drips out every four hours; a destination that fails is
+   retried on its own, without re-posting to the one that worked.
 
 ## Two kinds of post
 
 A **card** is one verified claim from one source, 1080×1350, and it goes to
-Instagram and the Telegram channel. That is the loop above.
+Instagram. That is the loop above.
 
 A **deck** is a slideshow — a cover and five to seven places — and it goes to
-TikTok and Instagram. It is built the other way round: Claude proposes what
-would be worth watching, and only then does the pipeline go looking for whether
-it can be sourced.
+TikTok, and to Instagram as a carousel. It is built the other way round: Claude
+proposes what would be worth watching, and only then does the pipeline go
+looking for whether it can be sourced.
+
+A deck is rendered **twice, in two design languages**. The TikTok set is
+1080×1920 with no branding on it at all and the text placed wherever the
+photograph is quietest — it is read over a video player's furniture, at arm's
+length, for two seconds. The Instagram set is 1080×1350 drawn as a *card*: the
+same wordmark, the same accent rule, the same type scale as the news cards, so a
+slideshow in the grid looks like the account that posted it. Same words, same
+photographs, two designs — one deck published twice, never two decks.
+
+**Decks are suggested to you, a few a day.** Only the idea is produced on the
+timer — one model call, no sourcing, no renders — and it arrives as text you
+approve before anything is built. See below.
 
 **A slide carries a place name and nothing else, unless a number decides
 something.** That is copied from the posts this channel is modelled on, and it
@@ -263,16 +278,87 @@ dashboard that are genuinely confusing.
 [`DEPLOY.md`](DEPLOY.md) covers the VPS: it has to run there, because Instagram
 fetches the card image from a public URL rather than receiving bytes.
 
+## How a deck actually gets made
+
+Two approvals, because the expensive half sits between them.
+
+```
+idea (text)  →  ✅ בנה  →  source + draft + render  →  album + card  →  ✅ אשר
+   ~1 call                  minutes, search budget                     publishes
+```
+
+The first card is the **proposal**: a title, the region, the category, and the
+list of places it intends to carry. Nothing has been sourced or rendered yet, so
+rejecting it costs one message rather than a full build. Three answers:
+
+| | |
+|---|---|
+| `📸 אינסטגרם` | build it for Instagram |
+| `🎵 טיקטוק (טיוטה)` | build it for TikTok |
+| `📸🎵 שניהם` | both |
+| `🤖 שנה בהוראה` | reply with what to change — "make it autumn", "Osaka instead", "six places" — and the idea is revised |
+| `❌ דחה` | one message spent |
+
+The place list on the proposal is the deck's **plan**, not a promise. The build
+sources its own places from the site or the map and may not find every one; the
+approval card after the build is the real list.
+
+Only the size that will be posted is rendered. Choosing Instagram does not pay
+for the TikTok crop of itself.
+
+## Why TikTok posts are drafts
+
+TikTok's photo API has no field for a sound. `auto_add_music` is a boolean — on,
+and TikTok picks a track you never see; off, and the post is silent, which costs
+reach. There is no `music_id`, and no endpoint exposes an account's saved
+sounds, so "use one of my sounds" cannot be built at either end.
+
+The same API has a second mode. `post_mode: MEDIA_UPLOAD` delivers the slides to
+the account's TikTok **inbox** — not the Drafts folder on the profile, which is
+the first place anyone looks and the one place it will not be — and the creator
+finishes it in the app: sound, cover, caption, then post.
+
+Three of TikTok's rules stop applying in that mode, and none of them by choice:
+
+- **No privacy level.** The post is not made by the client, so there is nothing
+  to resolve and `creator_info` is not even asked.
+- **No audit restriction.** `unaudited_client_can_only_post_to_private_accounts`
+  governs what an unaudited *client* may publish, and here it publishes nothing.
+  A draft can become a public post while the app is still in review.
+- **No daily cap.** The five-per-24h limit counts posts made through the API.
+
+The cost is that it is not unattended: a deck waits in your inbox until you open
+TikTok, and nothing in this process can tell whether you ever did. So the
+notification says what happened per destination — `📤 פורסם לאינסטגרם` and
+`📥 טיקטוק: נשלח לטיוטות — עוד לא באוויר` — because "posted" is the one wrong
+thing to say about a post that still needs you.
+
+**Scopes are per mode, not per media type.** `video.publish` is direct posting;
+`video.upload` is the inbox. Asking for the wrong one fails at `init` with
+`scope_not_authorized`, and a token cannot gain a scope by refreshing — only a
+new authorization grants more. `/tiktok` prints what the connection actually
+holds.
+
 ### Commands in the bot
 
 `/run` gather now · `/run 7` gather more than the daily target, overriding the
 quotas and reporting each one it stepped over · `/redo` forget what was seen and
 re-run, for testing a change · `/status` · `/health` every destination
 separately, with its last error · `/usage` tokens and cost · `/igquota` ·
-`/tiktok` connection, tokens and available privacy levels · `/sources` every
-feed with its last success and error, `/sources off <id>` to stand one down ·
-`/mix` topic balance · `/why` last run's rejections · `/queue` `/next`
-`/pending`
+`/tiktok` connection, tokens, granted scopes and available privacy levels ·
+`/tiktok_connect` which scopes a working connection needs and how to get one ·
+`/sources` every feed with its last success and error, `/sources off <id>` to
+stand one down · `/mix` topic balance · `/why` last run's rejections ·
+`/deck` build one now, `/deck Kyoto temple` name it · `/pending` ·
+`/queue` what is waiting, numbered, with destinations · `/next` publish the
+next · `/post 3` publish that one, out of turn · `/held` `/retry` `/clear_held`
+
+**The bot talks like a CLI.** A command prints what you asked for; the daemon
+does not chatter. Messages that arrive unasked are one line — a gather is
+`📥 איסוף: 253 → 12 נבדקו → 1 לאישור`, not twenty-one source bullets — and the
+detail lives behind `/status`, `/health` and `/sources`, where you go looking
+for it. Failures and things waiting on you are the exception, because they
+change what you would do next.
 
 **The owner is not rate-limited by any of this.** Every guard here — the topic
 quotas, the dedupe window, the daily target, the drip interval — protects the
@@ -298,13 +384,17 @@ message says when the slot frees.
 | `src/score.js` | ranking before anything expensive happens |
 | `src/render/` | templates, theme, Chromium |
 | `src/render/photo.js` | measures each photograph: where the words go, what colour they are |
-| `src/render/deckTemplates.js` | the two slide styles, minimal and info |
+| `src/render/deckTemplates.js` | the two TikTok slide styles, minimal and info |
+| `src/render/deckInstagram.js` | the same deck drawn as cards, for the grid |
+| `src/oauthServer.js` | the localhost endpoint that finishes a TikTok connect from the browser |
 | `src/deck/facts.js` | structured measurements off Wikidata properties |
 | `src/deck/hebrew.js` | every place name in Hebrew, and the check that it is |
 | `src/deck/request.js` | turns anything typed after `/deck` into something buildable |
 | `src/deck/flags.js` | countries in Hebrew, with their flag |
 | `src/sources/` | feed adapters and the climate dataset |
-| `src/publish/` | Instagram Graph API, publish targets |
+| `src/publish/` | Instagram Graph API, TikTok Content Posting API, publish targets |
+| `src/pillars.js` | the quotas: tag, pillar, source and **place** |
+| `src/deck/region.js` | which country a deck is in, and the check that it says so |
 | `src/images.js` | image provenance policy |
 | `src/usage.js` | token accounting, exposed as `/usage` |
 | `scripts/` | selftest, source probe, card-hosting check, one-off runs |
@@ -365,6 +455,20 @@ single-image photo post.
 were measured against one day of items. They are env-overridable and every
 rejection reports the count it measured against the floor it used, so if they
 start eating good sources the digest says so in numbers.
+
+**Four quotas, and the fourth is geographic.** No single tag, pillar, source or
+**place** may take more than its share of a rolling window of what actually
+published. The place cap exists because the other three measure what a post is
+*filed as* — and a feed can satisfy every one of them while being entirely about
+one city, which is what happened: slideshows file as pillar `day` with no
+source, so only the pillar cap could bite a run of Kyoto, and it did not.
+
+**A deck must be where it says it is.** The cover's country comes from each
+slide's own Wikidata claim; `where` comes from the string the map was searched
+with. They are compared on ISO codes, and a mismatch refuses the build rather
+than correcting itself — a deck headed "United States" carrying six Swiss peaks
+looks right to a reader and files Switzerland under America in the quota that
+exists to stop exactly that.
 
 **Topic quotas only bind once there is a sample.** Below `QUOTA_MIN_SAMPLE`
 published posts the shares are noise and nothing is capped.
