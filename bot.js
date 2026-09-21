@@ -36,6 +36,7 @@ import {
   isPlatformLimit as isPlatformLimitTikTok,
   isConfigProblem as isConfigProblemTikTok,
   missingScopes as tiktokMissingScopes,
+  authorizeUrl,
   SCOPES as TIKTOK_SCOPES,
   TIKTOK_DAILY_CAP,
 } from './src/publish/tiktok.js';
@@ -1710,6 +1711,37 @@ async function buildProposal(key, chatId, messageId = null, targets = ['instagra
   }
 }
 
+/**
+ * The authorization link, built from the scopes this bot actually needs.
+ *
+ * The website serves /tiktok/connect and builds its own authorize URL, which
+ * means the scope list lives in two places — and they drifted. The bot switched
+ * every deck to MEDIA_UPLOAD and started needing video.upload; the website's
+ * page went on requesting the two it was written with, so connecting through it
+ * produced a token that could not send a draft and said nothing was wrong.
+ *
+ * This is the same link with the right scopes on it. It does not replace the
+ * website — the callback is still what receives the code — it only removes the
+ * website from the business of deciding what to ask for, which was never
+ * information it had.
+ */
+bot.command('tiktok_connect', (ctx) => {
+  const missing = tiktokMissingScopes({ draft: true });
+  ctx.reply(
+    [
+      '🔗 פתחו את הקישור, אשרו, והחיבור יסתיים מעצמו:',
+      '',
+      authorizeUrl(),
+      '',
+      `הרשאות שיתבקשו: ${TIKTOK_SCOPES.join(', ')}`,
+      missing.length ? `כרגע חסר: ${missing.join(', ')}` : 'החיבור הנוכחי כולל את כל הדרוש',
+      '',
+      'שימו לב: הדף באתר מבקש רשימה משלו ויכול להיות מיושן — הקישור הזה הוא הנכון.',
+    ].join('\n'),
+    { link_preview_options: { is_disabled: true } }
+  );
+});
+
 bot.command('tiktok', async (ctx) => {
   if (!tiktokConfigured()) {
     return ctx.reply(
@@ -1829,6 +1861,7 @@ bot.command('help', (ctx) =>
       '/mix — תמהיל הנושאים שפורסמו',
       '/sources — רשימת המקורות',
       '/igquota — מכסת אינסטגרם',
+      '/tiktok_connect — קישור חיבור לטיקטוק עם ההרשאות הנכונות',
       '/deck — בונה מצגת לטיקטוק (רעיון, מקורות, שקופיות)',
       '/deck <מקום> <קטגוריה> — מצגת מוזמנת, למשל: /deck Prague museum',
       '/tiktok — חיבור טיקטוק, טוקנים ורמות פרטיות',
