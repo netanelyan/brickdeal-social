@@ -370,7 +370,19 @@ export const peekQueue = () => state.queue.slice(0, 10);
  * attempt and Instagram on a later one; two rows for one post would double-count
  * it in the quota window and skew the pillar mix the scorer reads back.
  */
-export function recordPublished({ id, pillar, tags = [], layout, sourceId, topic = null, telegram, instagram, tiktok }) {
+export function recordPublished({
+  id,
+  pillar,
+  tags = [],
+  layout,
+  sourceId,
+  topic = null,
+  headline = null,
+  place = null,
+  telegram,
+  instagram,
+  tiktok,
+}) {
   if (id) state.publishedIds[id] = Date.now();
   state.lastPublishedAt = Date.now();
 
@@ -402,6 +414,18 @@ export function recordPublished({ id, pillar, tags = [], layout, sourceId, topic
       // running are indistinguishable from three unrelated ones in this log —
       // which is exactly the repeat the owner override is supposed to name.
       topic,
+      // What it SAID, and WHERE it was about. Both are read back: `headline`
+      // is what the /deck idea prompt is shown as already-published, and
+      // `place` is the axis the geographic quota measures.
+      //
+      // Their absence was not a gap in the log, it was a silent failure. The
+      // idea prompt mapped `p.headline || p.id` over rows that had never
+      // stored a headline, so every entry fell through to a sha1 and the model
+      // was handed twelve hashes under the heading "do not repeat". It could
+      // not read them and repeated itself, which is how a feed meant to span
+      // the world became a run of one city.
+      headline,
+      place,
       telegram: Boolean(telegram),
       instagram: Boolean(instagram),
       tiktok: Boolean(tiktok),
@@ -442,6 +466,30 @@ export function tiktokCapFreesAt(now = Date.now()) {
 export function recentPublished() {
   prunePublished(state);
   return [...state.published].sort((a, b) => b.ts - a.ts);
+}
+
+/**
+ * What went out, in words — the memory the /deck idea prompt is given.
+ *
+ * Exported rather than mapped at the call site so it can be tested, because the
+ * inline version was wrong for as long as it existed and nothing could see it:
+ * it read `p.headline` from rows that had never stored one and fell through to
+ * `p.id`, so the prompt's "do not repeat" list was twelve sha1 hashes. A model
+ * cannot avoid repeating what it cannot read.
+ *
+ * Rows predating these fields yield an empty string and are dropped, so the
+ * list is short and true rather than long and meaningless.
+ */
+export function recentTitles({ limit = 12, history = recentPublished() } = {}) {
+  return history
+    .map((p) =>
+      // The place is appended to a headline, which rarely names it in a form
+      // the model can match on, and never to a topic, which is already
+      // "<where> · <category>" — "Vienna · city (Vienna)" says it twice.
+      p.headline ? [p.headline, p.place && `(${p.place})`].filter(Boolean).join(' ') : p.topic || ''
+    )
+    .filter(Boolean)
+    .slice(0, limit);
 }
 export const publishedToday = () => {
   const start = new Date();

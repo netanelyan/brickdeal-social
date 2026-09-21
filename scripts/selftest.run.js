@@ -409,6 +409,36 @@ ok('a candidate with no source is not capped by one', quotaBlock({ pillar: 'rout
 ok('history from before the field existed blocks nothing', quotaBlock({ pillar: 'route', tags: [], sourceId: 'smithsonian-volcano' }, hist(20, 0)) === null);
 
 /* -------------------------------------------------------------------------- */
+group('what the idea prompt remembers — the list that was twelve hashes');
+
+// The bug this guards, exactly: recordPublished never accepted a `headline`, so
+// `p.headline || p.id` fell through to a sha1 on every row and the /deck prompt
+// asked the model not to repeat twelve hex strings. With no readable memory it
+// returned its prior every run, and for "beautiful travel slideshow" that prior
+// is Kyoto — which is how a feed meant to span the world became one city.
+const titleHist = [
+  { headline: 'המקדשים והארמונות הכי יפים ביפן', topic: 'Kyoto · temple', place: 'Kyoto' },
+  { headline: null, topic: 'Vienna · city', place: 'Vienna' },
+  { headline: 'הרים באיטליה', topic: null, place: null },
+];
+
+eq(
+  'a headline is shown with its place',
+  store.recentTitles({ history: titleHist })[0],
+  'המקדשים והארמונות הכי יפים ביפן (Kyoto)'
+);
+eq('a row with no headline falls back to its topic', store.recentTitles({ history: titleHist })[1], 'Vienna · city');
+eq('a headline with no place is still readable', store.recentTitles({ history: titleHist })[2], 'הרים באיטליה');
+ok(
+  'nothing the model cannot read reaches the prompt',
+  store.recentTitles({ history: titleHist }).every((t) => !/^[0-9a-f]{12}$/.test(t))
+);
+// Rows written before these fields existed are dropped, not padded into the
+// list as empty strings — a short true list beats a long meaningless one.
+eq('legacy rows drop out entirely', store.recentTitles({ history: [{ ts: 1, id: 'a3f9c1b2d4e5' }] }).length, 0);
+eq('the list is capped', store.recentTitles({ history: Array.from({ length: 40 }, () => titleHist[0]) }).length, 12);
+
+/* -------------------------------------------------------------------------- */
 group('ranking — the two misfires found against live feeds');
 
 const base = { sourceId: 's', publishedAt: new Date().toISOString(), pillarHints: [] };

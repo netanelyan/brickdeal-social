@@ -13,7 +13,7 @@ import { renderCard, closeBrowser } from './src/render/index.js';
 import { publishTelegram, publishTelegramDeck, sendForApproval } from './src/publish/telegram.js';
 import { proposeIdeas, titleForRequest } from './src/deck/ideas.js';
 import { buildDeck } from './src/deck/build.js';
-import { toDeckCandidate } from './src/deck/candidate.js';
+import { toDeckCandidate, deckTopic } from './src/deck/candidate.js';
 import { canonicalKind } from './src/sources/tiyulplus.js';
 import { KINDS } from './src/sources/places.js';
 import { resolveRequest } from './src/deck/request.js';
@@ -433,6 +433,29 @@ const MAX_PUBLISH_ATTEMPTS = 3;
  * so retrying cannot duplicate anything, and a destination that failed is not
  * abandoned just because its neighbour worked.
  */
+
+/**
+ * What the published log records about a post, in one place.
+ *
+ * Written from two call sites — the nothing-owed path and the succeeded path —
+ * which had drifted into two copies of the same object literal. They must agree:
+ * the quota window and the /deck idea prompt both read these fields back, and a
+ * field populated on one path and not the other is a guard that works only on
+ * whichever path the post happened to take.
+ */
+const publishedFacts = (cand) => ({
+  id: cand.id,
+  pillar: cand.pillar,
+  tags: cand.tags,
+  layout: cand.layout,
+  sourceId: cand.sourceId,
+  topic: cand.deck ? deckTopic(cand.deck) : null,
+  headline: cand.headline || null,
+  // Where the post was about. A deck names its region; a card names it on the
+  // trip, which is the field verify.js already insists every card have.
+  place: (cand.deck ? cand.deck.where : cand.trip?.where) || null,
+});
+
 async function publishNext() {
   const cand = store.dequeue();
   if (!cand) return false;
@@ -479,14 +502,7 @@ async function publishNext() {
   // Nothing to do — the destination was reconfigured away while this sat in the
   // queue. Recording it stops it looping forever as a card that owes nothing.
   if (!owed.length) {
-    store.recordPublished({
-      id: cand.id,
-      pillar: cand.pillar,
-      tags: cand.tags,
-      layout: cand.layout,
-      sourceId: cand.sourceId,
-      topic: cand.deck ? `${cand.deck.where} · ${cand.deck.category}` : null,
-    });
+    store.recordPublished(publishedFacts(cand));
     return false;
   }
 
@@ -603,12 +619,7 @@ async function publishNext() {
 
   if (succeeded.length) {
     store.recordPublished({
-      id: cand.id,
-      pillar: cand.pillar,
-      tags: cand.tags,
-      layout: cand.layout,
-      sourceId: cand.sourceId,
-      topic: cand.deck ? `${cand.deck.where} · ${cand.deck.category}` : null,
+      ...publishedFacts(cand),
       telegram: Boolean(done.telegram),
       instagram: Boolean(done.instagram),
       tiktok: Boolean(done.tiktok),
@@ -1197,7 +1208,20 @@ async function buildAndStageDeck(arg, chatId) {
       idea = { ...cover, where: req.where, kind: req.kind, want: req.want, whyNow: 'asked for directly' };
     } else {
       await say('⏳ חושב על רעיונות...');
-      const recent = store.recentPublished().map((p) => p.headline || p.id).filter(Boolean).slice(0, 12);
+      // What actually went out, in words the model can read.
+      //
+      // This mapped `p.headline || p.id` against a log that never stored a
+      // headline — recordPublished did not even accept one — so every entry
+      // fell through to `p.id`, a sha1 slice. The prompt handed the model
+      // twelve hashes under the heading "ALREADY PUBLISHED (do not repeat, and
+      // avoid the same city twice in a row)". It could not read them, so it had
+      // no memory of the feed at all and returned its prior every run. For
+      // "beautiful travel slideshow" that prior is Kyoto, and the feed became a
+      // run of Kyoto while every quota read green.
+      //
+      // Rows written before these fields existed have neither and drop out,
+      // which shortens the list rather than padding it with noise.
+      const recent = store.recentTitles();
       const ideas = await proposeIdeas({ count: 3, recent });
       if (!ideas.length) return say('❌ לא חזרו רעיונות');
       idea = ideas[0];
