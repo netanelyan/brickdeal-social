@@ -98,12 +98,8 @@ export function rejectSingle(item) {
  * report is that this one copy will not be made.
  */
 export function targetAbandoned(headline, abandoned = []) {
-  return [
-    `⤫ ויתרנו על ${targetsHe(abandoned.map((a) => a.target))} לפוסט הזה`,
-    headline,
-    ...abandoned.map((a) => `   ${TARGET_HE[a.target] || a.target}: ${a.message}`),
-    'לא ינוסה שוב - הבעיה בפוסט עצמו, לא ביעד. שאר היעדים לא נפגעו.',
-  ].join('\n');
+  const why = abandoned.map((a) => `${TARGET_HE[a.target] || a.target}: ${a.message}`).join(' · ');
+  return `⤫ ויתרנו: ${why} — ${headline}`;
 }
 
 export function published({ headline, succeeded, failed = [], drafted = [] }) {
@@ -113,20 +109,15 @@ export function published({ headline, succeeded, failed = [], drafted = [] }) {
   // the direction that matters: you read "posted", never open the app, and the
   // app is the only place a draft becomes a post.
   const posted = succeeded.filter((t) => !drafted.includes(t));
-  const lines = [];
-  if (posted.length) lines.push(`📤 פורסם ל${targetsHe(posted)}`);
-  if (drafted.length) lines.push(`📥 ${targetsHe(drafted)}: נשלח לטיוטות — עוד לא באוויר`);
-  lines.push(headline);
-  // Where it actually is. An upload arrives as an INBOX NOTIFICATION, not in
-  // the Drafts folder on the profile — which is the first place anyone looks,
-  // and the one place it will not be.
-  if (drafted.length) {
-    lines.push('פתחו את טיקטוק ← תיבת ההודעות (Inbox) ← ההתראה על תוכן שהועלה. שם בוחרים סאונד ומפרסמים.');
-  }
-  for (const f of failed) {
-    lines.push(`⚠️ ${TARGET_HE[f.target] || f.target} נכשל: ${f.message}`);
-  }
-  return lines.join('\n');
+  // One line. This fires on every post, so it is the message that decides
+  // whether the chat is readable at all — and "where to find a TikTok draft" is
+  // something learned once, not reprinted every time. (Inbox, not the Drafts
+  // folder; it is in the README.)
+  const parts = [];
+  if (posted.length) parts.push(`📤 ${targetsHe(posted)}`);
+  if (drafted.length) parts.push(`📥 ${targetsHe(drafted)} טיוטה`);
+  for (const f of failed) parts.push(`⚠️ ${TARGET_HE[f.target] || f.target}: ${f.message}`);
+  return `${parts.join(' · ')} — ${headline}`;
 }
 
 /**
@@ -138,15 +129,11 @@ export function published({ headline, succeeded, failed = [], drafted = [] }) {
  * and is not now: the retry is per destination, so half of it may well be live.
  */
 export function publishRetrying(headline, failed, attempt, max, succeeded = []) {
-  const lines = [
-    succeeded.length
-      ? `🔁 פורסם ל${targetsHe(succeeded)} · חוזר לתור עבור השאר (ניסיון ${attempt}/${max})`
-      : `🔁 שום דבר לא פורסם — חזר לתור (ניסיון ${attempt}/${max})`,
-    headline,
-  ];
-  for (const f of failed) lines.push(`   ${TARGET_HE[f.target] || f.target}: ${f.message}`);
-  lines.push('ינוסה שוב רק ליעד שנכשל — מה שכבר עלה לא ישוכפל.');
-  return lines.join('\n');
+  // The closing sentence was a rule, not news: it is true of every retry and
+  // was reprinted on each one.
+  const ok = succeeded.length ? `📤 ${targetsHe(succeeded)} · ` : '';
+  const why = failed.map((f) => `${TARGET_HE[f.target] || f.target}: ${f.message}`).join(' · ');
+  return `🔁 ${ok}${attempt}/${max} — ${headline}\n${why}`;
 }
 
 /**
@@ -157,10 +144,8 @@ export function publishRetrying(headline, failed, attempt, max, succeeded = []) 
  * post at a time.
  */
 export function publishHeld(headline, owed, succeeded = [], heldCount = 1) {
-  const lines = [`⏸️ מוחזק עד שי${targetsHe(owed)} יחזור לעבוד`, headline];
-  if (succeeded.length) lines.push(`✅ כבר פורסם ל${targetsHe(succeeded)} — לא ישוכפל`);
-  lines.push(`📥 ${heldCount} מוחזקים בסך הכל · /held לרשימה · /retry לנסות שוב`);
-  return lines.join('\n');
+  const ok = succeeded.length ? `📤 ${targetsHe(succeeded)} · ` : '';
+  return `⏸️ ${ok}מוחזק: ${targetsHe(owed)} (${heldCount}) — ${headline} · /retry`;
 }
 
 /**
@@ -206,11 +191,7 @@ export function withDetail(hebrew, detail, { limit = 200 } = {}) {
  * nowhere to put it yet, and there will be.
  */
 export function publishWaitingForSetup(headline, owed, heldCount = 1) {
-  return [
-    `⏸️ ${targetsHe(owed)} עוד לא מחובר — הפוסט ממתין ולא ירד לטמיון`,
-    headline,
-    `📥 ${heldCount} מוחזקים · /held לרשימה · /retry אחרי שהיעד יחובר`,
-  ].join('\n');
+  return `⏸️ ${targetsHe(owed)} לא מחובר · מוחזק (${heldCount}) — ${headline} · /retry אחרי חיבור`;
 }
 
 /**
@@ -226,13 +207,10 @@ export function publishWaitingForSetup(headline, owed, heldCount = 1) {
  * is "so when does it go out".
  */
 export function platformLimited(headline, limited = [], freesAt = null) {
-  const lines = [`⏳ ${targetsHe(limited.map((l) => l.target))} — מגבלת פלטפורמה, הפוסט ממתין`, headline];
-  for (const l of limited) lines.push(`   ${TARGET_HE[l.target] || l.target}: ${l.message}`);
-  if (freesAt) {
-    lines.push(`🕒 המכסה מתפנה בעוד ${humanDuration(Math.max(0, freesAt - Date.now()))}`);
-  }
-  lines.push('זו מגבלה של הפלטפורמה, לא תקלה — לא עוקפים אותה. הפוסט יישלח כשהמכסה תתפנה.');
-  return lines.join('\n');
+  // The only fact here that changes anything you would do is WHEN it frees.
+  const when = freesAt ? ` · מתפנה בעוד ${humanDuration(Math.max(0, freesAt - Date.now()))}` : '';
+  const why = limited.map((l) => `${TARGET_HE[l.target] || l.target}: ${l.message}`).join(' · ');
+  return `⏳ ${why}${when} — ${headline}`;
 }
 
 /**
@@ -309,17 +287,12 @@ export function overrideNotice(headline, overrides = []) {
  */
 export function targetDegraded(target, health, detail) {
   const name = TARGET_HE[target] || target;
-  const lines = [
-    `🔴 ${name} נכשל ${health.failures} פעמים ברצף — מפסיק לנסות`,
-    detail ? `   ${detail}` : '',
-    health.lastOkAt
-      ? `📆 פורסם שם לאחרונה לפני ${humanDuration(Date.now() - health.lastOkAt)}`
-      : '📆 מעולם לא פורסם שם בהצלחה',
-    '',
-    'פוסטים מאושרים יוחזקו ולא יאבדו.',
-    'אחרי שהתקלה נפתרת: /retry',
-  ].filter(Boolean);
-  return lines.join('\n');
+  // Two lines, and both are news: which destination stopped, and why. That
+  // approved posts are held rather than lost is a standing guarantee, not an
+  // update — it belongs in the README, and it was being reprinted on every
+  // outage.
+  const last = health.lastOkAt ? humanDuration(Date.now() - health.lastOkAt) : 'מעולם';
+  return `🔴 ${name} נפל (${health.failures} ברצף · אחרון: ${last}) · /retry${detail ? `\n${detail}` : ''}`;
 }
 
 /**

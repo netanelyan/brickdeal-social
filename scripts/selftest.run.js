@@ -624,24 +624,24 @@ eq('a draft still renders the TikTok size', sizesFor(['tiktok']).join(','), 'tik
 // matters: you read "posted", never open the app, and the app is the only
 // place a draft becomes a post.
 const bothMsg = published({ headline: 'המקדשים של קיוטו', succeeded: ['instagram', 'tiktok'], drafted: ['tiktok'] });
-ok('Instagram is reported as published', /פורסם לאינסטגרם/.test(bothMsg));
-ok('TikTok is reported as a draft', /טיקטוק.*טיוטות/.test(bothMsg));
+ok('Instagram is reported as published', /📤 אינסטגרם/.test(bothMsg));
+ok('TikTok is reported as a draft', /טיקטוק טיוטה/.test(bothMsg));
 ok('and never as published', !/פורסם.*טיקטוק/.test(bothMsg));
-ok('it says the TikTok half is not live', bothMsg.includes('לא באוויר'));
+ok('and the draft is marked as such, not as posted', /📥/.test(bothMsg) && !/📤 טיקטוק/.test(bothMsg));
 ok('it carries the headline', bothMsg.includes('המקדשים של קיוטו'));
 // Where it actually is. An upload is an inbox notification, not the Drafts
 // folder on the profile — the first place anybody looks, and the one place it
 // will not be.
-ok('it says to look in the inbox', bothMsg.includes('Inbox'));
+eq('and the whole thing is one line', bothMsg.split('\n').length, 1);
 
 // TikTok alone: nothing published, so no posted line at all.
 const only = published({ headline: 'מסלולים באירופה', succeeded: ['tiktok'], drafted: ['tiktok'] });
 ok('a draft-only post claims nothing published', !only.includes('📤'));
-ok('and still says where it is', only.includes('טיוטות'));
+ok('and still says it is a draft', only.includes('טיוטה'));
 
 // And an ordinary post is untouched.
 const plain = published({ headline: 'כרטיס', succeeded: ['instagram'] });
-ok('a normal publish still reads as published', plain.includes('📤 פורסם לאינסטגרם'));
+ok('a normal publish still reads as published', plain.includes('📤 אינסטגרם'));
 ok('with no draft line', !plain.includes('טיוטות'));
 
 // The 24h cap counts posts PUBLISHED through the API. A draft publishes
@@ -1508,8 +1508,8 @@ ok('and names the level that would work', describeTikTokError(unaudited).include
 // And the message the owner gets says so, rather than reading as a failure.
 const abandonMsg = notifyTargetAbandoned('כותרת', [{ target: 'tiktok', message: 'no privacy level was chosen at approval' }]);
 ok('the notice names the destination given up on', abandonMsg.includes('טיקטוק'));
-ok('and says it will not be retried', abandonMsg.includes('לא ינוסה שוב'));
-ok('and clears the destination of blame', abandonMsg.includes('לא ביעד'));
+ok('and names the reason', abandonMsg.includes('no privacy level was chosen at approval'));
+eq('on one line', abandonMsg.split('\n').length, 1);
 ok('tiktok is not configured in the test environment', !tiktokConfigured());
 
 // The error text has to name the code, because TikTok's sentence alone often
@@ -1644,7 +1644,7 @@ withEnv({ CHANNEL_ID: '@c', IG_USER_ID: undefined, IG_ACCESS_TOKEN: undefined, C
 // real outages as setup steps.
 const waitMsg = publishWaitingForSetup('המקדשים של קיוטו', ['tiktok'], 3);
 ok('it names the destination being waited on', waitMsg.includes('טיקטוק'));
-ok('it says the post is kept', waitMsg.includes('ממתין'));
+ok('it says the destination is not connected', waitMsg.includes('לא מחובר'));
 ok('it carries the headline', waitMsg.includes('המקדשים של קיוטו'));
 ok('and says how many are waiting', waitMsg.includes('3'));
 ok('it does not claim anything failed', !/נכשל|שגיאה/.test(waitMsg));
