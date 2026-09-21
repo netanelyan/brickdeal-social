@@ -212,6 +212,11 @@ function stagingButtons(key, cand) {
  */
 async function attachTikTok(cand) {
   if (!cand.publishTargets?.includes('tiktok')) return cand;
+  // A draft has no privacy level to show you. TikTok asks you in the app when
+  // you post it, so asking creator_info here would spend a call to display a
+  // choice that is not yours to make — and the list it returns is the one the
+  // file's header warns is a courtesy rather than a guarantee.
+  if (cand.tiktokDraft) return cand;
   try {
     const info = await creatorInfo();
     return {
@@ -338,9 +343,13 @@ bot.action(/^edit:(.+)$/, async (ctx) => {
 
 // --- deck proposals (the text stage, before anything is built) ---------------
 
-bot.action(/^db:(.+):(instagram|tiktok)$/, async (ctx) => {
+bot.action(/^db:(.+):(instagram|tiktok|tiktokdraft)$/, async (ctx) => {
   const key = ctx.match[1];
-  const target = ctx.match[2];
+  // `tiktokdraft` is the same DESTINATION with a different relationship to it:
+  // the slides go to your inbox and you post them. So it resolves to the tiktok
+  // target plus a flag, rather than pretending to be a fourth place to publish.
+  const draft = ctx.match[2] === 'tiktokdraft';
+  const target = draft ? 'tiktok' : ctx.match[2];
   if (!store.getProposal(key)) return ctx.answerCbQuery('כבר טופל');
 
   // Said at the tap, not after the build. Choosing a destination that is not
@@ -348,7 +357,13 @@ bot.action(/^db:(.+):(instagram|tiktok)$/, async (ctx) => {
   // learning that after waiting minutes for twelve renders is the wrong order
   // to find it out in.
   const ready = targetsForKind('deck').includes(target);
-  await ctx.answerCbQuery(ready ? '⏳ בונה' : `⏳ בונה — ${TARGET_HE[target]} עוד לא מחובר, הפוסט ימתין`);
+  await ctx.answerCbQuery(
+    ready
+      ? draft
+        ? '⏳ בונה — יחכה לך בטיוטות בטיקטוק'
+        : '⏳ בונה'
+      : `⏳ בונה — ${TARGET_HE[target]} עוד לא מחובר, הפוסט ימתין`
+  );
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
 
   // Detached for the same reason the command was: a build is minutes of work
@@ -360,7 +375,7 @@ bot.action(/^db:(.+):(instagram|tiktok)$/, async (ctx) => {
   const messageId = ctx.callbackQuery.message.message_id;
   detach(
     'בניית מצגת',
-    () => runOverridden('/deck', () => buildProposal(key, chatId, messageId, target)),
+    () => runOverridden('/deck', () => buildProposal(key, chatId, messageId, target, draft)),
     chatId
   );
 });
@@ -580,6 +595,10 @@ const publishedFacts = (cand) => ({
   // Where the post was about. A deck names its region; a card names it on the
   // trip, which is the field verify.js already insists every card have.
   place: (cand.deck ? cand.deck.where : cand.trip?.where) || null,
+  // So the row does not claim a post that has not been made. A draft reached
+  // the inbox; whether it was ever posted happens in the app, where this
+  // process cannot see it.
+  tiktokDraft: Boolean(cand.tiktokDraft),
 });
 
 async function publishNext() {
@@ -696,7 +715,7 @@ async function publishNext() {
         ? publishTelegramDeck(bot.telegram, CHANNEL_ID, cand)
         : publishTelegram(bot.telegram, CHANNEL_ID, cand),
     instagram: () => publishInstagram(cand),
-    tiktok: () => publishTikTok(cand),
+    tiktok: () => publishTikTok(cand, { draft: Boolean(cand.tiktokDraft) }),
   };
   const errorText = {
     instagram: describeError,
@@ -805,7 +824,16 @@ async function publishNext() {
     // A card whose only remaining target was abandoned has nothing to announce
     // as published — saying "📤 פורסם ל" with an empty list reads as a bug.
     if (succeeded.length) {
-      await notify.send(bot.telegram, staging, notify.published({ headline: cand.headline, succeeded, failed: [] }));
+      // A deck handed to your inbox did not publish, and saying it did is the
+      // one wrong thing to say here: you would read "posted" and not open the
+      // app, which is the only place the last step can happen.
+      await notify.send(
+        bot.telegram,
+        staging,
+        cand.tiktokDraft && succeeded.length === 1 && succeeded[0] === 'tiktok'
+          ? notify.sentToDrafts(cand.headline)
+          : notify.published({ headline: cand.headline, succeeded, failed: [] })
+      );
     }
     return true;
   }
@@ -1449,6 +1477,10 @@ const proposalButtons = (key) =>
       Markup.button.callback('📸 בנה לאינסטגרם', `db:${key}:instagram`),
       Markup.button.callback('🎵 בנה לטיקטוק', `db:${key}:tiktok`),
     ],
+    // The third way to send a deck to TikTok, and the only one that lets you
+    // choose the sound. It lands in your TikTok inbox instead of the feed, and
+    // you finish it in the app.
+    [Markup.button.callback('📥 טיוטה לטיקטוק (בוחרים סאונד)', `db:${key}:tiktokdraft`)],
     [Markup.button.callback('🤖 שנה בהוראה', `dr:${key}`), Markup.button.callback('❌ דחה', `dx:${key}`)],
   ]);
 
@@ -1467,7 +1499,7 @@ async function proposeDeck(idea, alternatives, chatId) {
  * the repeat guards, and an AsyncLocalStorage context does not survive the wait
  * for you to tap a button.
  */
-async function buildProposal(key, chatId, messageId = null, target = 'instagram') {
+async function buildProposal(key, chatId, messageId = null, target = 'instagram', draft = false) {
   const say = (text) => notify.send(bot.telegram, chatId, text).catch(() => {});
   const proposal = store.getProposal(key);
   if (!proposal) return say('ההצעה הזו כבר לא ממתינה');
@@ -1512,7 +1544,7 @@ async function buildProposal(key, chatId, messageId = null, target = 'instagram'
     }
 
     // Rendered for the chosen destination only, and staged owing just that one.
-    const cand = await toDeckCandidate(built, { targets: [target] });
+    const cand = await toDeckCandidate(built, { targets: [target], tiktokDraft: draft });
 
     if (store.hasPublished(cand.id)) {
       return say(`⏭️ המצגת הזו כבר פורסמה (${cand.id}) — /deck שוב לרעיון אחר`);

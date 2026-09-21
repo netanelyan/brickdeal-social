@@ -468,6 +468,11 @@ async function waitForPublish(publishId, tok, { timeoutMs = 120_000, intervalMs 
 
     last = d.status || last;
     if (d.status === 'PUBLISH_COMPLETE') return d;
+    // The terminal state for an upload, where "done" means the slides reached
+    // your inbox rather than the feed. Nothing publishes from here — you finish
+    // it in the app — so waiting for PUBLISH_COMPLETE would time out on a
+    // transfer that had already succeeded.
+    if (d.status === 'SEND_TO_USER_INBOX') return d;
 
     if (d.status === 'FAILED') {
       // `fail_reason` is the actionable half and it is not always present;
@@ -671,7 +676,26 @@ export function preflight(cand) {
  * `content/init/` because it is the only irreversible step; stopping anywhere
  * earlier would leave the interesting half untested.
  */
-export async function publishTikTok(cand, { dryRun = false } = {}) {
+/**
+ * Publish, or hand over.
+ *
+ * `draft` switches post_mode to MEDIA_UPLOAD: the slides are delivered to the
+ * account's TikTok inbox and YOU finish them in the app — sound, cover, text —
+ * and tap post. It is a different relationship with the platform rather than a
+ * different setting, and three of this file's rules stop applying to it:
+ *
+ *   - No privacy level. There is nothing to choose here, because the post is
+ *     not being made by this client; creator_info is not even asked.
+ *   - No audit restriction. `unaudited_client_can_only_post_to_private_accounts`
+ *     is about what an unaudited CLIENT may publish, and in this mode the
+ *     client publishes nothing. A draft can become a public post today.
+ *   - No daily cap. The five-per-24h limit counts posts made through the API.
+ *
+ * The cost is that it is not unattended. A deck sent as a draft sits in your
+ * inbox until you open TikTok, and nothing in this process can tell whether you
+ * ever did.
+ */
+export async function publishTikTok(cand, { dryRun = false, draft = false } = {}) {
   if (!tiktokConfigured()) {
     throw new TikTokError(
       'TikTok is not configured (needs TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, a stored token and ' +
@@ -684,9 +708,14 @@ export async function publishTikTok(cand, { dryRun = false } = {}) {
 
   // TikTok's limit, checked before the call rather than discovered by being
   // refused. Not bypassable by the owner override — see TIKTOK_DAILY_CAP.
+  //
+  // Skipped for a draft, and not as a favour: the cap counts posts PUBLISHED by
+  // an API client in 24 hours, and a draft publishes nothing. Charging it
+  // against the cap would spend a limit that was never touched, and hold back
+  // direct posts that could have gone out.
   const cap = TIKTOK_DAILY_CAP();
   const used = store.tiktokPostsInLast24h();
-  if (used >= cap) {
+  if (!draft && used >= cap) {
     const freesAt = store.tiktokCapFreesAt();
     const mins = freesAt ? Math.max(1, Math.round((freesAt - Date.now()) / 60_000)) : null;
     throw new TikTokError(
@@ -700,7 +729,13 @@ export async function publishTikTok(cand, { dryRun = false } = {}) {
   // problem rather than as whatever init says about an expired bearer.
   const t = await liveToken(dryRun ? 'dry_run' : 'init');
 
-  const { privacy, source: privacySource, offered, note } = await resolvePrivacy(cand);
+  // A draft has no privacy level to resolve: the post is made by you, in the
+  // app, and TikTok asks you there. Asking creator_info anyway would be a call
+  // whose answer is discarded — and the answer is the list this app may not
+  // actually use, which is exactly the confusion the file's header warns about.
+  const { privacy, source: privacySource, offered, note } = draft
+    ? { privacy: null, source: 'draft', offered: [], note: null }
+    : await resolvePrivacy(cand);
   if (note) notes.push(note);
 
   if (dryRun) {
@@ -709,6 +744,7 @@ export async function publishTikTok(cand, { dryRun = false } = {}) {
       publishId: null,
       images,
       slides: images.length,
+      draft,
       privacy,
       privacySource,
       offered,
@@ -722,15 +758,31 @@ export async function publishTikTok(cand, { dryRun = false } = {}) {
     token: t,
     step: 'init',
     body: {
-      post_mode: 'DIRECT_POST',
+      post_mode: draft ? 'MEDIA_UPLOAD' : 'DIRECT_POST',
       media_type: 'PHOTO',
-      post_info: {
-        title: String(cand.headline || '').slice(0, 90),
-        description: cand.tiktokCaption || '',
-        privacy_level: privacy,
-        disable_comment: false,
-        auto_add_music: true,
-      },
+      post_info: draft
+        ? {
+            // Only what survives the handover. privacy_level, disable_comment
+            // and auto_add_music are all decisions the creator makes in the
+            // app for an upload, and sending them would be stating a preference
+            // for settings this client does not get to set.
+            //
+            // auto_add_music in particular is the reason to use this mode at
+            // all: it is a boolean with no way to name a track, so a deck that
+            // wants a chosen sound has to be finished by hand.
+            title: String(cand.headline || '').slice(0, 90),
+            description: cand.tiktokCaption || '',
+          }
+        : {
+            title: String(cand.headline || '').slice(0, 90),
+            description: cand.tiktokCaption || '',
+            privacy_level: privacy,
+            disable_comment: false,
+            // TikTok picks the track. There is no field for choosing one, so
+            // this is on or off — and off means a silent post, which generally
+            // reaches fewer people. Use draft mode to choose.
+            auto_add_music: true,
+          },
       source_info: {
         source: 'PULL_FROM_URL',
         photo_cover_index: 0,
@@ -749,7 +801,20 @@ export async function publishTikTok(cand, { dryRun = false } = {}) {
     });
   }
 
-  await waitForPublish(d.publish_id, t);
+  const status = await waitForPublish(d.publish_id, t);
 
-  return { publishId: d.publish_id, images, slides: images.length, privacy, privacySource, notes };
+  return {
+    publishId: d.publish_id,
+    images,
+    slides: images.length,
+    privacy,
+    privacySource,
+    notes,
+    // Whether this reached the feed or your inbox. The publish loop reports
+    // them differently, because "posted" and "waiting for you to post it" are
+    // not the same outcome and a log that conflates them is a log that says
+    // things went out when they did not.
+    draft,
+    status: status?.status || null,
+  };
 }

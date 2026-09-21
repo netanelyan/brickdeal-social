@@ -417,6 +417,7 @@ export function recordPublished({
   telegram,
   instagram,
   tiktok,
+  tiktokDraft = false,
 }) {
   if (id) state.publishedIds[id] = Date.now();
   state.lastPublishedAt = Date.now();
@@ -434,6 +435,11 @@ export function recordPublished({
     existing.telegram = existing.telegram || Boolean(telegram);
     existing.instagram = existing.instagram || Boolean(instagram);
     existing.tiktok = existing.tiktok || Boolean(tiktok);
+    // Sticky the other way round: a row that reached the inbox and was later
+    // published for real stops being a draft. The flag says "as far as this
+    // process knows, nothing was posted", and a direct post is that knowledge
+    // arriving.
+    if (tiktok && !tiktokDraft) existing.tiktokDraft = false;
   } else {
     state.published.push({
       ts: Date.now(),
@@ -465,6 +471,12 @@ export function recordPublished({
       instagram: Boolean(instagram),
       tiktok: Boolean(tiktok),
       tiktokAt: tiktok ? Date.now() : null,
+      // Reached your inbox rather than the feed. Recorded so the row does not
+      // claim something that has not happened: the deck is finished, approved
+      // and delivered, and whether it was ever POSTED is a fact this process
+      // cannot observe. Everything downstream that says "published" should say
+      // something else about these.
+      tiktokDraft: Boolean(tiktok && tiktokDraft),
     });
   }
   prunePublished(state);
@@ -486,7 +498,14 @@ export function recordPublished({
  */
 export function tiktokPostsInLast24h(now = Date.now()) {
   const cutoff = now - DAY_MS;
-  return state.published.filter((p) => p.tiktok && (p.tiktokAt ?? p.ts ?? 0) >= cutoff).length;
+  // Drafts are excluded, and this is the whole reason the flag is stored. The
+  // cap counts posts PUBLISHED through the API in 24 hours; a deck handed to
+  // your inbox publishes nothing until you tap post in the app, and TikTok does
+  // not charge it. Counting it here would spend a limit that was never touched
+  // and hold back direct posts that could have gone out.
+  return state.published.filter(
+    (p) => p.tiktok && !p.tiktokDraft && (p.tiktokAt ?? p.ts ?? 0) >= cutoff
+  ).length;
 }
 
 /** When the oldest TikTok post inside the 24h window falls out of it. */

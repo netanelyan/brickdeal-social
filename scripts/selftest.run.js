@@ -18,6 +18,7 @@ import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, evidence
 import { renderSlideHtml, SIZES, sizeClass, INK_LUMINANCE, FACES } from '../src/render/deckTemplates.js';
 import { renderInstagramSlideHtml } from '../src/render/deckInstagram.js';
 import { sizesFor } from '../src/deck/candidate.js';
+import { sentToDrafts } from '../src/notify.js';
 import { SCRIM_INK } from '../src/render/theme.js';
 import {
   lengthValue,
@@ -570,6 +571,39 @@ const cb = /^db:(.+):(instagram|tiktok)$/;
 ok('the Instagram button parses', cb.exec('db:a1b2c3d:instagram')?.[2] === 'instagram');
 ok('the TikTok button parses', cb.exec('db:a1b2c3d:tiktok')?.[2] === 'tiktok');
 ok('and a bare build tap no longer matches anything', !cb.test('db:a1b2c3d'));
+
+// Draft mode: the same destination reached a different way. TikTok's API has no
+// field for choosing a sound on a photo post — auto_add_music is a boolean —
+// so a deck that wants a particular track has to be finished by hand in the
+// app. MEDIA_UPLOAD delivers it to the inbox for exactly that.
+const cbd = /^db:(.+):(instagram|tiktok|tiktokdraft)$/;
+eq('the draft button parses', cbd.exec('db:a1b2c3d:tiktokdraft')?.[2], 'tiktokdraft');
+eq('and does not shadow the direct one', cbd.exec('db:a1b2c3d:tiktok')?.[2], 'tiktok');
+// It resolves to the tiktok TARGET plus a flag, not a fourth destination —
+// publishTargets stays a list of real places.
+eq('a draft still renders the TikTok size', sizesFor(['tiktok']).join(','), 'tiktok');
+
+// The message must not say "published". Nothing in the process can see whether
+// the app was ever opened, so this is the last honest thing it can report.
+const drafted = sentToDrafts('המקדשים של קיוטו');
+ok('it says where the deck is', drafted.includes('טיוטות'));
+ok('it carries the headline', drafted.includes('המקדשים של קיוטו'));
+ok('it says the post is NOT live', drafted.includes('לא באוויר'));
+ok('and never claims it published', !drafted.includes('פורסם'));
+
+// The 24h cap counts posts PUBLISHED through the API. A draft publishes
+// nothing, so charging it against the cap would spend a limit never touched.
+const day = Date.now();
+const capRows = [
+  { tiktok: true, tiktokAt: day },
+  { tiktok: true, tiktokAt: day, tiktokDraft: true },
+  { tiktok: true, tiktokAt: day, tiktokDraft: true },
+];
+eq(
+  'drafts do not eat the direct-post cap',
+  capRows.filter((p) => p.tiktok && !p.tiktokDraft).length,
+  1
+);
 
 /* -------------------------------------------------------------------------- */
 group('ranking — the two misfires found against live feeds');

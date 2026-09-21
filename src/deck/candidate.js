@@ -99,7 +99,11 @@ export const sizesFor = (targets) => [
  */
 export async function toDeckCandidate(
   built,
-  { minSlides = Number(process.env.DECK_MIN_SLIDES || 3), targets = targetsForKind('deck') } = {}
+  {
+    minSlides = Number(process.env.DECK_MIN_SLIDES || 3),
+    targets = targetsForKind('deck'),
+    tiktokDraft = false,
+  } = {}
 ) {
   if (built.slides.length < minSlides) {
     const err = new Error(
@@ -144,6 +148,12 @@ export async function toDeckCandidate(
     // Chosen at the proposal, not derived here: the owner picked the platform
     // before the build, and that choice is what the slides were rendered for.
     publishTargets: targets,
+    // Not a destination but a way of reaching one: the slides go to the
+    // account's TikTok inbox and the owner posts them from the app, which is
+    // the only route to choosing the sound. Carried on the candidate so it
+    // survives the wait in the queue — the decision was made at the proposal,
+    // possibly hours before this publishes.
+    tiktokDraft: Boolean(tiktokDraft),
     createdAt: deck.createdAt,
     // Same as a card: whatever the owner's request stepped over travels with
     // the deck so it can be said before it publishes, not discovered after.

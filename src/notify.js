@@ -182,6 +182,23 @@ export function withDetail(hebrew, detail, { limit = 200 } = {}) {
 }
 
 /**
+ * It reached your TikTok inbox. It is not posted.
+ *
+ * Its own message because "📤 פורסם לטיקטוק" would be false, and falsely in the
+ * direction that matters: the whole point of a draft is that the last step is
+ * yours, and a notification saying it went out is one you would read and then
+ * not act on. Nothing in this process can see whether you ever open the app, so
+ * this is the last thing it can honestly tell you about that deck.
+ */
+export function sentToDrafts(headline) {
+  return [
+    '📥 נשלח לטיוטות בטיקטוק — ממתין לך באפליקציה',
+    headline,
+    'פתחו את טיקטוק, בחרו סאונד ופרסמו. עד אז הפוסט לא באוויר.',
+  ].join('\n');
+}
+
+/**
  * The destination does not exist yet, as opposed to being broken.
  *
  * Its own message for the same reason the platform-limit one has its own:
