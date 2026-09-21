@@ -11,7 +11,7 @@ import { primaryAuthority, enabledSources, registry } from './src/sources/index.
 import { approvalMessage, decidedMessage, evidenceReport, channelCaption, instagramCaption, tiktokCaption } from './src/format.js';
 import { renderCard, closeBrowser } from './src/render/index.js';
 import { publishTelegram, publishTelegramDeck, sendForApproval } from './src/publish/telegram.js';
-import { proposeIdeas, titleForRequest } from './src/deck/ideas.js';
+import { proposeIdeas, titleForRequest, reviseIdea } from './src/deck/ideas.js';
 import { buildDeck } from './src/deck/build.js';
 import { toDeckCandidate, deckTopic } from './src/deck/candidate.js';
 import { placeOverCap } from './src/pillars.js';
@@ -323,6 +323,102 @@ bot.action(/^edit:(.+)$/, async (ctx) => {
   store.setPendingEdit(key, { chatId, promptMessageId: prompt.message_id, cardMessageId, cardIsPhoto });
 });
 
+// --- deck proposals (the text stage, before anything is built) ---------------
+
+bot.action(/^db:(.+)$/, async (ctx) => {
+  const key = ctx.match[1];
+  if (!store.getProposal(key)) return ctx.answerCbQuery('כבר טופל');
+  await ctx.answerCbQuery('⏳ בונה');
+  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+
+  // Detached for the same reason the command was: a build is minutes of work
+  // and holding it inside the handler overran Telegraf's timeout. And wrapped
+  // in runOverridden again, because an AsyncLocalStorage context cannot survive
+  // the wait for you to tap a button — without this, a deck you asked for by
+  // name would be judged by guards the override exists to step over.
+  const chatId = ctx.chat.id;
+  detach('בניית מצגת', () => runOverridden('/deck', () => buildProposal(key, chatId)), chatId);
+});
+
+bot.action(/^dx:(.+)$/, async (ctx) => {
+  const key = ctx.match[1];
+  if (!store.getProposal(key)) return ctx.answerCbQuery('כבר טופל');
+  store.clearProposal(key);
+  await ctx.answerCbQuery('❌ נדחה');
+  await ctx.editMessageText(`❌ נדחה\n\n${ctx.callbackQuery.message.text || ''}`).catch(() => {});
+  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+});
+
+bot.action(/^dr:(.+)$/, async (ctx) => {
+  const key = ctx.match[1];
+  if (!store.getProposal(key)) return ctx.answerCbQuery('כבר טופל');
+
+  const proposalMessageId = ctx.callbackQuery.message.message_id;
+  await ctx.answerCbQuery('🤖 כתוב מה לשנות');
+  const prompt = await ctx.reply('🤖 מה לשנות בהצעה שלמעלה? כתוב בתשובה להודעה הזו', {
+    reply_parameters: { message_id: proposalMessageId },
+    ...Markup.forceReply(),
+  });
+
+  // Same pendingEdit table and the same routing by prompt message id, so two
+  // proposals can be mid-revision at once without one reply reaching the other.
+  // `kind` is what tells the reply handler which of the two it is holding.
+  store.setPendingEdit(key, {
+    kind: 'idea',
+    chatId: ctx.chat.id,
+    promptMessageId: prompt.message_id,
+    proposalMessageId,
+  });
+});
+
+/**
+ * Apply an instruction to a proposed deck.
+ *
+ * The reply is an instruction, not a replacement — "make it autumn", "Osaka
+ * instead", "six places" — which is the difference between this and the ✏️
+ * button on a card, where what you type IS the new headline.
+ *
+ * It can only work before the build. Once a deck is rendered its title is baked
+ * into the cover JPEG and toDeckCandidate has dropped the photograph that would
+ * be needed to draw a new one, so this is the last point at which the words are
+ * still words.
+ */
+async function handleIdeaReply(ctx, key, pending) {
+  store.clearPendingEdit(key);
+  const proposal = store.getProposal(key);
+  if (!proposal) return ctx.reply('ההצעה הזו כבר לא ממתינה');
+
+  const said = (ctx.message.text || ctx.message.caption || '').trim();
+  if (!said) {
+    store.setPendingEdit(key, pending); // nothing consumed — stay open for a real reply
+    return ctx.reply('שלח טקסט (לא תמונה/מדבקה)');
+  }
+
+  await ctx.reply('🤖 חושב...');
+  const chatId = pending.chatId;
+  // Detached: one Opus call, and blocking the update loop on it delays every
+  // other button in the chat.
+  detach(
+    'שינוי הצעה',
+    async () => {
+      let revised;
+      try {
+        revised = await reviseIdea(proposal.idea, said);
+      } catch (e) {
+        // The proposal is untouched and still answerable, so the prompt goes
+        // back rather than leaving a dead end — replying again retries.
+        store.setPendingEdit(key, pending);
+        return bot.telegram.sendMessage(chatId, `❌ השינוי נכשל: ${e.message}`);
+      }
+      if (!store.updateProposal(key, { idea: revised })) {
+        return bot.telegram.sendMessage(chatId, 'ההצעה הזו כבר לא ממתינה');
+      }
+      await bot.telegram.sendMessage(chatId, `🤖 עודכן:\n\n${proposalMessage(revised)}`, proposalButtons(key));
+    },
+    chatId
+  );
+}
+
 /**
  * Apply an edited headline.
  *
@@ -332,6 +428,10 @@ bot.action(/^edit:(.+)$/, async (ctx) => {
  */
 async function handleEditReply(ctx, key) {
   const pending = store.getPendingEdit(key);
+  // Both stages route through the same prompt-id lookup, so this is where they
+  // part: an idea is still text and gets revised, a staged card is a rendered
+  // JPEG and gets its headline replaced.
+  if (pending?.kind === 'idea') return handleIdeaReply(ctx, key, pending);
   store.clearPendingEdit(key);
   const cand = store.getStaging(key);
   if (!pending || !cand) return ctx.reply('הפריט הזה כבר לא ממתין לעריכה');
@@ -889,7 +989,19 @@ bot.command('redo', async (ctx) => {
   detach('סבב איסוף', () => runOverridden('/redo', () => doRun()), ctx.chat.id);
 });
 
-bot.command('pending', (ctx) => ctx.reply(`⏳ ${store.stagingSize()} ממתינים לאישור`));
+// Both queues, because both are waiting on the same thing — a tap from you.
+// Counting only the built ones would report "0 pending" at the exact moment
+// three proposed decks were sitting unanswered.
+bot.command('pending', (ctx) =>
+  ctx.reply(
+    [
+      `⏳ ${store.stagingSize()} ממתינים לאישור`,
+      store.proposalSize() ? `💡 ${store.proposalSize()} הצעות ממתינות לבנייה` : null,
+    ]
+      .filter(Boolean)
+      .join('\n')
+  )
+);
 bot.command('queue', (ctx) => ctx.reply(`📦 ${store.queueSize()} בתור לפרסום`));
 
 /**
@@ -1249,15 +1361,63 @@ async function buildAndStageDeck(arg, chatId) {
       // a region nobody has mapped. Taken from `ordered`, so a fallback reached
       // after the first choice fails is also the less-repeated one.
       alternatives = ordered.slice(1).map((i) => ({ where: i.where, kind: i.kind }));
-      // `say`, not ctx.reply — this function runs detached from the update that
-      // started it and there is no ctx here. It threw a ReferenceError on every
-      // bare /deck, which is why that path appeared to hang.
-      await say(
-        [`💡 ${idea.titleHe}`, idea.angleHe, `📍 ${idea.where} · ${idea.kind} · ${idea.want} מקומות`, `⏳ מחפש מקורות...`]
-          .filter(Boolean)
-          .join('\n')
-      );
     }
+
+    // The idea is now TEXT, and text is where it stops until you say otherwise.
+    //
+    // Everything below the proposal — sourcing each place, a drafting call per
+    // place, twelve renders — takes minutes and real quota, and all of it used
+    // to happen before you had seen anything. A deck you did not want cost the
+    // whole build and was rejected at the end of it. Now it costs one message.
+    return proposeDeck(idea, alternatives, chatId);
+  } catch (e) {
+    console.error('deck idea failed:', e);
+    return say(`❌ לא הצלחתי להציע מצגת: ${e.message}`);
+  }
+}
+
+/** The proposal itself: what would be built, and the three ways to answer it. */
+function proposalMessage(idea) {
+  return [
+    `💡 ${idea.titleHe}`,
+    idea.angleHe,
+    `📍 ${idea.where} · ${KINDS[idea.kind]?.he || idea.kind} · ${idea.want} מקומות`,
+    idea.whyNow ? `🗓 ${idea.whyNow}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+const proposalButtons = (key) =>
+  Markup.inlineKeyboard([
+    [Markup.button.callback('✅ בנה', `db:${key}`), Markup.button.callback('❌ דחה', `dx:${key}`)],
+    [Markup.button.callback('🤖 שנה בהוראה', `dr:${key}`)],
+  ]);
+
+async function proposeDeck(idea, alternatives, chatId) {
+  const key = store.addProposal({ idea, alternatives, chatId });
+  await bot.telegram.sendMessage(chatId, proposalMessage(idea), proposalButtons(key));
+  return key;
+}
+
+/**
+ * Build a proposal that was approved, and stage what comes out.
+ *
+ * The second half of what used to be one straight-through function. It is
+ * reached from a button tap rather than from the command, so it re-enters
+ * runOverridden: the override is what lets a deck the owner asked for step over
+ * the repeat guards, and an AsyncLocalStorage context does not survive the wait
+ * for you to tap a button.
+ */
+async function buildProposal(key, chatId) {
+  const say = (text) => notify.send(bot.telegram, chatId, text).catch(() => {});
+  const proposal = store.getProposal(key);
+  if (!proposal) return say('ההצעה הזו כבר לא ממתינה');
+  const { idea, alternatives = [] } = proposal;
+  store.clearProposal(key);
+
+  try {
+    await say(`⏳ מחפש מקורות ל-${idea.where}...`);
 
     const built = await buildWithFallback(idea, alternatives, {
       // Said out loud, because a deck takes minutes and silence looks like a

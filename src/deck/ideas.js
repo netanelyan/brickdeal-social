@@ -332,6 +332,77 @@ export async function proposeIdeas({ count = 4, recent = [], today = new Date() 
   return (parsed.ideas || []).map(normaliseIdea).filter(Boolean);
 }
 
+/**
+ * Adjust a proposed deck, in the owner's own words.
+ *
+ * The instruction arrives as a Telegram reply — "make it autumn", "Osaka not
+ * Kyoto", "six places, not five", "the angle is too guidebooky" — and is passed
+ * through verbatim rather than parsed. Parsing it would mean guessing at a
+ * grammar, and the whole reason this exists is that the alternative to guessing
+ * is retyping the whole /deck command.
+ *
+ * Runs BEFORE anything is built, which is the only point at which a title is
+ * still cheap to change: once a deck is rendered its cover is a JPEG with the
+ * title baked into it, and toDeckCandidate has dropped the photograph it would
+ * need to draw a new one.
+ *
+ * Deliberately conservative about what it touches. A reply that says nothing
+ * about the region must not quietly relocate the deck — the owner is correcting
+ * one thing, not re-commissioning it.
+ */
+export async function reviseIdea(idea, instruction, { today = new Date() } = {}) {
+  if (!hasApiKey()) throw new Error('ANTHROPIC_API_KEY is not set — revision needs it');
+  const said = String(instruction || '').trim();
+  if (!said) throw new Error('nothing to apply — the reply was empty');
+
+  const month = today.toLocaleString('en-GB', { month: 'long' });
+  const user = [
+    `TODAY: ${today.toISOString().slice(0, 10)} (${month})`,
+    'REVISE the deck idea below and return exactly 1 idea.',
+    '',
+    'THE IDEA AS IT STANDS:',
+    `  title_he: ${idea.titleHe}`,
+    `  where: ${idea.where}`,
+    `  kind: ${idea.kind}`,
+    `  want: ${idea.want}`,
+    `  angle_he: ${idea.angleHe || ''}`,
+    `  why_now: ${idea.whyNow || ''}`,
+    '',
+    'CATEGORIES AVAILABLE (the revision must be exactly one of these):',
+    ...Object.entries(KINDS).map(([id, k]) => `  ${id} — ${k.he}`),
+    '',
+    'WHAT THE OWNER REPLIED, VERBATIM:',
+    said,
+    '',
+    'Change what was asked for and keep everything else as it is. If the reply',
+    'says nothing about the region, the region does not move; if it says nothing',
+    'about the category, the category does not change. A correction to the title',
+    'is a correction to the title.',
+  ].join('\n');
+
+  const res = await getClient().messages.create({
+    model: MODEL,
+    max_tokens: 8000,
+    output_config: { effort: EFFORT, format: { type: 'json_schema', schema: IDEAS_SCHEMA } },
+    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+    messages: [{ role: 'user', content: user }],
+  });
+
+  recordUsage(res.usage, MODEL);
+  if (res.stop_reason === 'refusal') throw new Error('revision refused');
+  if (res.stop_reason === 'max_tokens') throw new Error('revision hit max_tokens');
+
+  const text = res.content.find((b) => b.type === 'text')?.text;
+  if (!text) throw new Error('revision returned no text');
+
+  const [revised] = (JSON.parse(text).ideas || []).map(normaliseIdea).filter(Boolean);
+  // normaliseIdea returns null for a title, region or category it cannot use.
+  // Failing here keeps the original proposal intact and answerable, rather than
+  // replacing it with something half-formed that fails later during the build.
+  if (!revised) throw new Error('the revision came back unusable — the idea is unchanged');
+  return revised;
+}
+
 const TITLE_SCHEMA = {
   type: 'object',
   properties: {

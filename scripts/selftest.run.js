@@ -506,6 +506,47 @@ eq('legacy rows drop out entirely', store.recentTitles({ history: [{ ts: 1, id: 
 eq('the list is capped', store.recentTitles({ history: Array.from({ length: 40 }, () => titleHist[0]) }).length, 12);
 
 /* -------------------------------------------------------------------------- */
+group('deck proposals — the text stage, before anything is built');
+
+// A deck is an idea call, a search and a drafting call per place, then twelve
+// renders. All of it used to happen before you had seen anything, so a deck you
+// did not want cost the whole build and was rejected at the end of it. The
+// proposal is the same decision taken while it is still one message.
+const propIdea = { titleHe: 'המקדשים של קיוטו', where: 'Kyoto', kind: 'temple', want: 5, angleHe: 'מה פתוח בחורף' };
+const propKey = store.addProposal({ idea: propIdea, alternatives: [{ where: 'Nara', kind: 'temple' }], chatId: 42 });
+
+eq('a proposal round-trips', store.getProposal(propKey).idea.where, 'Kyoto');
+ok('and is stamped with when it was proposed', typeof store.getProposal(propKey).proposedAt === 'number');
+
+// Revision replaces the idea and nothing else: the fallbacks were generated in
+// the same call and are still the right things to try if the build comes up dry.
+store.updateProposal(propKey, { idea: { ...propIdea, where: 'Osaka' } });
+eq('a revision moves the idea', store.getProposal(propKey).idea.where, 'Osaka');
+eq('and keeps the alternatives', store.getProposal(propKey).alternatives.length, 1);
+eq('and keeps the chat it was proposed in', store.getProposal(propKey).chatId, 42);
+
+// Keyed per proposal, never per chat — the same lesson pendingEdit records.
+const propKey2 = store.addProposal({ idea: { ...propIdea, where: 'Lisbon' }, chatId: 42 });
+ok('two proposals do not collide', store.getProposal(propKey).idea.where !== store.getProposal(propKey2).idea.where);
+
+// Building consumes it, so a second tap on a message still showing its buttons
+// finds nothing rather than building the same deck twice.
+store.clearProposal(propKey);
+eq('building consumes the proposal', store.getProposal(propKey), null);
+
+// The marker that splits the two reply paths. Both route through the same
+// prompt-id lookup; only `kind` says whether the reply is an instruction for an
+// idea or a replacement headline for a rendered card.
+store.setPendingEdit(propKey2, { kind: 'idea', chatId: 42, promptMessageId: 777 });
+eq('a reply routes to its own proposal', store.findPendingEditByPrompt(777), propKey2);
+eq('and carries the marker that says which stage it is', store.getPendingEdit(propKey2).kind, 'idea');
+eq('a reply to anything else routes nowhere', store.findPendingEditByPrompt(999), null);
+
+// /clear_pending means everything awaiting a tap, not just the built ones.
+store.clearStaging();
+eq('clearing what is pending takes proposals too', store.proposalSize(), 0);
+
+/* -------------------------------------------------------------------------- */
 group('ranking — the two misfires found against live feeds');
 
 const base = { sourceId: 's', publishedAt: new Date().toISOString(), pillarHints: [] };
@@ -2125,7 +2166,7 @@ group('module surfaces — a deleted export must not fail silently');
 // Checked as a list rather than by importing each one, so the failure names the
 // missing symbol instead of taking the whole suite down with a module error.
 for (const [mod, expected] of [
-  ['../src/deck/ideas.js', ['hasApiKey', 'proposeIdeas', 'coverForDeck', 'titleForRequest', 'normaliseIdea', 'rotationFor', 'oneClause', 'emphasisFrom']],
+  ['../src/deck/ideas.js', ['hasApiKey', 'proposeIdeas', 'reviseIdea', 'coverForDeck', 'titleForRequest', 'normaliseIdea', 'rotationFor', 'oneClause', 'emphasisFrom']],
   ['../src/deck/build.js', ['buildDeck', 'buildDeckFromSite', 'fillImages', 'draftSlide', 'findPage']],
   ['../src/deck/facts.js', ['factsFor', 'countryFor', 'enoughFor', 'applyCountryVisibility', 'lengthValue', 'yearValue']],
   ['../src/render/deck.js', ['renderDeck', 'renderDeckSize', 'slideStem']],

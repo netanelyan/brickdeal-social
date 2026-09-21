@@ -31,6 +31,12 @@ const empty = {
   seen: {},
   queue: [],
   staging: {},
+  // Deck ideas proposed as TEXT and awaiting a decision, before anything is
+  // built. A deck costs an idea call, a search and a drafting call per place
+  // and twelve renders; proposing it first means a slideshow you did not want
+  // costs one message instead of all of that. Separate from `staging`, which
+  // holds things that are already built and are awaiting publication.
+  proposals: {},
   pendingEdit: {},
   published: [],
   // Ids of everything ever published, kept separately from `published`.
@@ -119,6 +125,7 @@ function load() {
   }
   if (!Array.isArray(s.published)) s.published = [];
   if (!Array.isArray(s.held)) s.held = [];
+  if (!s.proposals || typeof s.proposals !== 'object') s.proposals = {};
   if (!s.targetHealth || typeof s.targetHealth !== 'object') s.targetHealth = {};
   if (!s.sourceHealth || typeof s.sourceHealth !== 'object') s.sourceHealth = {};
   if (!s.sourceOff || typeof s.sourceOff !== 'object') s.sourceOff = {};
@@ -321,12 +328,40 @@ export function updateStaging(key, patch) {
 export const hasStaging = (key) => Boolean(state.staging[key]);
 export const stagingSize = () => Object.keys(state.staging).length;
 export function clearStaging() {
-  const n = Object.keys(state.staging).length;
+  const n = Object.keys(state.staging).length + Object.keys(state.proposals).length;
   state.staging = {};
+  // Proposals go too. They are the same thing at an earlier stage — something
+  // awaiting a tap from you — and leaving them behind would mean "clear
+  // everything pending" quietly left a queue of them to be answered later.
+  state.proposals = {};
   state.pendingEdit = {};
   save();
   return n;
 }
+
+// --- proposals --------------------------------------------------------------
+// A deck idea that has been suggested and not yet decided on. Keyed the same
+// way staging is, and deliberately persisted: a proposal that evaporates on
+// restart is one you answer into a void, and the build it was waiting for never
+// happens.
+export function addProposal(proposal) {
+  const key = Math.random().toString(36).slice(2, 9);
+  state.proposals[key] = { ...proposal, proposedAt: Date.now() };
+  save();
+  return key;
+}
+export const getProposal = (key) => state.proposals[key] || null;
+export function updateProposal(key, proposal) {
+  if (!state.proposals[key]) return false;
+  state.proposals[key] = { ...state.proposals[key], ...proposal };
+  save();
+  return true;
+}
+export function clearProposal(key) {
+  delete state.proposals[key];
+  save();
+}
+export const proposalSize = () => Object.keys(state.proposals).length;
 
 // --- pending edits ----------------------------------------------------------
 // Keyed by the staging key, never by chat: BrickDeal learned the hard way that
