@@ -1,4 +1,12 @@
-import { palette, heeboDataUri, assistantDataUri, tiktokSansDataUri, rubikDataUri, escapeHtml } from './theme.js';
+import {
+  palette,
+  heeboDataUri,
+  assistantDataUri,
+  tiktokSansDataUri,
+  rubikDataUri,
+  arimoDataUri,
+  escapeHtml,
+} from './theme.js';
 import { emojiHtml } from './emojiArt.js';
 
 // Slideshow slides, set the way the two accounts this channel is modelled on
@@ -68,9 +76,20 @@ export const INK_LUMINANCE = { info: 0.772, minimal: null };
 // Assistant at 700, so swapping the family without re-choosing the weights
 // changes the colour of the whole slide. Keeping them adjacent makes "the same
 // face, a little lighter" a one-line edit instead of a hunt through five rules.
+// Arimo 600, chosen by rendering the same slide over the same photograph in
+// each candidate and looking at them — which is the only way this question can
+// be answered, and why scripts/font-lab.js exists.
+//
+// Metric-compatible with Arial, which is what older iOS drew Hebrew with. Of
+// the five it read most like text somebody typed into the app rather than type
+// somebody set, and that is the brief for a photo post.
+//
+// One weight across both styles. The old table ran minimal at 600 and info at
+// 800, which made the same deck's two styles look like two accounts — and the
+// weight difference was doing work that the field list already does.
 export const FACES = {
-  minimal: { family: 'Rubik', name: 600, note: 500, cover: 700 },
-  info: { family: 'Rubik', name: 800, field: 800, cover: 800 },
+  minimal: { family: 'Arimo', name: 600, note: 600, cover: 600 },
+  info: { family: 'Arimo', name: 600, field: 600, cover: 600 },
 };
 
 // The Hebrew face, overridable.
@@ -139,6 +158,13 @@ ${
 @font-face {
   font-family: 'Rubik';
   src: url('${rubikDataUri()}') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'Arimo';
+  src: url('${arimoDataUri()}') format('truetype');
   font-weight: 100 900;
   font-style: normal;
   font-display: block;

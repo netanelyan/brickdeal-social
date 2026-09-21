@@ -1912,19 +1912,33 @@ ok('the info style is cream over bronze, which is its whole signature', slideHtm
 // only the digits and punctuation — so the family after it is the one that
 // actually draws the words.
 ok('Latin and digits are always set in TikTok Sans', slideHtml.includes("font-family: 'TikTok Sans'"));
-ok('the info style sets Hebrew in the display face', slideHtml.includes("font-family: 'TikTok Sans', 'Rubik'"));
-ok('and so does the minimal style', placed.includes("font-family: 'TikTok Sans', 'Rubik'"));
+ok('the info style sets Hebrew in the display face', slideHtml.includes("font-family: 'TikTok Sans', 'Arimo'"));
+ok('and so does the minimal style', placed.includes("font-family: 'TikTok Sans', 'Arimo'"));
 // Heebo stays last, so a face that fails to parse degrades to legible-but-wrong
 // rather than to a slide full of tofu boxes.
 ok('both fall back rather than to nothing', placed.includes("'Heebo', sans-serif") && slideHtml.includes("'Heebo', sans-serif"));
 ok('the faces are bundled into the page, not linked', placed.includes('data:font/ttf;base64,'));
 
-// The weights are the difference between the two styles now that the family is
-// shared, so they are worth asserting: an info slide is meant to be loud and a
-// minimal slide is meant to look like a caption somebody typed.
-eq('the minimal name is set light', FACES.minimal.name, 600);
-eq('the info name is set heavy', FACES.info.name, 800);
-ok('and the minimal style really is lighter', FACES.minimal.name < FACES.info.name);
+// ONE weight across both styles, and it is a constraint rather than a taste.
+//
+// The shipped Arimo.ttf is a single static 600 instance, not a variable font.
+// Asking for 800 from it does not get a heavier cut — the browser synthesises
+// one by smearing the outlines, and faux-bold Hebrew over a photograph is
+// exactly the "added in Photoshop" look the rest of this file works to avoid.
+//
+// The weights used to be what separated the two styles. They no longer need to
+// be: an info slide already announces itself with a list of fields and a cream
+// ink over a bronze outline, which is a louder difference than 200 units of
+// weight ever was.
+eq('the deck face is Arimo', FACES.minimal.family, 'Arimo');
+eq('and both styles use it', FACES.info.family, FACES.minimal.family);
+eq('at one weight', FACES.minimal.name, 600);
+eq('the same one', FACES.info.name, FACES.minimal.name);
+// Guard against a heavier weight being asked of a single-weight file again.
+ok(
+  'no style asks for a weight the file does not have',
+  [FACES.minimal, FACES.info].every((f) => Object.values(f).filter((v) => typeof v === 'number').every((w) => w === 600))
+);
 ok('the weight reaches the stylesheet', placed.includes(`font-weight: ${FACES.minimal.name};`));
 ok('and the info weight does too', slideHtml.includes(`font-weight: ${FACES.info.name};`));
 

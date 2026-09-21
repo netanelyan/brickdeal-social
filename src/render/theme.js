@@ -125,11 +125,31 @@ export function assistantDataUri() {
 // One variable file, for the reason given above TikTok Sans: the two static
 // weights that used to be here were corrupt and had never once loaded.
 let rubikCache = null;
+let arimoCache = null;
 export function rubikDataUri() {
   if (rubikCache) return rubikCache;
   const buf = readFileSync(new URL('../../assets/fonts/Rubik.ttf', import.meta.url));
   rubikCache = `data:font/ttf;base64,${buf.toString('base64')}`;
   return rubikCache;
+}
+
+/**
+ * Arimo — the deck face, chosen by looking at it.
+ *
+ * Metric-compatible with Arial, which is what older iOS drew Hebrew with, and
+ * the one of the five candidates that read as typed-into-the-app rather than
+ * as set by a designer. That is the whole brief for these slides: the text on a
+ * TikTok photo post should look like text somebody typed on a phone.
+ *
+ * Larger than the others at 320KB because of its coverage. It is inlined per
+ * render like every other face here, for the reason the note above gives — a
+ * webfont that fails to load does not error, it silently draws tofu.
+ */
+export function arimoDataUri() {
+  if (arimoCache) return arimoCache;
+  const buf = readFileSync(new URL('../../assets/fonts/Arimo.ttf', import.meta.url));
+  arimoCache = `data:font/ttf;base64,${buf.toString('base64')}`;
+  return arimoCache;
 }
 
 export function siteMark() {
