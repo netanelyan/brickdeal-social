@@ -73,18 +73,40 @@ export async function candidates(query, { n = 6, timeoutMs = 15_000, w = 440, h 
   const q = String(query || '').trim();
   if (!q) return [];
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  let json;
-  try {
-    const res = await fetch(`${API}?${new URLSearchParams({ query: q, per_page: '30' })}`, {
-      headers: { Authorization: process.env.PEXELS_API_KEY },
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error(`Pexels search failed: HTTP ${res.status}`);
-    json = await res.json();
-  } finally {
-    clearTimeout(timer);
+  // PORTRAIT FIRST, and it matters more here than anywhere else in the file.
+  //
+  // A slide is 1080x1920. A landscape photograph cropped into that keeps about
+  // a third of its width, and the third it keeps is the middle — so the peak
+  // that was framed against a valley arrives as a wall of rock, and a lake with
+  // a mountain behind it arrives as a lake. The single-image path has always
+  // asked for portrait; this one, which is the path every deck slide takes, was
+  // asking for whatever the library felt like and then cropping it hard.
+  //
+  // Unfiltered is still tried when portrait comes back thin, because a wrongly
+  // cropped photograph of the right place beats no slide at all — but it is the
+  // fallback now rather than the default.
+  const search = async (orientation) => {
+    const params = { query: q, per_page: '30' };
+    if (orientation) params.orientation = orientation;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${API}?${new URLSearchParams(params)}`, {
+        headers: { Authorization: process.env.PEXELS_API_KEY },
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error(`Pexels search failed: HTTP ${res.status}`);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  let json = await search('portrait');
+  if ((json.photos || []).length < n) {
+    const wide = await search(null).catch(() => ({ photos: [] }));
+    const seen = new Set((json.photos || []).map((p) => p.id));
+    json = { photos: [...(json.photos || []), ...(wide.photos || []).filter((p) => !seen.has(p.id))] };
   }
 
   const ranked = (json.photos || [])

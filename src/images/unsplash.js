@@ -108,12 +108,25 @@ export async function candidates(query, { n = 6, timeoutMs = 15_000 } = {}) {
   const q = String(query || '').trim();
   if (!q) return [];
 
-  const params = new URLSearchParams({ query: q, per_page: '24', content_filter: 'high' });
-  let json;
-  try {
+  // Portrait first — see the note in pexels.js. A slide is 1080x1920, and a
+  // landscape frame cropped into that keeps its middle third and throws away
+  // the composition that made it worth choosing.
+  const search = async (orientation) => {
+    const params = new URLSearchParams({ query: q, per_page: '24', content_filter: 'high' });
+    if (orientation) params.set('orientation', orientation);
     const res = await fetch(`${API}?${params}`, { headers: auth(), signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    json = await res.json();
+    return res.json();
+  };
+
+  let json;
+  try {
+    json = await search('portrait');
+    if ((json.results || []).length < n) {
+      const wide = await search(null).catch(() => ({ results: [] }));
+      const seen = new Set((json.results || []).map((p) => p.id));
+      json = { results: [...(json.results || []), ...(wide.results || []).filter((p) => !seen.has(p.id))] };
+    }
   } catch (e) {
     throw new Error(`unsplash search failed: ${e.message}`);
   }
