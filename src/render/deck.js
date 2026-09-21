@@ -1,5 +1,6 @@
 import { renderToJpeg, cardOutputDir, cardPublicUrl } from './index.js';
 import { renderSlideHtml, SIZES, isStyle, INK_LUMINANCE } from './deckTemplates.js';
+import { renderInstagramSlideHtml } from './deckInstagram.js';
 import { analyseSlides } from './photo.js';
 import { findTextRegion } from '../images/textbox.js';
 
@@ -93,7 +94,15 @@ export async function renderDeckSize(deck, { size = 'tiktok', outDir = cardOutpu
   };
 
   const items = [cover, ...deck.slides];
-  const spots = await analyseSlides(
+
+  // Instagram is drawn as cards, and a card pins its text: header to the top,
+  // name to the bottom, same on every slide. So the placement search is skipped
+  // for it — not as an optimisation but because moving the text is the thing
+  // that would break it. A run of cards reads as a set because they line up,
+  // and a headline that wandered to wherever the photograph was quietest would
+  // undo exactly that. It does also mean the Instagram pass costs no image
+  // analysis, which is most of what rendering a deck spends its time on.
+  const spots = size === 'instagram' ? items.map(() => null) : await analyseSlides(
     items.map((slide, i) => ({
       src: slide.image?.src || null,
       place: i === 0 ? deck.titleHe : slide.nameHe,
@@ -124,10 +133,24 @@ export async function renderDeckSize(deck, { size = 'tiktok', outDir = cardOutpu
   const out = [];
   for (const [i, slide] of items.entries()) {
     const index = i + 1;
-    const html = renderSlideHtml(
-      { ...slide, blockH: blockHeight(slide, { cover: i === 0, style }) },
-      { size, cover: i === 0, style, spot: spots[i] }
-    );
+    // Same content, two design languages. The TikTok slide is built to be read
+    // over a video player's furniture with no branding on it; the Instagram one
+    // is a card, because it lands in a feed beside our own news cards and
+    // should look like the same account made it.
+    const html =
+      size === 'instagram'
+        ? renderInstagramSlideHtml(slide, {
+            cover: i === 0,
+            style,
+            index,
+            total: items.length,
+            kicker: i === 0 ? '' : deck.titleHe,
+            pillar: 'day',
+          })
+        : renderSlideHtml(
+            { ...slide, blockH: blockHeight(slide, { cover: i === 0, style }) },
+            { size, cover: i === 0, style, spot: spots[i] }
+          );
     const rendered = await renderToJpeg(html, {
       stem: slideStem(deck.id, size, index),
       width: geometry.w,

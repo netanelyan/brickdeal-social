@@ -16,6 +16,7 @@ import { renderHtml, LAYOUTS, PHOTO_LAYOUTS, isPhotoLayout, SCRIM_FALLBACK } fro
 import { assertGenericAiPrompt, ImagePolicyError, imageQueries } from '../src/images.js';
 import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, evidenceReport, deckApprovalMessage } from '../src/format.js';
 import { renderSlideHtml, SIZES, sizeClass, INK_LUMINANCE, FACES } from '../src/render/deckTemplates.js';
+import { renderInstagramSlideHtml } from '../src/render/deckInstagram.js';
 import {
   lengthValue,
   yearValue,
@@ -1405,8 +1406,12 @@ group('decks - a slideshow is not a card, and goes somewhere else');
 withEnv({ ...IG, CHANNEL_ID: '@c' }, () => {
   eq('a card goes to Instagram and nowhere else', targetsForKind('card').join(','), 'instagram');
   ok('a card never goes to TikTok', !allowedForKind('card').includes('tiktok'));
+  // A deck goes to both, and it is not the same artefact twice: the TikTok set
+  // is drawn to be read over a video player's furniture, the Instagram set is
+  // drawn as cards so a slideshow sits in the grid looking like the account
+  // that posted it. Same words, same photographs, two designs.
   ok('a deck goes to TikTok', allowedForKind('deck').includes('tiktok'));
-  ok('and a deck no longer goes to Instagram', !allowedForKind('deck').includes('instagram'));
+  ok('and a deck also goes to Instagram', allowedForKind('deck').includes('instagram'));
   // CHANNEL_ID is set in this env and still nothing routes to it. Telegram is
   // where posts are APPROVED; that path runs on STAGING_CHAT_ID and never comes
   // through here.
@@ -1436,9 +1441,24 @@ withEnv({ ...IG, CHANNEL_ID: '@c', TIKTOK_CLIENT_KEY: 'k', TIKTOK_CLIENT_SECRET:
 // published and dropped it. Silently, one slideshow at a time, at the drip
 // interval.
 withEnv({ ...IG, CHANNEL_ID: '@c' }, () => {
-  eq('with TikTok unconnected a deck has nowhere to go', targetsForKind('deck').length, 0);
-  ok('which is what makes it wait rather than be consumed', targetsForKind('deck').length === 0);
-  ok('while cards are unaffected and still publish', targetsForKind('card').length > 0);
+  // While TikTok approval is pending, a deck is NOT stuck: it publishes to
+  // Instagram and owes TikTok nothing it can act on. That is the whole value of
+  // the deck reaching two platforms rather than one.
+  eq('with TikTok pending a deck still has Instagram', targetsForKind('deck').join(','), 'instagram');
+  ok('so nothing is waiting on a destination that does not exist yet', targetsForKind('deck').length > 0);
+  ok('and cards are unaffected', targetsForKind('card').length > 0);
+});
+
+// The hold path still matters, for the case where a kind genuinely has nowhere
+// to go. Neither destination configured means a deck cannot publish anywhere —
+// and the startup guard refuses to start at all in that state, which is the
+// first of the two defences.
+// Explicitly cleared, not merely absent from the patch: withEnv only touches
+// the keys it is given, and a developer .env supplies the real ones.
+withEnv({ CHANNEL_ID: '@c', IG_USER_ID: undefined, IG_ACCESS_TOKEN: undefined, CARD_PUBLIC_BASE_URL: undefined }, () => {
+  eq('with neither destination a deck has nowhere to go', targetsForKind('deck').length, 0);
+  eq('and neither do cards', targetsForKind('card').length, 0);
+  ok('which is what the startup guard refuses to start on', !targetsForKind('card').length && !targetsForKind('deck').length);
 });
 
 // Its own message, not the outage one. "Held until TikTok comes back to work"
@@ -1451,6 +1471,50 @@ ok('it says the post is kept', waitMsg.includes('ממתין'));
 ok('it carries the headline', waitMsg.includes('המקדשים של קיוטו'));
 ok('and says how many are waiting', waitMsg.includes('3'));
 ok('it does not claim anything failed', !/נכשל|שגיאה/.test(waitMsg));
+
+/* -------------------------------------------------------------------------- */
+group('the same deck, drawn as cards for Instagram');
+
+// One deck, two designs. The words and the photographs are identical — what
+// differs is that the Instagram set is built in the CARD's design language, so
+// a slideshow lands in the grid looking like the account that posted it rather
+// than like a TikTok slide with less headroom.
+const igSlide = renderInstagramSlideHtml(
+  { nameHe: 'אגם סורפיס', countryHe: 'איטליה', flag: '🇮🇹', fields: [{ emoji: '📏', labelHe: 'מרחק', value: '12.5 קמ' }] },
+  { index: 3, total: 5, style: 'info', kicker: 'טופ 4 מסלולים בדולומיטים' }
+);
+
+ok('it carries the brand, which a TikTok slide never does', igSlide.includes('class="brand"'));
+ok('and the site, the same as a card', igSlide.includes('class="site"'));
+ok('it is numbered, because a carousel shows no progress of its own', igSlide.includes('3 / 5'));
+ok('it names the deck it belongs to', igSlide.includes('טופ 4 מסלולים בדולומיטים'));
+ok('the place name is there', igSlide.includes('אגם סורפיס'));
+ok('and the info fields', igSlide.includes('מרחק'));
+// Built at card dimensions, from the card stylesheet — not approximated.
+ok('it is the card size', igSlide.includes('1080px') && igSlide.includes('1350px'));
+ok('it uses the card accent rule under the header', igSlide.includes('border-bottom: 2px solid var(--accent)'));
+
+// The minimal style has a note and no field list; the info style the reverse.
+// Same split the TikTok slide makes, so the two stay one deck.
+const igMinimal = renderInstagramSlideHtml(
+  { nameHe: 'מאטרהורן', fields: [{ emoji: '🗻', labelHe: 'גובה', value: '4,478 מ' }] },
+  { index: 2, total: 6, style: 'minimal' }
+);
+ok('the minimal style shows the fact as a note', igMinimal.includes('(4,478 מ)'));
+ok('and does not list fields', !igMinimal.includes('גובה:'));
+
+// The cover is the title alone, with the model's chosen phrase in the accent.
+const igCover = renderInstagramSlideHtml(
+  { titleHe: 'טופ 5 פסגות שאסור לפספס באלפים', emphasisHe: 'שאסור לפספס' },
+  { cover: true, index: 1, total: 6 }
+);
+ok('the cover carries the title', igCover.includes('טופ 5 פסגות'));
+ok('and lifts the emphasis into the accent colour', igCover.includes('class="emph"'));
+ok('a cover is not numbered against a deck title it opens', !igCover.includes('class="kick"'));
+
+// No photograph is not an error — a deck built with no image provider renders
+// every slide this way, and an empty frame would be worse than a flat field.
+ok('a slide with no photograph still renders', renderInstagramSlideHtml({ nameHe: 'x' }, {}).includes('bg-empty'));
 
 /* -------------------------------------------------------------------------- */
 group('Hebrew first — technical detail below the line, never inside it');

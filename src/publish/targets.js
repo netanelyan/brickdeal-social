@@ -32,7 +32,13 @@ export const TARGET_HE = { telegram: 'טלגרם', instagram: 'אינסטגרם'
  */
 const ALLOWED_BY_KIND = {
   card: ['instagram'],
-  deck: ['tiktok'],
+  // A deck goes to both, and it is not the same artefact in two places: the
+  // TikTok set is drawn to be read over a video player's furniture with no
+  // branding on it, the Instagram set is drawn as cards (render/deckInstagram)
+  // so a slideshow sits in the grid looking like the account that posted it.
+  // Same words, same photographs, two designs. Instagram first, because it is
+  // the one that has worked for months.
+  deck: ['instagram', 'tiktok'],
 };
 
 /**
