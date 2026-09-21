@@ -14,7 +14,7 @@ import * as store from '../src/store.js';
 import { candidateId, tripGap } from '../src/candidate.js';
 import { renderHtml, LAYOUTS, PHOTO_LAYOUTS, isPhotoLayout, SCRIM_FALLBACK } from '../src/render/templates.js';
 import { assertGenericAiPrompt, ImagePolicyError, imageQueries } from '../src/images.js';
-import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, evidenceReport, deckApprovalMessage } from '../src/format.js';
+import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, deckTiktokCaption, evidenceReport, deckApprovalMessage } from '../src/format.js';
 import { renderSlideHtml, SIZES, sizeClass, INK_LUMINANCE, FACES } from '../src/render/deckTemplates.js';
 import { renderInstagramSlideHtml } from '../src/render/deckInstagram.js';
 import { sizesFor } from '../src/deck/candidate.js';
@@ -1912,6 +1912,12 @@ const dcap = deckCaption(deckFixture.deck);
 // who wants the list swipes; what the description is for is saying what this
 // is and where to go next, and a wall of names pushes the only line that asks
 // for anything below the fold.
+// Two descriptions, because one platform has a title field and the other does
+// not. Repeating the title in TikTok's description spends the first line of the
+// only place a link can be asked for on a line already read two centimetres up.
+eq('TikTok gets the shoutout alone', deckTiktokCaption().split('
+')[0], 'למתכנן טיולים חכם בביו שלנו');
+ok('and never the title', !deckTiktokCaption().includes('פראג'));
 ok('the caption is the title', dcap.startsWith('המוזיאונים של פראג'));
 ok('and does not list the places', !dcap.includes('1. המוזיאון'));
 ok('and drops the angle', !dcap.includes('מה פתוח'));

@@ -561,6 +561,21 @@ SOUNDING LIKE A PERSON
 Write the way someone who has actually been there would write it to a friend who
 is about to go. That is a real constraint, not a vibe. In practice:
 
+- SPOKEN HEBREW, NOT WRITTEN HEBREW. Write the word an Israeli would SAY.
+  Literary Hebrew reads as translated-from-English or as a tourism brochure,
+  and both are the voice this page is trying not to have.
+
+      רחוק      not  הרחק
+      ליד       not  בסמוך ל
+      אפשר      not  ניתן
+      בגלל      not  בשל / עקב
+      כדאי      not  מומלץ
+      הכי יפה   not  היפה ביותר
+      נמצא      not  שוכן / ממוקם
+
+  The test is whether you would say it out loud to the friend who asked. "המפל
+  הכי גבוה" passes; "המפל הגבוה ביותר" is a caption on a postcard.
+
 - Never open with a rhetorical question, and never open with "ידעתם ש...".
 - Never announce the post ("היום נדבר על...", "אז מה חשוב לדעת?"). Start with the thing.
 - No summing-up line at the end. When you have said it, stop. Do not add

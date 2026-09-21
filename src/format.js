@@ -101,6 +101,21 @@ export const tiktokCaption = (cand) => publishedDescription(cand, 4000); // TikT
  * is for, and it is also what someone searching for one of those places will
  * match on.
  */
+/**
+ * What goes under a deck on TIKTOK.
+ *
+ * The shoutout and nothing else, because TikTok has a separate title field and
+ * the title is already in it. Repeating it in the description spends the first
+ * line of the only place a link can be asked for on a line the viewer has
+ * already read, two centimetres higher.
+ *
+ * Instagram is the other way round — see deckCaption — because a carousel has
+ * no title field and the caption is the only text there is.
+ */
+export function deckTiktokCaption() {
+  return DECK_SIGNATURE;
+}
+
 export function deckCaption(deck) {
   // The title and the shoutout. Nothing else.
   //

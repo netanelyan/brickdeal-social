@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { renderDeck } from '../render/deck.js';
-import { deckCaption } from '../format.js';
+import { deckCaption, deckTiktokCaption } from '../format.js';
 import { targetsForKind } from '../publish/targets.js';
 import { overrideActive, overrideNotes } from '../override.js';
 import { recentPublished } from '../store.js';
@@ -167,13 +167,17 @@ export async function toDeckCandidate(
     notes: deckRepeats(deck),
   };
 
-  // Both platforms get the same words, for the same reason the card does: the
-  // approval message shows you one caption, and a second wording would be a
-  // second thing nobody reviewed.
+  // Not the same text, and the difference is one field.
+  //
+  // TikTok carries the title separately in post_info.title, so its description
+  // is the shoutout alone — repeating the title there spends the first line of
+  // the only place a link can be asked for on a line the viewer just read two
+  // centimetres higher. Instagram has no title field on a carousel, so its
+  // caption has to open with the title or the post has none.
   const caption = deckCaption(deck);
   cand.channelCaption = [deck.titleHe, '', caption].join('\n');
   cand.instagramCaption = caption;
-  cand.tiktokCaption = caption;
+  cand.tiktokCaption = deckTiktokCaption();
 
   // A deck publishes from its slide URLs, but Telegram uploads bytes and the
   // held/retry paths look for a file — the cover stands in as "the card".

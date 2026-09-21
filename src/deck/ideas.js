@@ -163,6 +163,23 @@ VOICE
 Hebrew, warm, specific, no hype. A cover that names a subject and withholds the
 story beats one that narrates it. Hyphens, never em dashes.
 
+SPOKEN HEBREW, NOT WRITTEN HEBREW
+
+Write the word an Israeli would SAY. Literary Hebrew reads as translated-from-
+English or as a tourism brochure, and both are the voice this page is trying
+not to have.
+
+  רחוק      not  הרחק
+  ליד       not  בסמוך ל
+  אפשר      not  ניתן
+  בגלל      not  בשל / עקב
+  כדאי      not  מומלץ
+  הכי יפה   not  היפה ביותר
+  נמצא      not  שוכן / ממוקם
+
+The test is whether you would say it out loud to a friend who asked where to
+go. "המפל הכי גבוה" passes. "המפל הגבוה ביותר" is a caption on a postcard.
+
 HOW A COVER IS ACTUALLY WRITTEN
 
 The cover is ONE short line. Five to eight words. These four are the spec — not
