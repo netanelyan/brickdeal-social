@@ -324,6 +324,17 @@ export function takeStaging(key) {
   return item || null;
 }
 export const getStaging = (key) => state.staging[key] || null;
+
+/**
+ * Everything waiting for approval, with its key.
+ *
+ * There was no way to list this. /pending answered with a count, which is fine
+ * until the count and the number of cards in the chat disagree — and then it is
+ * the one question you cannot ask. An item is added here BEFORE its approval
+ * card is sent, so a send that fails leaves a staged item nothing can see.
+ */
+export const stagingItems = () =>
+  Object.entries(state.staging).map(([key, cand]) => ({ key, cand: { ...cand } }));
 export function updateStaging(key, patch) {
   if (!state.staging[key]) return false;
   state.staging[key] = { ...state.staging[key], ...patch };

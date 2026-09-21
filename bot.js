@@ -241,7 +241,25 @@ async function attachTikTok(cand) {
 async function stage(candidate) {
   const cand = await attachTikTok(candidate);
   const key = store.addStaging(cand);
-  await sendForApproval(bot.telegram, staging, cand, approvalMessage(cand), stagingButtons(key, cand));
+  try {
+    await sendForApproval(bot.telegram, staging, cand, approvalMessage(cand), stagingButtons(key, cand));
+  } catch (e) {
+    // A send that fails leaves a post staged and INVISIBLE. It has to be added
+    // before the send — the key is what the buttons carry — so the item exists,
+    // is counted by /pending, and has no card in the chat to act on. Six of
+    // those and the bot looks like it has stopped working while it is in fact
+    // waiting for you.
+    //
+    // The likeliest cause is Telegram refusing a burst: a gather that drafts
+    // five cards sends five photos in a row, and 429 is not a rare answer to
+    // that. Not worth failing the post over — the post is fine — so it says so
+    // and /resend picks it up.
+    console.error(`stage: card did not reach you — ${e?.message || e}`);
+    await notify
+      .send(bot.telegram, staging, `⚠️ פוסט נוצר אבל הכרטיס לא נשלח (${store.stagingSize()} ממתינים) · /resend`)
+      .catch(() => {});
+    return key;
+  }
   // Stamped after the send, so the quiet alarm measures cards that actually
   // arrived — not ones that were built and then failed to reach you.
   store.noteStagedAt();
@@ -1101,16 +1119,59 @@ bot.command('redo', async (ctx) => {
 // Both queues, because both are waiting on the same thing — a tap from you.
 // Counting only the built ones would report "0 pending" at the exact moment
 // three proposed decks were sitting unanswered.
-bot.command('pending', (ctx) =>
+bot.command('pending', (ctx) => {
+  const rows = store.stagingItems();
+  if (!rows.length && !store.proposalSize()) return ctx.reply('✅ אין ממתינים');
+
+  // Listed, not counted. The count and the number of cards in the chat can
+  // disagree — a send that failed leaves a staged post with nothing to tap —
+  // and a count is the one shape that cannot show you which.
+  const lines = rows.map(({ cand }, i) => `${i + 1}. ${cand.kind === 'deck' ? '🎞️' : '📰'} ${cand.headline}`);
   ctx.reply(
     [
-      `⏳ ${store.stagingSize()} ממתינים לאישור`,
+      `⏳ ${rows.length} ממתינים לאישור:`,
+      ...lines,
       store.proposalSize() ? `💡 ${store.proposalSize()} הצעות ממתינות לבנייה` : null,
+      rows.length ? 'אם אין כרטיס בצ׳אט: /resend' : null,
     ]
       .filter(Boolean)
       .join('\n')
-  )
-);
+  );
+});
+
+/**
+ * Send the approval cards again.
+ *
+ * For the case where a post exists and its card does not. Spaced out on
+ * purpose: the likeliest reason the first attempt failed is that several went
+ * at once and Telegram refused the burst, and resending at the same rate would
+ * reproduce exactly that.
+ */
+bot.command('resend', async (ctx) => {
+  const rows = store.stagingItems();
+  if (!rows.length) return ctx.reply('אין ממתינים');
+
+  await ctx.reply(`📨 שולח מחדש ${rows.length} כרטיסים...`);
+  detach(
+    'שליחה מחדש',
+    async () => {
+      let sent = 0;
+      for (const { key, cand } of rows) {
+        try {
+          await sendForApproval(bot.telegram, staging, cand, approvalMessage(cand), stagingButtons(key, cand));
+          sent += 1;
+        } catch (e) {
+          console.error(`resend: ${cand.headline} — ${e?.message || e}`);
+        }
+        // A second and a half between cards. The per-chat burst limit is what
+        // is being worked around, and a deck is an album plus a message.
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      await notify.send(bot.telegram, staging, `📨 ${sent}/${rows.length} נשלחו`);
+    },
+    ctx.chat.id
+  );
+});
 /**
  * What is waiting, in the order it will go out.
  *
@@ -1923,7 +1984,8 @@ bot.command('help', (ctx) =>
       '/redo — שכח מה כבר נראה והרץ שוב (לבדיקת שינויים בעיצוב/נוסח)',
       '/status — סטטוס מלא',
       '/health — בריאות כל יעד בנפרד, והשגיאה האחרונה',
-      '/pending — ממתינים לאישור ולבנייה',
+      '/pending — רשימת הממתינים לאישור',
+      '/resend — שולח שוב את כרטיסי האישור (אם לא הגיעו)',
       '/queue — מה בתור, לפי הסדר, ממוספר',
       '/next — מפרסם את הבא בתור',
       '/post <מספר> — מפרסם אחד מסוים מהתור, מדלג על הסדר',
