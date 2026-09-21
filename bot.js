@@ -1396,7 +1396,17 @@ async function buildAndStageDeck(arg, chatId) {
       const cover = await titleForRequest({ where: req.where, kind: req.kind, count: req.want }).catch(() => ({
         titleHe: req.titleHe,
       }));
-      idea = { ...cover, where: req.where, kind: req.kind, want: req.want, whyNow: 'asked for directly' };
+      // `asked` is what YOU typed, kept so the proposal can show it beside what
+      // the resolver made of it. A request naming a country is narrowed to the
+      // part travellers mean — Austria + trails becomes Tyrol — because a
+      // country-wide bounding box returns places that do not belong on one
+      // list. That is a defensible rule, and it was invisible: the card showed
+      // "Tyrol" with nothing to say where Tyrol had come from.
+      //
+      // whyNow was the literal English 'asked for directly', which is how an
+      // English sentence ended up in the middle of a Hebrew card. Dropped: the
+      // asked line says the same thing, in Hebrew, and says something useful.
+      idea = { ...cover, where: req.where, kind: req.kind, want: req.want, whyNow: null, asked: arg };
     } else {
       console.log('deck: proposing ideas');
       // What actually went out, in words the model can read.
@@ -1455,11 +1465,24 @@ async function buildAndStageDeck(arg, chatId) {
 }
 
 /** The proposal itself: what would be built, and the three ways to answer it. */
+/** Did the resolver hand back a different region from the one you named? */
+const narrowedFrom = (idea) => {
+  const asked = String(idea.asked || '').trim();
+  const where = String(idea.where || '').trim().toLowerCase();
+  return asked && where && !asked.toLowerCase().includes(where) ? asked : null;
+};
+
 function proposalMessage(idea) {
   return [
     `💡 ${idea.titleHe}`,
     idea.angleHe,
     `📍 ${idea.where} · ${KINDS[idea.kind]?.he || idea.kind} · ${idea.want} מקומות`,
+    // Shown only when the resolver moved. Typing "מסלולים אוסטריה" and being
+    // offered Tyrol with no explanation reads as the bot ignoring the request,
+    // when it is in fact the documented narrowing doing its job. Suppressed
+    // when the request already names the region, where repeating it back costs
+    // a line and says nothing.
+    narrowedFrom(idea) ? `🗣 ביקשת "${idea.asked}" — צומצם ל-${idea.where}, אזור שמפה יכולה לחפש בו` : null,
     idea.whyNow ? `🗓 ${idea.whyNow}` : null,
   ]
     .filter(Boolean)
