@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { record as recordUsage } from '../usage.js';
-import { KINDS, kindIds } from '../sources/places.js';
+import { KINDS, kindIds, isSourcedKind, subjectEn } from '../sources/places.js';
 import { namesPlace } from './region.js';
 import { loadDestinations } from '../sources/climate.js';
 
@@ -77,7 +77,11 @@ const IDEAS_SCHEMA = {
             enum: kindIds(),
             description: 'Which category of place this deck is made of',
           },
-          want: { type: 'integer', description: 'How many places the deck should carry, 5 to 7' },
+          want: {
+            type: 'integer',
+            description:
+              'How many places the deck should carry. FIVE unless there is a reason, which there usually is not — five destinations after the cover is the template this format settled on.',
+          },
           angle_he: {
             type: 'string',
             description:
@@ -96,11 +100,45 @@ const IDEAS_SCHEMA = {
           },
           places_he: {
             type: 'array',
-            description: 'The places the deck would carry, in Hebrew, in order, exactly `want` of them. Real, named, specific places a visitor could stand in - not categories and not districts. This is the PLAN shown to the owner before anything is built; the build sources its own places and may not find every one of these, so name the ones you are most confident actually exist and are known by these names.',
+            description: 'The places the deck would carry, in Hebrew, in order, exactly `want` of them. Real, named, specific places a visitor could stand in - not categories and not districts. THE PLACE ONLY: no country, no comma, no region after it - the country is its own field and the slide draws it on its own line. This is the PLAN shown to the owner before anything is built; on a sourced deck the build finds its own places and may not find every one of these, so name the ones you are most confident actually exist and are known by these names.',
             items: { type: 'string' },
           },
+          places_en: {
+            type: 'array',
+            description:
+              'The same places, same order, same count, in English as a map would know them. Used to find each photograph, so a name that returns the wrong place returns the wrong picture.',
+            items: { type: 'string' },
+          },
+          countries_he: {
+            type: 'array',
+            description:
+              'The country each place is in, Hebrew, same order, same count. Its own field because the slide draws it on its own line under the name - do NOT put the country inside places_he, and do not leave this empty on a deck that spans countries, which is the deck that needs it most.',
+            items: { type: 'string' },
+          },
+          subject_en: {
+            type: 'string',
+            description:
+              'What the PHOTOGRAPHS have to show, in English, two or three words. Added to every image search, and the chooser rejects a frame that does not show it. For a northern lights deck it is "northern lights" - NOT the country and NOT "landscape". Name the thing a viewer came to look at.',
+          },
+          emphasis_he: {
+            type: 'string',
+            description:
+              'The phrase copied EXACTLY from title_he that is set in the accent colour on the cover. Under 16 characters. Pick the words carrying the promise - the phenomenon or the claim, not the preposition.',
+          },
         },
-        required: ['title_he', 'where', 'kind', 'want', 'angle_he', 'why_now', 'search_terms', 'places_he'],
+        required: [
+          'title_he',
+          'where',
+          'kind',
+          'want',
+          'angle_he',
+          'why_now',
+          'search_terms',
+          'places_he',
+          'places_en',
+          'subject_en',
+          'emphasis_he',
+        ],
         additionalProperties: false,
       },
     },
@@ -115,16 +153,67 @@ A deck is a TikTok photo slideshow: a cover slide that names the list, then one
 slide per place with two to four short lines of fact — opening hours, ticket
 price, how long it takes, how hard it is, what it is known for.
 
-WHAT MAKES A GOOD DECK
+TWO KINDS OF DECK, AND THE SUBJECT DECIDES WHICH
 
-A viewer should be able to act on it. "Five museums in Prague" is actionable;
-"five beautiful places in Europe" is a screensaver. Name the city or the range,
-not the continent.
+A deck is one of two artefacts, and which one is decided by the category, not
+by you. Propose the subject; the pipeline picks the form.
 
-The list has to have an organising idea beyond "these exist". The best ones
-answer a question a traveller actually has: what is worth the ticket, what is
-open on a Monday, what can be done in half a day, where locals eat, what is
-walkable from the station.
+  LANDSCAPE — mountain, waterfall, beach, lake, island, canyon, village,
+  aurora, trail. Five named places, a country each, a photograph each, and NO
+  facts: no hours, no prices, no durations, no difficulty grades. Nothing is
+  looked up, so nothing constrains you but whether the place is real, famous
+  enough to be photographed well, and obviously the thing the cover promised.
+
+  SOURCED — museum, attraction, food. Every fact on every slide is quoted word
+  for word from the official website of the place or of the body that manages
+  it. If a place has no official page it cannot carry a fact and does not
+  belong in one of these.
+
+THE SUBJECT IS WHAT DECIDES WHETHER A DECK WORKS
+
+Not the title. This was measured on a comparable feed and the gaps are not
+close, so treat it as the strongest guidance here:
+
+  A NAMED PHENOMENON BEATS A NAMED CONTINENT, BY TWENTY TO ONE. "The best
+  places to see the northern lights" and "islands with the clearest water"
+  travel. "The most beautiful places in Africa" and "the most beautiful places
+  in South America" were the two worst posts in the whole sample. A continent
+  plus an interchangeable superlative promises nothing a viewer can picture.
+  Lead with the thing they came to look at: the aurora, the water, the
+  unreal-looking peak, the empty road.
+
+  PURE LANDSCAPE BEATS A MIXED LIST. The five strongest posts contained no
+  town, no building and no monument. A list of scenic old villages did well;
+  the same list with a museum in it does not exist, because the two do not
+  belong on the same swipe.
+
+  ONE STRONG COLOUR CARRIES THE THUMBNAIL. Green-magenta aurora, turquoise
+  water, orange desert rock. A subject whose photographs are green-and-grey
+  alpine or blue-and-white coastal looks like every other travel post in the
+  feed. Prefer a subject with a colour signature that survives being two
+  centimetres tall.
+
+  COUNTER-SEASONAL BEATS IN-SEASON. The biggest post in the sample was a winter
+  aurora subject published in August. People plan the season they are not in.
+  why_now is still worth answering honestly, but "the season nobody is posting
+  about yet" is a better reason than "it is happening now".
+
+A DECK STILL HAS TO HAVE AN ORGANISING IDEA BEYOND "THESE EXIST". For a sourced
+deck that idea answers a traveller's question — what is worth the ticket, what
+is open on a Monday, where locals eat. For a landscape deck it is a visual
+promise, and the promise has to be true of the five photographs.
+
+THE MIX, WHEN YOU ARE ASKED FOR SEVERAL
+
+Most of them landscape, and not all of them. Roughly one in five should be a
+sourced deck — a museum, an attraction, a food market.
+
+This is not a compromise, it is the only thing this channel has that a repost
+account does not. Anyone can put five photographs of Lofoten in a row; a
+slideshow that tells you what the ticket costs and what time it shuts had to be
+researched, and it is the reason to follow this page rather than any of the
+hundred archives posting the same photographs. A run of proposals that is
+nothing but landscape has quietly given that up.
 
 Israeli travellers are the audience. Direct flights, kosher-adjacent practicality,
 school holidays and the Jewish calendar are all legitimate reasons to choose a
@@ -143,15 +232,31 @@ not the first place that came to mind. Asked for a beautiful travel slideshow
 with nothing to go on, the honest answer is Kyoto every time, and a feed of
 that is a feed about one city.
 
+A PHENOMENON-LED DECK MAY RANGE. "The clearest water in the world" is not a
+deck about one country and forcing it into one ruins it — those five places may
+come from five continents, and the catalogue stops applying the moment the
+subject has no home. What the catalogue still protects is the ordinary case: a
+deck that COULD be set anywhere should be set somewhere this audience flies.
+A slide nobody can book is a photograph, not a destination, and a feed of those
+is the archive account this one is not trying to be.
+
 HARD CONSTRAINTS
 
-Every fact on every slide will have to be quoted, word for word, from the
-official website of the place itself or of the body that manages it. If a
-category of place does not have official websites, the deck cannot be made.
-Museums, temples, castles, galleries, markets, zoos and parks have them.
-Waterfalls, beaches, viewpoints and most hiking routes usually do not — propose
-those only when the places are managed by a park or regional authority that
-publishes about them.
+On a SOURCED deck — museum, attraction, food — every fact on every slide will
+have to be quoted, word for word, from the official website of the place itself
+or of the body that manages it. If a place has no official page it cannot carry
+a fact. Museums, temples, castles, galleries, markets, zoos and parks have them.
+
+On a LANDSCAPE deck nothing is quoted because nothing is claimed: the slide is
+a name, a country and a photograph. Do not propose one and then plan facts for
+it, and do not avoid a waterfall or a viewpoint on the grounds that it has no
+official website. That rule used to live here without the distinction, and the
+result was a feed with no landscape in it at all.
+
+Every place must be real, specific and standable-in. "The Dolomites" is a
+region and a viewer cannot be in it; Lago di Braies is a place. A phenomenon is
+not a place either — an aurora deck is about Abisko and Tromso, not about the
+aurora.
 
 Do not propose a deck about a place that is at war, under evacuation, or where
 the practical answer for a traveller right now is "do not go".
@@ -197,17 +302,35 @@ NO COUNT. None of them says how many. "טופ 6" and "6 מקומות" are not wr
 they are just rarely what this page sounds like, and they will be asked for
 explicitly when they are wanted.
 
-NAME WHERE IT IS. Every one of those four says where, and it is never optional.
-A scroller who cannot tell which country the photograph is in has no reason to
-save the post, and a deck of six Icelandic waterfalls titled "המפלים הכי יפים
-בעולם" is not withholding a story, it is withholding the only fact that makes
-the list usable.
+NAME THE PLACE OR NAME THE PHENOMENON — one of the two, and never neither.
 
-The place is HANDED TO YOU with the deck and it is the only one you may use:
+A cover has to promise something a viewer can picture before they swipe. There
+are exactly two ways to do that and both work:
+
+  NAME WHERE IT IS.      "הרים באיסלנד שלא נראים אמיתיים"
+  NAME WHAT IT IS OF.    "המקומות הכי טובים לראות את האורות הצפוניים"
+
+The second one names no country at all and that is allowed, because the aurora
+IS the promise. Roughly half of the covers in the sample this is drawn from
+name no place, and the best-performing post in it was one of them.
+
+What is NOT allowed is the shape that promises neither — a continent and an
+interchangeable superlative:
+
+  ✗  המקומות הכי יפים באפריקה
+  ✗  המקומות הכי יפים בדרום אמריקה
+
+Those two were the worst posts in the sample by a factor of twenty, and the
+reason is visible in them: "Africa" is not a picture and "most beautiful" is
+not a claim about anything. If the subject is a whole continent, find the
+phenomenon inside it and lead with that instead.
+
+WHEN YOU DO NAME A PLACE, the place is HANDED TO YOU with the deck and it is
+the only one you may use:
 
   every slide in one country  →  that country.        "באיסלנד", "בשווייץ"
   several countries, one area →  that area.           "בסקנדינביה", "בבלקן"
-  nothing in common at all    →  "בעולם", and nowhere else.
+  nothing in common at all    →  name the phenomenon instead, or "בעולם".
 
 Do not name a city, a valley or a national park instead of what you were given,
 and do not add a second place beside it. One place, the one supplied.
@@ -477,7 +600,11 @@ export async function reviseIdea(idea, instruction, { today = new Date() } = {})
   //
   // Which kind of deck this is was decided when you typed /deck free. A
   // revision may change anything in it; it may not change what it is.
-  if (idea.freeform) return reviseFreeform(idea, said, { today });
+  //
+  // `ownWords`, not `freeform`: a landscape proposal is free-form too but has a
+  // category, and revising it through the free-form schema would strip the
+  // category and lose the routing that put it there.
+  if (idea.ownWords) return reviseFreeform(idea, said, { today });
 
   const month = today.toLocaleString('en-GB', { month: 'long' });
   const user = [
@@ -638,6 +765,13 @@ export async function freeformIdea(request, { today = new Date() } = {}) {
 
   return {
     freeform: true,
+    // A deck you described in your own words, as opposed to one whose CATEGORY
+    // happens to be free-form. Both carry `freeform: true` and they are not
+    // interchangeable: this one has no category, keeps the request verbatim,
+    // and revises against its own schema. Everything that used to branch on
+    // `freeform` to mean "came from /deck free" branches on this instead, and
+    // the day landscape kinds became free-form is the day that mattered.
+    ownWords: true,
     asked,
     titleHe: clean(parsed.title_he),
     emphasisHe: clean(parsed.emphasis_he),
@@ -747,6 +881,23 @@ const TITLE_SCHEMA = {
       type: 'array',
       description: 'The places the deck would carry, in Hebrew, in order, exactly `want` of them. Real, named, specific places a visitor could stand in - not categories and not districts. This is the PLAN shown to the owner before anything is built; the build sources its own places and may not find every one of these, so name the ones you are most confident actually exist and are known by these names.',
       items: { type: 'string' },
+    },
+    places_en: {
+      type: 'array',
+      description:
+        'The same places, same order, same count, in English as a map would know them. Used to find each photograph on a landscape deck, so a name that returns the wrong place returns the wrong picture.',
+      items: { type: 'string' },
+    },
+    countries_he: {
+      type: 'array',
+      description:
+        'The country each place is in, Hebrew, same order, same count. Its own field because the slide draws it on its own line under the name - do NOT put the country inside places_he.',
+      items: { type: 'string' },
+    },
+    subject_en: {
+      type: 'string',
+      description:
+        'What the PHOTOGRAPHS have to show, in English, two or three words. Added to every image search, and the chooser rejects a frame that does not show it. Name the thing a viewer came to look at, not the country.',
     },
   },
   required: ['title_he', 'emphasis_he', 'place_he', 'eyebrow_he', 'angle_he', 'search_terms', 'places_he'],
@@ -1020,12 +1171,21 @@ export async function titleForRequest({ where, kind, count = 5, today = new Date
 
   const parsed = JSON.parse(text);
   const clean = (s) => String(s || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+  const placesHe = (parsed.places_he || []).map(clean).filter(Boolean);
+  const placesEn = (parsed.places_en || []).map(clean).filter(Boolean);
+
   return {
     titleHe: clean(parsed.title_he),
+    // Was being dropped on the floor. The schema has asked for it all along and
+    // the cover draws it in the accent colour, so a deck asked for by name was
+    // the only one whose title came out in one flat weight.
+    emphasisHe: clean(parsed.emphasis_he),
     eyebrowHe: clean(parsed.eyebrow_he),
     angleHe: clean(parsed.angle_he),
     searchTerms: (parsed.search_terms || []).map(clean).filter(Boolean).slice(0, 4),
-    places: (parsed.places_he || []).map(clean).filter(Boolean).slice(0, 8),
+    places: placesHe.slice(0, 8),
+    freeformPlaces: pairPlaces(placesHe, placesEn, count, (parsed.countries_he || []).map(clean)),
+    subjectEn: clean(parsed.subject_en) || subjectEn(kind),
   };
 }
 
@@ -1036,22 +1196,104 @@ export async function titleForRequest({ where, kind, count = 5, today = new Date
  * not a per-idea one, and a model that asks for eleven has misunderstood the
  * format rather than found a richer list.
  */
+/**
+ * The Hebrew names and the English ones, as slides.
+ *
+ * Paired by index and truncated to whichever list is shorter, because a slide
+ * needs both and each name does a different job: the Hebrew one is drawn on the
+ * slide, the English one finds the photograph. A Hebrew name with no English
+ * partner cannot be photographed; an English one with no Hebrew partner renders
+ * a slide with no title. Either way the pair is what is usable, so the pair is
+ * what survives — silently, because the model returning four of five is a
+ * shorter deck and not a failure.
+ */
+function pairPlaces(placesHe = [], placesEn = [], want = 5, countriesHe = []) {
+  return placesHe
+    .slice(0, want)
+    .map((nameHe, i) => ({ nameHe, nameEn: placesEn[i] || '', countryHe: countriesHe[i] || '', noteHe: '' }))
+    .filter((p) => p.nameEn);
+}
+
 export function normaliseIdea(raw) {
   if (!raw?.title_he || !raw?.where || !KINDS[raw.kind]) return null;
   const clean = (s) => String(s || '').replace(/[—–]/g, '-').replace(/\s+/g, ' ').trim();
+
+  // Five, because that is the template. Six is allowed and seven is not: the
+  // format this is modelled on ran twelve of thirteen posts at exactly five
+  // destinations after the cover, and a list that goes long stops being a list
+  // you finish.
+  const want = Math.min(6, Math.max(5, Number(raw.want) || 5));
+
+  const placesHe = (raw.places_he || []).map(clean).filter(Boolean);
+  const placesEn = (raw.places_en || []).map(clean).filter(Boolean);
+
+  // Whether this deck quotes facts or carries names and photographs. Decided
+  // by the kind rather than by the model, so it cannot drift per idea — see
+  // isSourcedKind in sources/places.js.
+  const freeform = !isSourcedKind(raw.kind);
+
   return {
     titleHe: clean(raw.title_he),
     where: clean(raw.where),
     kind: raw.kind,
-    want: Math.min(7, Math.max(5, Number(raw.want) || 5)),
+    want,
     angleHe: clean(raw.angle_he),
     whyNow: clean(raw.why_now),
     searchTerms: (raw.search_terms || []).map(clean).filter(Boolean).slice(0, 4),
     // The places the deck INTENDS to carry, shown on the proposal so the
-    // decision you make there is about content rather than about a title. Not
-    // a promise: the build sources its own places from the site or the map, and
-    // may not find every one of these. The approval card after the build is
-    // where the real list appears.
-    places: (raw.places_he || []).map(clean).filter(Boolean).slice(0, 8),
+    // decision you make there is about content rather than about a title. On a
+    // sourced deck this is not a promise — the build finds its own places from
+    // the site or the map and may not find every one of these, and the approval
+    // card after the build is where the real list appears. On a free-form deck
+    // it IS the list: nothing looks anything up, so these are the slides.
+    places: placesHe.slice(0, 8),
+
+    freeform,
+    // What a free-form build needs and a sourced one ignores. Shaped here
+    // rather than at the call site so both routes out of this module — the
+    // daily suggestion and a deck asked for by name — hand the builder the same
+    // thing.
+    //
+    // Paired by index, and truncated to the shorter of the two: an English name
+    // with no Hebrew one renders a slide with no title, and a Hebrew one with
+    // no English name cannot be photographed. Either way the pair is what is
+    // usable, so the pair is what survives.
+    freeformPlaces: pairPlaces(placesHe, placesEn, want, (raw.countries_he || []).map(clean)),
+    // The kind's own subject is the fallback and usually the better string: the
+    // model is answering per idea, the table was written once and calibrated
+    // against the failures.
+    subjectEn: clean(raw.subject_en) || subjectEn(raw.kind),
+    emphasisHe: clean(raw.emphasis_he),
+  };
+}
+
+/**
+ * A proposed idea, in the shape the free-form builder takes.
+ *
+ * buildFreeformDeck was written for /deck free, where the owner's own words are
+ * the request and a second model call produces the places. A proposal already
+ * HAS its places — they were shown to you before you tapped — so this adapts
+ * rather than asks again. One model call per deck, not two, and the deck that
+ * gets built is the one that was approved rather than a fresh answer to the
+ * same question.
+ *
+ * Kept next to normaliseIdea because the two are one contract: whatever that
+ * function puts on an idea, this is what reads it.
+ */
+export function freeformFromIdea(idea) {
+  return {
+    freeform: true,
+    titleHe: idea.titleHe,
+    emphasisHe: idea.emphasisHe || '',
+    // `where` is already the English region — it is what the map would be
+    // searched with, which is exactly what the image search wants.
+    whereEn: idea.where,
+    subjectEn: idea.subjectEn || subjectEn(idea.kind),
+    // Left empty deliberately when the deck spans countries. The slide prints
+    // this under the place name, and one wrong country under five right names
+    // is worse than no country under any of them.
+    countryHe: idea.countryHe || '',
+    places: idea.freeformPlaces || [],
+    want: idea.want,
   };
 }

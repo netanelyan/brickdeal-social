@@ -11,12 +11,12 @@ import { primaryAuthority, enabledSources, registry } from './src/sources/index.
 import { approvalMessage, decidedMessage, evidenceReport, channelCaption, instagramCaption, tiktokCaption } from './src/format.js';
 import { renderCard, closeBrowser } from './src/render/index.js';
 import { publishTelegram, publishTelegramDeck, sendForApproval } from './src/publish/telegram.js';
-import { proposeIdeas, titleForRequest, reviseIdea, freeformIdea } from './src/deck/ideas.js';
+import { proposeIdeas, titleForRequest, reviseIdea, freeformIdea, freeformFromIdea } from './src/deck/ideas.js';
 import { buildDeck } from './src/deck/build.js';
 import { toDeckCandidate, deckTopic } from './src/deck/candidate.js';
 import { placeOverCap } from './src/pillars.js';
 import { canonicalKind } from './src/sources/tiyulplus.js';
-import { KINDS } from './src/sources/places.js';
+import { KINDS, isSourcedKind } from './src/sources/places.js';
 import { resolveRequest } from './src/deck/request.js';
 import { buildWithFallback, describeAttempt } from './src/deck/attempt.js';
 import { buildFreeformDeck } from './src/deck/build.js';
@@ -1701,7 +1701,20 @@ async function buildAndStageDeck(arg, chatId) {
       // whyNow was the literal English 'asked for directly', which is how an
       // English sentence ended up in the middle of a Hebrew card. Dropped: the
       // asked line says the same thing, in Hebrew, and says something useful.
-      idea = { ...cover, where: req.where, kind: req.kind, want: req.want, whyNow: null, asked: arg };
+      // `freeform` is derived from the category here too, and from the same
+      // predicate. A deck asked for by name does not go through normaliseIdea,
+      // so before this it was the one route that ignored the routing entirely:
+      // "/deck mountains Switzerland" went off to source official pages for
+      // five summits that do not have any.
+      idea = {
+        ...cover,
+        where: req.where,
+        kind: req.kind,
+        want: req.want,
+        whyNow: null,
+        asked: arg,
+        freeform: !isSourcedKind(req.kind),
+      };
     } else {
       console.log('deck: proposing ideas');
       const picked = await pickIdea();
@@ -1732,10 +1745,12 @@ const narrowedFrom = (idea) => {
 };
 
 function proposalMessage(idea) {
-  // A free-form idea has no category and its places are already decided, so it
-  // describes itself differently — and says what it will not carry, because
-  // "no facts" is the thing to know before approving one.
-  if (idea.freeform) {
+  // `ownWords`, not `freeform`. A deck you described in your own words is what
+  // this branch is for — no category, and the request quoted back. Landscape
+  // proposals are free-form too now and DO have a category, so they take the
+  // ordinary branch below and pick up the no-facts line there. Not `asked`
+  // either: a deck requested by name carries that too.
+  if (idea.ownWords) {
     return [
       `💡 ${idea.titleHe}`,
       `📍 ${idea.whereEn} · חופשי · ${idea.places.length} מקומות`,
@@ -1764,7 +1779,16 @@ function proposalMessage(idea) {
     // last line says so rather than letting you discover it at the album.
     idea.places?.length ? '────────────' : null,
     ...(idea.places || []).map((p, i) => `${i + 1}. ${p}`),
-    idea.places?.length ? '\n(רשימה מתוכננת — הבנייה מאתרת את המקומות בפועל ויכולה להחליף חלק)' : null,
+    // Two different sentences, because the list means two different things.
+    // On a sourced deck it is a plan the build may not be able to keep. On a
+    // landscape deck nothing is looked up, so the list IS the slides — and the
+    // fact that they will carry no hours and no prices is the thing to know
+    // before tapping, not after.
+    idea.places?.length
+      ? idea.freeform
+        ? '\n(שמות ותמונות בלבד — בלי שעות, מחירים או עובדות מאומתות)'
+        : '\n(רשימה מתוכננת — הבנייה מאתרת את המקומות בפועל ויכולה להחליף חלק)'
+      : null,
   ]
     .filter(Boolean)
     .join('\n');
@@ -1913,8 +1937,11 @@ async function buildProposal(key, chatId, messageId = null, targets = ['instagra
     // A free-form deck has no sources to find — its places are already named
     // and it carries no facts — so it goes straight to the photographs. There
     // is no fallback ladder either, because there is no region to fall back to.
+    // A free-form idea from /deck free already IS the builder's shape; one from
+    // a proposal has to be adapted, because its places were chosen when the
+    // idea was and must not be asked for a second time.
     const built = idea.freeform
-      ? await buildFreeformDeck(idea, {
+      ? await buildFreeformDeck(idea.ownWords ? idea : freeformFromIdea(idea), {
           // Rewrites the same message, so a seven-place image hunt reports
           // itself without costing seven notifications.
           onProgress: ({ done, of, name, ok }) =>

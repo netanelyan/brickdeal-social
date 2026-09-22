@@ -1049,7 +1049,12 @@ export async function buildFreeformDeck(idea, { wantImages = true, onProgress = 
     n: i + 1,
     nameHe: p.nameHe,
     nameEn: p.nameEn,
-    countryHe: idea.countryHe || null,
+    // The place's OWN country first. A worldwide deck — five islands on five
+    // continents — has no deck-level country, and the one on the idea would be
+    // empty or, worse, one of the five stamped under all of them. The reference
+    // format labels every slide with its own, which is the only version that is
+    // true on a scattered list.
+    countryHe: p.countryHe || idea.countryHe || null,
     // One short note at most, and only when the model offered one. Rendered by
     // the minimal style as the parenthesised aside it already draws.
     bullets: p.noteHe ? [{ text: p.noteHe }] : [],

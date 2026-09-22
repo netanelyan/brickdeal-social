@@ -18,7 +18,7 @@ import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, deckTikt
 import { renderSlideHtml, SIZES, sizeClass, INK_LUMINANCE, FACES } from '../src/render/deckTemplates.js';
 import { renderInstagramSlideHtml } from '../src/render/deckInstagram.js';
 import { sizesFor } from '../src/deck/candidate.js';
-import { normaliseIdea } from '../src/deck/ideas.js';
+import { normaliseIdea, freeformFromIdea } from '../src/deck/ideas.js';
 import { readFileSync } from 'node:fs';
 import { FIELDS_BY_KIND } from '../src/deck/fields.js';
 import { cinematicQueries } from '../src/images/curate.js';
@@ -42,7 +42,7 @@ import { deckPlace, namesPlace, REGIONS } from '../src/deck/region.js';
 import { __test as photoTest, scrimAlpha, underScrim } from '../src/render/photo.js';
 import { deckId } from '../src/deck/candidate.js';
 import { sameSite } from '../src/search.js';
-import { authorityDomains, KINDS, subjectEn } from '../src/sources/places.js';
+import { authorityDomains, KINDS, subjectEn, isSourcedKind } from '../src/sources/places.js';
 import { pick, CATEGORY_HE, canonicalKind } from '../src/sources/tiyulplus.js';
 import { keepByName } from '../src/deck/shape.js';
 import {
@@ -2327,7 +2327,12 @@ group('the guide page — a deck of trails is not a deck of whatever is on the p
 //
 // A missing line is invisible until a deck goes out wrong, so the table is held
 // against the registry instead of being read by eye.
-for (const id of Object.keys(KINDS)) {
+// Sourced kinds only. CATEGORY_HE maps a deck kind onto the vocabulary our own
+// destination pages use, and that mapping is how the site route picks places —
+// a route a free-form kind never takes. A landscape deck names its own places
+// and reads no guide page, so demanding a category for one would be demanding a
+// mapping that nothing could ever use.
+for (const id of Object.keys(KINDS).filter(isSourcedKind)) {
   ok(`the guide page knows what a ${id} deck wants`, Array.isArray(CATEGORY_HE[id]) && CATEGORY_HE[id].length > 0);
 }
 
@@ -2398,9 +2403,111 @@ eq('a plural resolves to the registry name', canonicalKind('mountains'), 'mounta
 eq('and so does a synonym', canonicalKind('hiking'), 'trail');
 ok('a resolved synonym reaches a real mapping', Boolean(CATEGORY_HE[canonicalKind('waterfalls')]));
 
-// The model is asked for 5-7 and will occasionally ask for eleven; that is a
-// misunderstanding of the format rather than a richer list.
-eq('slide count is clamped, not trusted', normaliseIdea({ title_he: 'x', where: 'Prague', kind: 'museum', want: 11 }).want, 7);
+// The model will occasionally ask for eleven; that is a misunderstanding of the
+// format rather than a richer list. The ceiling came down from seven to six
+// when the format was measured against a comparable feed: twelve of its
+// thirteen posts ran at exactly five destinations after the cover, and a list
+// that goes long stops being a list you finish.
+eq('slide count is clamped, not trusted', normaliseIdea({ title_he: 'x', where: 'Prague', kind: 'museum', want: 11 }).want, 6);
+eq('and five is the template, so an unstated count is five', normaliseIdea({ title_he: 'x', where: 'Prague', kind: 'museum' }).want, 5);
+
+/* -------------------------------------------------------------------------- */
+group('landscape carries names, not facts');
+
+// The channel drifted to museums and markets, and the reason was in the table
+// rather than in the prompt: every kind was sourced, sourcing means quoting an
+// official page, and a mountain does not have one. The idea prompt then told
+// the model so, in as many words, and it obediently stopped proposing
+// landscape — which is most of what a travel slideshow is.
+//
+// So the table now says which kinds carry quoted facts and which carry a name,
+// a country and a photograph, and the routing follows the kind rather than a
+// flag somebody remembered to set.
+ok('a museum is sourced', isSourcedKind('museum'));
+ok('so is an attraction', isSourcedKind('attraction'));
+ok('and a food deck', isSourcedKind('food'));
+ok('a mountain is not', !isSourcedKind('mountain'));
+ok('nor a waterfall', !isSourcedKind('waterfall'));
+ok('nor a beach', !isSourcedKind('beach'));
+ok('an unknown kind is not sourced either', !isSourcedKind('nonsense'));
+
+// The subjects the old table could not express at all. Each needs an English
+// search subject or its photographs are of the right country and the wrong
+// thing — the failure KIND_SUBJECT_EN was written for.
+for (const id of ['lake', 'island', 'village', 'canyon', 'aurora']) {
+  ok(`${id} is a category that can now be proposed`, Boolean(KINDS[id]));
+  ok(`and it knows what its photographs must show`, Boolean(subjectEn(id)));
+  ok(`and it is free-form, having no page to quote`, !isSourcedKind(id));
+}
+eq('the aurora searches for the aurora, not for the country', subjectEn('aurora'), 'northern lights');
+
+// A free-form kind has no Overpass query, and reaching the sourced path with
+// one is a routing bug. It should say so rather than dying on spec.q.
+await (async () => {
+  const { osmPlaces } = await import('../src/sources/places.js');
+  const e = await osmPlaces('0,0,1,1', 'aurora').catch((x) => x);
+  ok('a free-form kind refused by the sourced path names the reason', /not a sourced kind/.test(e?.message || ''));
+})();
+
+// An idea routes itself. This is what stops a landscape deck being sent off to
+// find official pages that do not exist.
+const landscape = normaliseIdea({
+  title_he: 'המקומות הכי טובים לראות את האורות הצפוניים',
+  emphasis_he: 'האורות הצפוניים',
+  where: 'Arctic',
+  kind: 'aurora',
+  want: 5,
+  places_he: ['אביסקו', 'טרומסה', 'רובנימי', 'אלטה', 'פיירבנקס'],
+  places_en: ['Abisko', 'Tromso', 'Rovaniemi', 'Alta', 'Fairbanks'],
+  subject_en: 'northern lights',
+});
+ok('a landscape idea marks itself free-form', landscape.freeform);
+eq('and pairs its places for the photo search', landscape.freeformPlaces.length, 5);
+eq('Hebrew on the slide', landscape.freeformPlaces[0].nameHe, 'אביסקו');
+eq('English for the photograph', landscape.freeformPlaces[0].nameEn, 'Abisko');
+
+const sourced = normaliseIdea({
+  title_he: 'המוזיאונים של פראג',
+  where: 'Prague',
+  kind: 'museum',
+  want: 5,
+  places_he: ['מוזיאון לאומי'],
+  places_en: ['National Museum'],
+});
+ok('a museum idea stays sourced', !sourced.freeform);
+
+// A place with no English partner cannot be photographed, and one with no
+// Hebrew partner renders a slide with no title. The pair is what survives.
+const halfNamed = normaliseIdea({
+  title_he: 'x',
+  where: 'Norway',
+  kind: 'mountain',
+  want: 5,
+  places_he: ['א', 'ב', 'ג'],
+  places_en: ['A', 'B'],
+});
+eq('an unpaired name is dropped rather than rendered blank', halfNamed.freeformPlaces.length, 2);
+
+// The adapter, which is what stops a proposal being asked for its places twice.
+const forBuild = freeformFromIdea(landscape);
+eq('the builder gets the region it will search', forBuild.whereEn, 'Arctic');
+eq('and the subject the chooser rejects against', forBuild.subjectEn, 'northern lights');
+eq('and the places that were approved, not new ones', forBuild.places.length, 5);
+ok('and the cover phrase survives into the render', forBuild.emphasisHe.includes('האורות'));
+
+// A kind with no subject of its own still gets one from the table.
+eq(
+  'an idea that named no subject falls back to its kind',
+  freeformFromIdea({ ...landscape, subjectEn: '' }).subjectEn,
+  'northern lights'
+);
+
+// /deck free and a deck requested by name BOTH carry `asked`, so `asked` cannot
+// tell them apart — and `freeform` cannot either now that landscape kinds are
+// free-form. `ownWords` is the discriminator, and it must be absent here: a
+// landscape proposal revised through the free-form schema would lose the
+// category that routed it.
+eq('a landscape proposal is not a deck you described in words', landscape.ownWords, undefined);
 eq('and clamped upwards too', normaliseIdea({ title_he: 'x', where: 'Prague', kind: 'museum', want: 2 }).want, 5);
 eq('an idea in an unknown category is dropped', normaliseIdea({ title_he: 'x', where: 'p', kind: 'nightclub', want: 5 }), null);
 ok(

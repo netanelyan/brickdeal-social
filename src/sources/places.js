@@ -67,6 +67,29 @@ export class PlacesError extends Error {
  * tags are what make the shortlist defensible: `route=hiking` is a thing OSM
  * has a definition for, "nice walks" is not.
  *
+ * `sourced` is the newer and more consequential flag, and it splits this table
+ * in two.
+ *
+ * A SOURCED kind carries quoted facts: a museum has an official page with its
+ * opening hours on it, and every sentence that reaches a slide comes off that
+ * page. That is the standard the rest of this file exists to uphold.
+ *
+ * An UNSOURCED kind carries a name, a country and a photograph, and nothing
+ * else. Not a lowering of the standard — a different artefact. A mountain has
+ * no official website, which is why the idea prompt used to warn the model off
+ * proposing mountains at all, and why a channel built on this table drifted
+ * toward museums and markets. Landscape is most of what a travel slideshow IS,
+ * and the honest way to publish it is to stop pretending there is a page to
+ * quote rather than to keep refusing the subject.
+ *
+ * So the unsourced kinds route to deck/build.js's free-form path, which was
+ * already written for exactly this shape and was reachable only by typing
+ * `/deck free` by hand.
+ *
+ * The last five have no `q` at all. Nothing in OSM agrees on what a village
+ * worth photographing is, and the aurora is not a place — those decks name
+ * their own places, which is what the free-form path does.
+ *
  * `needsWikidata` is where the standard bites. A place with no Wikidata entry
  * has no official-website record either, so nothing about it could be quoted
  * from an authority — it would be a slide with a name and no facts. Kinds
@@ -76,24 +99,29 @@ export class PlacesError extends Error {
 export const KINDS = {
   trail: {
     he: 'מסלולים',
+    sourced: false,
     q: (bbox) => `relation["route"="hiking"]["name"]["wikidata"](${bbox});`,
   },
   museum: {
     he: 'מוזיאונים',
+    sourced: true,
     q: (bbox) => `nwr["tourism"="museum"]["name"]["wikidata"](${bbox});`,
   },
   attraction: {
     he: 'אטרקציות',
+    sourced: true,
     q: (bbox) =>
       `nwr["tourism"~"^(attraction|viewpoint|theme_park|zoo|aquarium)$"]["name"]["wikidata"](${bbox});` +
       `nwr["historic"~"^(castle|monument|memorial|ruins)$"]["name"]["wikidata"](${bbox});`,
   },
   beach: {
     he: 'חופים',
+    sourced: false,
     q: (bbox) => `nwr["natural"="beach"]["name"]["wikidata"](${bbox});`,
   },
   food: {
     he: 'אוכל',
+    sourced: true,
     // Restaurants are rarely in Wikidata, so this leans on markets and food
     // halls, which are — and which are what a "where to eat" slide should be
     // pointing at anyway rather than one restaurant's table.
@@ -104,6 +132,7 @@ export const KINDS = {
   },
   mountain: {
     he: 'הרים',
+    sourced: false,
     // Peaks, and the ranges themselves. A deck about "mountains in Italy" wants
     // the Dolomites as much as it wants any single summit, and OSM files a
     // range as a natural=ridge or a place=region rather than a peak.
@@ -113,11 +142,34 @@ export const KINDS = {
   },
   waterfall: {
     he: 'מפלים',
+    sourced: false,
     q: (bbox) => `nwr["waterway"="waterfall"]["name"]["wikidata"](${bbox});`,
   },
+
+  // No Overpass query, and none is missing. These are the subjects a travel
+  // slideshow is actually made of and the ones this table had no way to say.
+  // A lake and a canyon are tagged in OSM but not in a way that ranks the five
+  // worth looking at; a village worth photographing is not a tag at all; and
+  // the northern lights are a phenomenon rather than a place, so the deck is
+  // about the towns you stand in to see them. All four name their own places
+  // on the free-form path.
+  lake: { he: 'אגמים', sourced: false },
+  island: { he: 'איים', sourced: false },
+  village: { he: 'כפרים', sourced: false },
+  canyon: { he: 'קניונים', sourced: false },
+  aurora: { he: 'זוהר צפוני', sourced: false },
 };
 
 export const kindIds = () => Object.keys(KINDS);
+
+/**
+ * Does this kind carry quoted facts, or names and photographs?
+ *
+ * The one question that decides which build path a deck takes, asked in one
+ * place so the answer cannot drift between the proposal, the build and the
+ * approval card.
+ */
+export const isSourcedKind = (kind) => Boolean(KINDS[kind]?.sourced);
 
 /**
  * What the deck is about, in English, for a photo search and for the chooser.
@@ -140,6 +192,13 @@ export const KIND_SUBJECT_EN = {
   food: 'food market',
   mountain: 'mountain peak',
   waterfall: 'waterfall',
+  lake: 'mountain lake',
+  island: 'island coastline',
+  village: 'old village',
+  canyon: 'canyon',
+  // Not "Tromso" and not "night sky". The frame has to have the aurora IN it,
+  // and this string is what the chooser rejects a daylight fjord against.
+  aurora: 'northern lights',
 };
 
 export const subjectEn = (kind) => KIND_SUBJECT_EN[kind] || '';
@@ -213,6 +272,13 @@ export async function resolveArea(name) {
 export async function osmPlaces(bbox, kind) {
   const spec = KINDS[kind];
   if (!spec) throw new PlacesError(`unknown kind: ${kind}`, { step: 'overpass' });
+  // A kind with no query is not a gap in this table, it is a kind that names
+  // its own places — see the free-form note on KINDS. Reaching here with one
+  // means something routed a free-form deck down the sourced path, and the
+  // useful failure says that rather than "spec.q is not a function".
+  if (!spec.q) {
+    throw new PlacesError(`${kind} is not a sourced kind — it builds free-form`, { step: 'overpass' });
+  }
 
   const ql = `[out:json][timeout:60];(${spec.q(bbox)});out tags center ${Number(process.env.PLACES_MAX || 200)};`;
 
