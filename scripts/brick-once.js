@@ -8,14 +8,17 @@ import { renderBrickDeckSize } from '../src/render/brickDeck.js';
 import { captionFor, instagramCaptionFor, dressing } from '../src/brick/caption.js';
 import { closeBrowser } from '../src/render/index.js';
 import { writeContactSheet } from './lib/contact-sheet.js';
+import { roomFor } from './lib/rooms.js';
 import { sampleDeals } from './fixtures/deals.js';
 
 // The whole path, printed, publishing nothing.
 //
 //   npm run brick-once
 //   npm run brick-once -- "harry-potter"
-//   npm run brick-once -- --no-images        (skip the generated photographs)
-//   npm run brick-once -- --fixture          (a generated feed, no network)
+//   npm run brick-once -- "harry-potter" "100" "בונסאי"   one sheet, three decks
+//   npm run brick-once -- --fixture       a generated feed, no network
+//   npm run brick-once -- --rooms         stand-in photographs, no image calls
+//   npm run brick-once -- --no-images     no photographs at all
 //
 // Writes to out/brick/ instead of to Telegram, with a contact sheet. Touches
 // neither the store nor any destination, so it is safe to run on the VPS.
@@ -30,11 +33,22 @@ import { sampleDeals } from './fixtures/deals.js';
 const OUT = path.join(process.cwd(), 'out', 'brick');
 
 const argv = process.argv.slice(2);
-const noImages = argv.includes('--no-images');
+const useRooms = argv.includes('--rooms');
+const noImages = argv.includes('--no-images') || useRooms;
 const useFixture = argv.includes('--fixture');
-const request = argv.filter((a) => !a.startsWith('--')).join(' ') || null;
+
+// Several requests build several decks onto one sheet. A deck is only really
+// judgeable next to another one — whether five slides read as a series, whether
+// two posts in a day would look like the same post — and that is invisible one
+// build at a time.
+const requests = argv.filter((a) => !a.startsWith('--'));
 
 const money = (n) => `${Math.round(n).toLocaleString('en-US')}₪`;
+const indent = (text) =>
+  String(text)
+    .split('\n')
+    .map((l) => `    ${l}`)
+    .join('\n');
 
 async function main() {
   mkdirSync(OUT, { recursive: true });
@@ -51,16 +65,48 @@ async function main() {
     console.log(`  feed: generated fixture at ${file}`);
   }
 
-  console.log(`\n  building${request ? ` "${request}"` : ''}${noImages ? ' (no photographs)' : ''}\n`);
+  const sheets = [];
+  for (const [n, request] of (requests.length ? requests : [null]).entries()) {
+    sheets.push(await buildOne(request, n));
+  }
+
+  writeContactSheet(sheets, OUT, { title: `brick-once — ${sheets.map((d) => d.titleHe).join(' · ')}` });
+  await closeBrowser();
+
+  const total = sheets.reduce((t, d) => t + d.slides.length, 0);
+  console.log(`\n  ${total} slides in ${sheets.length} deck(s)`);
+  console.log(`  ${path.join(OUT, 'index.html')}\n`);
+}
+
+async function buildOne(request, n) {
+  console.log(`\n  building${request ? ` "${request}"` : ''}\n`);
   const deck = await buildDeck(request, {
     wantImages: !noImages,
     onProgress: (s) => console.log(`    ${s}`),
   });
-  deck.id = 'once';
+  deck.id = `once-${n}`;
+
+  // Stand-in photographs, so a whole deck can be looked at without paying for
+  // real ones. Assigned HERE rather than inside the build, deliberately: the
+  // builder must never be able to put a picture on a slide that nothing
+  // generated for that product, because a slide whose photograph is not of the
+  // set it names is the one failure this pipeline most has to avoid. A dev
+  // script faking it for a contact sheet is a different thing from the builder
+  // learning how.
+  if (useRooms) {
+    deck.slides = deck.slides.map((s, i) => ({
+      ...s,
+      image: { src: roomFor(n * 3 + i).src, provenance: 'stock', note: 'stand-in, not a real photograph' },
+    }));
+  }
 
   console.log(`\n  ${deck.titleHe}`);
-  console.log(`  recipe: ${deck.recipe}${deck.ceiling ? ` (under ${deck.ceiling}₪)` : ''}${deck.theme ? ` · ${deck.theme}` : ''}`);
-  console.log(`  cover:  "${deck.hookHe}"  [${deck.hookFrom}]`);
+  console.log(
+    `  recipe: ${deck.recipe}${deck.ceiling ? ` (under ${deck.ceiling}₪)` : ''}${deck.theme ? ` · ${deck.theme}` : ''}`
+  );
+  console.log(
+    `  cover:  "${deck.hookHe}"${deck.emphasisHe ? `   [shout: ${deck.emphasisHe}]` : ''}   [${deck.hookFrom}]`
+  );
 
   const rateNote = Object.entries(deck.rates)
     .map(([c, r]) => `${c}/ILS ${r.rate} on ${r.date}`)
@@ -73,11 +119,11 @@ async function main() {
     // A single-set post's later slides carry a fact rather than a price block,
     // so printing the price under all of them reads as five identical slides
     // when they are nothing of the sort. What a slide SAYS is what to print.
-    const carriesPrices = s.lines.length > 1 || s.lines[0]?.value;
+    const carriesPrices = s.lines.length > 1 || Boolean(s.lines[0]?.value);
     const claim = !carriesPrices
       ? s.lines.map((l) => l.label).join(' · ')
       : c?.ok
-        ? `${money(c.paid)} vs ${money(c.listIls)} (${c.source.region} ${c.source.amount} ${c.source.currency}) → saves ${money(c.saving)}`
+        ? `${money(c.paid)} vs ${money(c.listIls)} (${c.source.region} ${c.source.amount} ${c.source.currency}) saves ${money(c.saving)}`
         : `${money(s.deal.price)} · no comparison — ${c?.why || 'unknown'}`;
     console.log(`    ${s.emoji} ${s.nameHe}`);
     console.log(`       ${claim}`);
@@ -91,7 +137,6 @@ async function main() {
   if (deck.feedDropped?.length) {
     console.log(`\n  feed: ${deck.feedDropped.length} record(s) were not usable`);
     for (const d of deck.feedDropped.slice(0, 6)) console.log(`    ${d.id} — ${d.why}`);
-    if (deck.feedDropped.length > 6) console.log(`    ... and ${deck.feedDropped.length - 6} more`);
   }
 
   // One hook AND one tag block, drawn once and handed to both, exactly as the
@@ -99,20 +144,20 @@ async function main() {
   // diverging in the first place, so they stay side by side.
   const dress = dressing(deck);
   console.log('\n  TikTok description\n');
-  console.log(captionFor(deck, dress).split('\n').map((l) => `    ${l}`).join('\n'));
+  console.log(indent(captionFor(deck, dress)));
   console.log('\n  Instagram caption\n');
-  console.log(instagramCaptionFor(deck, dress).split('\n').map((l) => `    ${l}`).join('\n'));
+  console.log(indent(instagramCaptionFor(deck, dress)));
 
   console.log('\n  rendering');
   const slides = await renderBrickDeckSize(deck, { size: 'tiktok', outDir: OUT });
-  writeContactSheet(
-    [{ titleHe: deck.titleHe, style: 'product', size: 'tiktok', note: deck.subject, slides: slides.map((s) => ({ ...s, spot: null })) }],
-    OUT,
-    { title: `brick-once — ${deck.titleHe}` }
-  );
 
-  await closeBrowser();
-  console.log(`\n  ${slides.length} slides\n  ${path.join(OUT, 'index.html')}\n`);
+  return {
+    titleHe: deck.titleHe,
+    style: deck.recipe,
+    size: 'tiktok',
+    note: `${deck.subject} · "${deck.hookHe}"`,
+    slides: slides.map((s) => ({ ...s, spot: null })),
+  };
 }
 
 main().catch(async (e) => {

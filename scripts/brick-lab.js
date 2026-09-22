@@ -8,6 +8,7 @@ import { renderBrickSlideHtml } from '../src/render/brickSlide.js';
 import { SIZES } from '../src/render/sizes.js';
 import { slideLines } from '../src/brick/copy.js';
 import { writeContactSheet } from './lib/contact-sheet.js';
+import { ROOMS } from './lib/rooms.js';
 
 // Look at the slides.
 //
@@ -30,44 +31,6 @@ import { writeContactSheet } from './lib/contact-sheet.js';
 // common. It is first in the list for that reason.
 
 const OUT = path.join(process.cwd(), 'out', 'brick-lab');
-
-/**
- * A stand-in for a home photograph, as an inline SVG.
- *
- * Not a photograph and not trying to be one. What it reproduces is the thing
- * that decides legibility: the luminance of the region the words land in, and
- * whether there is a hard edge running through it.
- */
-const room = ({ wall, shelf, model, accent, label }) => ({
-  label,
-  src:
-    'data:image/svg+xml;base64,' +
-    Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
-        <defs>
-          <linearGradient id="w" x1="0" y1="0" x2="0.3" y2="1">
-            <stop offset="0" stop-color="${wall}"/>
-            <stop offset="1" stop-color="${shelf}"/>
-          </linearGradient>
-        </defs>
-        <rect width="1080" height="1920" fill="url(#w)"/>
-        <rect x="0" y="1320" width="1080" height="26" fill="${shelf}" opacity="0.8"/>
-        <rect x="0" y="1346" width="1080" height="574" fill="${shelf}"/>
-        <g opacity="0.95">
-          <rect x="300" y="900" width="480" height="420" rx="14" fill="${model}"/>
-          <rect x="360" y="820" width="360" height="90" rx="10" fill="${accent}"/>
-          <circle cx="410" cy="1320" r="52" fill="${accent}"/>
-          <circle cx="670" cy="1320" r="52" fill="${accent}"/>
-        </g>
-      </svg>`
-    ).toString('base64'),
-});
-
-const ROOMS = [
-  room({ label: 'white wall, daylight', wall: '#F4F2EE', shelf: '#DCD6CC', model: '#C8452F', accent: '#2B4C7E' }),
-  room({ label: 'oak shelf, warm lamp', wall: '#C9A97E', shelf: '#8A6A46', model: '#2F6B3C', accent: '#E0C24A' }),
-  room({ label: 'dim bedroom, night', wall: '#2A2E36', shelf: '#171A20', model: '#9C2B2B', accent: '#D8D2C4' }),
-];
 
 // The cases that actually break, not five tidy ones.
 const SLIDES = [
