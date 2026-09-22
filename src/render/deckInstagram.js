@@ -1,4 +1,4 @@
-import { baseCss, escapeHtml as e, palette, pillarAccent, siteMark, SCRIM_INK } from './theme.js';
+import { baseCss, escapeHtml as e, palette, pillarAccent, siteMark, SCRIM_FLAT } from './theme.js';
 import { emojiHtml } from './emojiArt.js';
 
 // The same deck, drawn as a carousel of cards.
@@ -72,9 +72,20 @@ function titleSize(text) {
  * everywhere to fix contrast in two places. The top one carries the header, the
  * bottom one carries the name, and the middle of the picture is left alone.
  *
- * Strength comes from the measured scrim when render/photo.js supplied one, and
+ * Strength comes from the measured scrim that render/deck.js supplies, and
  * otherwise from the card's own fallback — which is sized for the worst
  * photograph there is, and is the right way to be wrong.
+ *
+ * SCRIM_FLAT rather than SCRIM_INK, and the bottom scrim is why: it reaches
+ * 0.97 at the foot of the frame, where the photograph is contributing three
+ * percent and the scrim is the colour of the slide rather than a tint over one.
+ * A palette cast is a tint; at this opacity it is a green rectangle. See the
+ * note on both constants in theme.js.
+ *
+ * The middle stop is a share of the measured strength rather than a constant.
+ * It was 0.86 against a fallback of 0.97, and left as a constant it would put
+ * an 0.86 band ABOVE a measured 0.4 foot — the gradient would run backwards and
+ * the measurement would buy nothing.
  */
 function scrimCss(scrim) {
   const bottom = scrim?.bottom ?? 0.97;
@@ -82,11 +93,13 @@ function scrimCss(scrim) {
   return `
   .scrim-top {
     position: absolute; inset: 0 0 auto 0; height: 34%;
-    background: linear-gradient(to bottom, rgba(${SCRIM_INK},${top}) 0%, rgba(${SCRIM_INK},0) 100%);
+    background: linear-gradient(to bottom, rgba(${SCRIM_FLAT},${top}) 0%, rgba(${SCRIM_FLAT},0) 100%);
   }
   .scrim-bottom {
     position: absolute; inset: auto 0 0 0; height: 58%;
-    background: linear-gradient(to top, rgba(${SCRIM_INK},${bottom}) 0%, rgba(${SCRIM_INK},0.86) 34%, rgba(${SCRIM_INK},0) 100%);
+    background: linear-gradient(to top, rgba(${SCRIM_FLAT},${bottom}) 0%, rgba(${SCRIM_FLAT},${(
+      bottom * 0.89
+    ).toFixed(3)}) 34%, rgba(${SCRIM_FLAT},0) 100%);
   }`;
 }
 

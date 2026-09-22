@@ -35,6 +35,24 @@ export const palette = {
  */
 export const SCRIM_INK = '21,27,26';
 
+/**
+ * The same scrim where it runs as a GROUND rather than as a shadow.
+ *
+ * A third of the saturation is the right answer at the opacities a news card
+ * reaches, because at 0.5 over a photograph the remaining cast is a tint and a
+ * tint should belong to the palette. It is the wrong answer at 0.9 and above.
+ * There the photograph contributes almost nothing, the scrim stops modifying a
+ * colour and becomes one, and "a third of the saturation" is simply a green
+ * that somebody chose — which is what the deck's Instagram slides were showing
+ * across the bottom fifth of every frame.
+ *
+ * So: neutral, at the same relative luminance as SCRIM_INK (0.0102 against
+ * 0.0100 — close enough that photo.js's SCRIM_LUM still sizes these correctly
+ * and does not need a second constant). Used by the deck's Instagram slides,
+ * whose bottom scrim is the one that goes opaque.
+ */
+export const SCRIM_FLAT = '26,26,26';
+
 // Per-pillar accent, so a run of cards reads as one system while still being
 // distinguishable at a glance in the channel.
 export const pillarAccent = {

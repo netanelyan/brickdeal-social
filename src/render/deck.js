@@ -1,7 +1,7 @@
 import { renderToJpeg, cardOutputDir, cardPublicUrl } from './index.js';
 import { renderSlideHtml, SIZES, isStyle, INK_LUMINANCE } from './deckTemplates.js';
 import { renderInstagramSlideHtml } from './deckInstagram.js';
-import { analyseSlides } from './photo.js';
+import { analyseSlides, measureCardScrims } from './photo.js';
 import { findTextRegion } from '../images/textbox.js';
 
 // A deck to files on disk, twice.
@@ -130,16 +130,42 @@ export async function renderDeckSize(deck, { size = 'tiktok', outDir = cardOutpu
     }
   );
 
+  // The scrims, measured off the photograph exactly as a card's are.
+  //
+  // Skipping the placement search for Instagram was deliberate; skipping this
+  // was not, and the two got skipped together. With nothing measured, the
+  // fallbacks in deckInstagram fire on every slide — 0.97 at the foot of the
+  // frame, 0.72 across the top — and those are the constants written for the
+  // worst photograph there is, a white sky. At 0.97 the scrim is no longer a
+  // shadow over the picture, it IS the picture: the bottom fifth of the slide
+  // is a flat field of the scrim's own colour, the photograph contributes three
+  // percent, and whatever cast the scrim has stops being a tint and becomes the
+  // colour of the slide. Six slides of that in a carousel is what "the green"
+  // was.
+  //
+  // Cards have been measuring theirs since render/index.js started doing it.
+  // This is the same call on the same 4:5 frame, so a dark photograph now gets
+  // the light scrim it needs instead of near-black over near-black.
+  const scrims =
+    size === 'instagram'
+      ? await measureCardScrims(items.map((s) => s.image?.src || null)).catch(() => [])
+      : [];
+
   const out = [];
   for (const [i, slide] of items.entries()) {
     const index = i + 1;
+    // Measured or not at all — a slide whose photograph could not be sampled
+    // keeps its image untouched and falls through to the worst-photograph
+    // constants, which is what they are for.
+    const drawn =
+      scrims[i]?.bottom != null ? { ...slide, image: { ...slide.image, scrim: scrims[i] } } : slide;
     // Same content, two design languages. The TikTok slide is built to be read
     // over a video player's furniture with no branding on it; the Instagram one
     // is a card, because it lands in a feed beside our own news cards and
     // should look like the same account made it.
     const html =
       size === 'instagram'
-        ? renderInstagramSlideHtml(slide, {
+        ? renderInstagramSlideHtml(drawn, {
             cover: i === 0,
             style,
             index,
