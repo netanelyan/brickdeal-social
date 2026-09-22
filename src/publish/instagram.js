@@ -50,11 +50,15 @@ export function currentToken() {
 }
 
 export class InstagramError extends Error {
-  constructor(message, { step, code, subcode } = {}) {
+  constructor(message, { step, code, subcode, creationId } = {}) {
     super(message);
     this.step = step;
     this.code = code;
     this.subcode = subcode;
+    // The container this failure happened around, when there was one. Carried on
+    // the error so the caller can hold onto it and ask about it later — see
+    // publishInstagram()'s resume check.
+    this.creationId = creationId;
   }
 }
 
@@ -231,6 +235,11 @@ async function waitForContainer(creationId, { timeoutMs = 60_000, intervalMs = 3
   for (;;) {
     const r = await graph(creationId, { params: { fields: 'status_code,status' }, step: 'container_status' });
     if (r.status_code === 'FINISHED') return;
+    // Already a post. Not one of the states this was written for, and left out
+    // it is the worst one: PUBLISHED is neither FINISHED nor an error, so the
+    // loop polls a container that will never change again and gives up after a
+    // minute — reporting a timeout on a post that is live.
+    if (r.status_code === 'PUBLISHED') return;
     if (r.status_code === 'ERROR' || r.status_code === 'EXPIRED') {
       throw new InstagramError(`container ${r.status_code}: ${r.status || 'no detail'}`, {
         step: 'container_status',
@@ -242,6 +251,75 @@ async function waitForContainer(creationId, { timeoutMs = 60_000, intervalMs = 3
       });
     }
     await new Promise((res) => setTimeout(res, intervalMs));
+  }
+}
+
+/**
+ * Has this container already become a post?
+ *
+ * The one question that separates "Instagram refused" from "Instagram accepted
+ * and then told us it had not". A container carries its own answer — status_code
+ * goes to PUBLISHED once media_publish has taken it — so the post itself can be
+ * asked, rather than inferred from what the failing call happened to say.
+ *
+ * Asked twice. The error that made this necessary was code 4, an app-level
+ * throttle, and a throttle that refused the publish call can refuse the question
+ * about it just as easily; a few seconds is usually the whole difference. Two
+ * attempts and no more, because a bot holding the publish path open waiting for
+ * a throttle to clear is the outage it was trying to avoid.
+ *
+ * Never throws. A verification that cannot be completed must leave the caller
+ * exactly where it was — reporting the original failure — rather than replacing
+ * a wrong answer with a different wrong answer.
+ */
+async function containerPublished(creationId, { attempts = 2, gapMs = 4_000 } = {}) {
+  for (let i = 0; i < attempts; i++) {
+    if (i) await new Promise((res) => setTimeout(res, gapMs));
+    try {
+      const r = await graph(creationId, { params: { fields: 'status_code' }, step: 'publish_verify' });
+      if (r.status_code === 'PUBLISHED') return true;
+      // A definite answer that is not PUBLISHED settles it. Only an error is
+      // worth asking again about.
+      return false;
+    } catch {
+      // Throttled, most likely — the reason we are here at all. Try once more.
+    }
+  }
+  return false;
+}
+
+/**
+ * The last step, and the only one whose failure can be a lie.
+ *
+ * Graph returns "Application request limit reached" (code 4) from media_publish
+ * on posts that went up anyway. Taken at face value that is the worst outcome
+ * the pipeline has: the post is live, the bot says it is not, the card goes back
+ * on the queue as merely delayed, and the retry publishes it a SECOND time. One
+ * true statement from Instagram — the container's own status — costs one GET and
+ * turns all of that into a note.
+ */
+async function publishContainer(igUser, creationId) {
+  try {
+    const published = await graph(`${igUser}/media_publish`, {
+      method: 'POST',
+      params: { creation_id: creationId },
+      step: 'publish',
+    });
+    return { mediaId: published.id };
+  } catch (e) {
+    if (await containerPublished(creationId)) {
+      return {
+        // Graph gives no way back from a creation_id to the media id it became,
+        // and the post being live is the fact that matters. Null rather than a
+        // guess.
+        mediaId: null,
+        notes: [`פורסם למרות שגיאה מ-Graph — ${describeError(e).split('\n')[0]}`],
+      };
+    }
+    // Genuinely not published. The container id travels with the error so the
+    // next attempt can ask about this one before creating another.
+    e.creationId ||= creationId;
+    throw e;
   }
 }
 
@@ -303,13 +381,9 @@ async function publishInstagramCarousel(cand, images) {
 
   await waitForContainer(parent.id);
 
-  const published = await graph(`${igUser}/media_publish`, {
-    method: 'POST',
-    params: { creation_id: parent.id },
-    step: 'publish',
-  });
+  const published = await publishContainer(igUser, parent.id);
 
-  return { mediaId: published.id, creationId: parent.id, slides: images.length, images };
+  return { ...published, creationId: parent.id, slides: images.length, images };
 }
 
 export async function publishInstagram(cand) {
@@ -319,6 +393,22 @@ export async function publishInstagram(cand) {
       { step: 'config' }
     );
   }
+  // Did the LAST attempt at this card already publish it?
+  //
+  // Only ever set by a publish that failed with a container in hand, so on a
+  // first attempt there is nothing here and nothing is asked. On a retry it is
+  // the difference between one post and two: the failure that sends a card back
+  // to the queue is sometimes a failure Instagram reported after publishing, and
+  // the retry has no other way to know that. One GET, before anything is
+  // created, and a card that is already live is reported as live.
+  if (cand.instagramCreationId && (await containerPublished(cand.instagramCreationId, { attempts: 1 }))) {
+    return {
+      mediaId: null,
+      creationId: cand.instagramCreationId,
+      notes: ['כבר היה מפורסם מהניסיון הקודם — לא פורסם שוב'],
+    };
+  }
+
   // A deck arrives here with its Instagram-sized slides already rendered, and
   // takes the carousel path. Everything else is one image, as before.
   const deckImages = cand.deck?.urls?.instagram || [];
@@ -350,11 +440,7 @@ export async function publishInstagram(cand) {
 
   await waitForContainer(created.id);
 
-  const published = await graph(`${igUser}/media_publish`, {
-    method: 'POST',
-    params: { creation_id: created.id },
-    step: 'publish',
-  });
+  const published = await publishContainer(igUser, created.id);
 
-  return { mediaId: published.id, creationId: created.id, imageUrl };
+  return { ...published, creationId: created.id, imageUrl };
 }

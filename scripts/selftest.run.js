@@ -50,9 +50,15 @@ import {
   targetAbandoned as notifyTargetAbandoned,
   publishWaitingForSetup,
   published,
+  platformLimited,
   withDetail,
 } from '../src/notify.js';
-import { describeError, InstagramError, isPlatformLimit as isPlatformLimitInstagram } from '../src/publish/instagram.js';
+import {
+  describeError,
+  InstagramError,
+  isPlatformLimit as isPlatformLimitInstagram,
+  publishInstagram,
+} from '../src/publish/instagram.js';
 import { publishTargets, targetsForKind, allowedForKind, liveTargets } from '../src/publish/targets.js';
 import {
   defaultPrivacy,
@@ -1713,6 +1719,117 @@ ok('and a page throttle', isPlatformLimitInstagram(new InstagramError('x', { cod
 ok('a dead token is not', !isPlatformLimitInstagram(new InstagramError('x', { code: 190 })));
 ok('nor an unfetchable image', !isPlatformLimitInstagram(new InstagramError('x', { code: 9004 })));
 ok('nor a non-Graph failure', !isPlatformLimitInstagram(new Error('network')));
+
+/* -------------------------------------------------------------------------- */
+group('a publish that reports failure on a post that is live');
+
+// The throttle handling above was right and incomplete. Graph returns
+// "Application request limit reached" from media_publish on posts it has
+// already published, and treating that as a wait produced the worst message the
+// bot can send: the post was on Instagram, the bot said it was not, the card
+// went back on the queue as merely delayed, and the retry would have published
+// a second copy.
+//
+// The container knows. status_code goes to PUBLISHED once media_publish has
+// taken it, so the post is asked rather than the failing call believed.
+{
+  const realFetch = globalThis.fetch;
+  const savedEnv = { ...IG };
+  for (const [k, v] of Object.entries(IG)) {
+    savedEnv[k] = process.env[k];
+    process.env[k] = v;
+  }
+
+  const igCand = { card: { url: 'https://cdn.example/card.jpg' }, instagramCaption: 'שלום' };
+  const throttle = {
+    ok: false,
+    status: 400,
+    json: async () => ({
+      error: { message: 'Application request limit reached', code: 4, error_subcode: 2207051 },
+    }),
+  };
+
+  // Graph, in the shape the two publish paths actually call it. The container
+  // poll and the verification both ask for status_code and are told apart the
+  // way the real URLs differ: the poll asks for `status_code,status`.
+  let posted = [];
+  const graphStub = ({ publishFails = true, verify = 'PUBLISHED', containerStatus = 'FINISHED', throttleVerify = 0 } = {}) => {
+    let refused = 0;
+    return async (url, opts = {}) => {
+      const u = String(url);
+      if (u.includes('/media_publish')) {
+        posted.push(u);
+        return publishFails ? throttle : { ok: true, json: async () => ({ id: 'media-1' }) };
+      }
+      if (u.includes('status_code%2Cstatus')) return { ok: true, json: async () => ({ status_code: containerStatus }) };
+      if (u.includes('fields=status_code')) {
+        if (refused++ < throttleVerify) return throttle;
+        return { ok: true, json: async () => ({ status_code: verify }) };
+      }
+      posted.push(u);
+      return { ok: true, json: async () => ({ id: 'container-1' }) };
+    };
+  };
+
+  globalThis.fetch = graphStub({ publishFails: true, verify: 'PUBLISHED' });
+  const rescued = await publishInstagram({ ...igCand }).catch((e) => e);
+  ok('a throttle on a container that did publish is not a failure', !(rescued instanceof Error));
+  eq('the container it published is reported', rescued?.creationId, 'container-1');
+  ok('and it says so, rather than reporting a clean publish', /Graph/.test(rescued?.notes?.[0] || ''));
+  ok('the note carries what Graph actually said', /Application request limit/.test(rescued?.notes?.[0] || ''));
+
+  // The other half, and the one that must not change: a throttle that really
+  // did refuse the publish still throws, is still a platform limit, and still
+  // sends the card back to wait.
+  globalThis.fetch = graphStub({ publishFails: true, verify: 'FINISHED' });
+  const refusedErr = await publishInstagram({ ...igCand }).catch((e) => e);
+  ok('a throttle on a container that did NOT publish still fails', refusedErr instanceof InstagramError);
+  ok('and is still read as a wait rather than a breakage', isPlatformLimitInstagram(refusedErr));
+  eq('the container travels with it, for the retry to ask about', refusedErr?.creationId, 'container-1');
+
+  // The verification runs into the same throttle that caused the problem. One
+  // more ask, a few seconds later, is the whole difference.
+  globalThis.fetch = graphStub({ publishFails: true, verify: 'PUBLISHED', throttleVerify: 1 });
+  const retried = await publishInstagram({ ...igCand }).catch((e) => e);
+  ok('a throttled verification is asked again rather than believed', !(retried instanceof Error));
+
+  // The resume check. This is what stops the second copy.
+  posted = [];
+  globalThis.fetch = graphStub({ publishFails: false, verify: 'PUBLISHED' });
+  const already = await publishInstagram({ ...igCand, instagramCreationId: 'container-1' });
+  ok('a retry of a card that already published posts nothing', !posted.length);
+  ok('and reports it as published rather than as a new post', /כבר/.test(already?.notes?.[0] || ''));
+
+  posted = [];
+  globalThis.fetch = graphStub({ publishFails: false, verify: 'EXPIRED' });
+  const fresh = await publishInstagram({ ...igCand, instagramCreationId: 'container-old' });
+  eq('a retry whose old container never published goes out normally', fresh?.mediaId, 'media-1');
+  ok('which means it created and published one', posted.length === 2);
+
+  // A container that is already a post is not a container still working. Left
+  // out of waitForContainer it polls for a minute and then reports a timeout on
+  // a post that is live.
+  globalThis.fetch = graphStub({ publishFails: false, containerStatus: 'PUBLISHED' });
+  const live = await publishInstagram({ ...igCand }).catch((e) => e);
+  ok('an already-published container is not waited on', !(live instanceof Error));
+
+  globalThis.fetch = realFetch;
+  for (const [k, v] of Object.entries(savedEnv)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+}
+
+// And the message. publishRetrying and publishHeld both name what DID publish;
+// this one did not, so a deck that reached Instagram and was waiting on TikTok's
+// cap was announced as though nothing had gone out.
+{
+  const both = platformLimited('המקדשים של קיוטו', [{ target: 'tiktok', message: 'מכסה יומית' }], null, ['instagram']);
+  ok('a partial publish held on a limit says what published', both.includes('אינסטגרם'));
+  ok('and still says what it is waiting on', both.includes('טיקטוק'));
+  const neither = platformLimited('המקדשים של קיוטו', [{ target: 'tiktok', message: 'מכסה יומית' }]);
+  ok('with nothing published it claims nothing', !neither.includes('📤'));
+}
 
 /* -------------------------------------------------------------------------- */
 group('a deck must be where it says it is');

@@ -206,11 +206,16 @@ export function publishWaitingForSetup(headline, owed, heldCount = 1) {
  * It says when the slot frees, because the only question worth answering here
  * is "so when does it go out".
  */
-export function platformLimited(headline, limited = [], freesAt = null) {
+export function platformLimited(headline, limited = [], freesAt = null, succeeded = []) {
   // The only fact here that changes anything you would do is WHEN it frees.
   const when = freesAt ? ` · מתפנה בעוד ${humanDuration(Math.max(0, freesAt - Date.now()))}` : '';
   const why = limited.map((l) => `${TARGET_HE[l.target] || l.target}: ${l.message}`).join(' · ');
-  return `⏳ ${why}${when} — ${headline}`;
+  // What DID publish, for the same reason publishRetrying and publishHeld say
+  // it: a deck goes to two places, and a message that names only the one still
+  // waiting reads as a post that did not go out. This was the last of the three
+  // to be told.
+  const ok = succeeded.length ? `📤 ${targetsHe(succeeded)} · ` : '';
+  return `⏳ ${ok}${why}${when} — ${headline}`;
 }
 
 /**

@@ -235,7 +235,10 @@ async function backfill(ref) {
       instagram: true,
     });
     store.noteTargetOk('instagram');
-    console.log(`   ✓ published to Instagram (media ${r.mediaId})`);
+    // No media id when the publish came back as an error on a post that had
+    // gone up anyway — the container is what we have, and the notes say why.
+    console.log(`   ✓ published to Instagram (media ${r.mediaId || `container ${r.creationId}`})`);
+    for (const note of r.notes || []) console.log(`     ℹ️ ${note}`);
     return true;
   } catch (e) {
     store.noteTargetFailed('instagram', describeError(e));

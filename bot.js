@@ -813,6 +813,13 @@ async function publishNext(item = null) {
       const detail = (errorText[target] || ((x) => x.message))(e);
       console.error(`publish: ${target} failed:`, detail);
 
+      // Instagram can refuse a publish it has already carried out — see the note
+      // on publishContainer(). When it does, the container id comes back on the
+      // error, and it has to survive onto the queued card: it is the only thing
+      // the retry can ask "is this already live?" with, and without it the retry
+      // posts a second copy of a post that went out fine.
+      if (target === 'instagram' && e?.creationId) cand.instagramCreationId = e.creationId;
+
       // A card this destination can NEVER accept is not an outage, and scoring
       // it as one does real damage.
       //
@@ -939,7 +946,7 @@ async function publishNext(item = null) {
       await notify.send(
         bot.telegram,
         staging,
-        notify.platformLimited(cand.headline, limited, store.tiktokCapFreesAt())
+        notify.platformLimited(cand.headline, limited, store.tiktokCapFreesAt(), succeeded)
       );
     } else {
       await notify.send(
