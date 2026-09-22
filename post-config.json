@@ -1,0 +1,142 @@
+{
+  "_comment": [
+    "How a slideshow post is dressed: the caption line, the hashtags, the type on",
+    "the slides, and which destinations the pipeline leans toward.",
+    "",
+    "Everything here is editorial rather than structural — it is the set of",
+    "decisions that get re-litigated after looking at a week of numbers, so it",
+    "lives in one file you can edit without reading any code. src/postConfig.js",
+    "reads it, validates it, and is the only module that knows this path.",
+    "",
+    "Read once per process and cached, exactly as sources.json and",
+    "destinations.json are. A malformed file throws at first use rather than",
+    "quietly reverting to a default: a post that silently lost its hashtags looks",
+    "identical to a post that never had any."
+  ],
+
+  "caption": {
+    "_comment": [
+      "One of these opens every published slideshow, picked at random per post.",
+      "",
+      "Short, emotional, and asking for nothing. The old caption was a call to",
+      "action with a URL under it, and an external link in a TikTok description",
+      "is a demotion — the link belongs in the bio, where it is also the only",
+      "tappable route either platform offers.",
+      "",
+      "No brand name and no CTA by rule, and no URL by enforcement: format.js",
+      "refuses to hand a caption containing one to the approval queue, so a line",
+      "added here with a domain in it fails loudly at build time rather than",
+      "being published."
+    ],
+    "lines": [
+      "מקומות שנראים לא אמיתיים",
+      "יעד לרשימה",
+      "הייתם טסים לשם?",
+      "זה קיים באמת",
+      "צבעים שלא ראיתם",
+      "עוד שנייה מזמינים",
+      "נראה כמו ציור",
+      "פשוט קסם",
+      "לא מאמינים שזה אמיתי",
+      "הלב נשאר שם",
+      "רוצים לקום ולטוס",
+      "יש מקומות כאלה",
+      "בול בשביל החלומות",
+      "כאן הייתי נשאר",
+      "תגידו לי שזה אמיתי",
+      "אחד כזה ברשימה",
+      "בוקר אחד שם",
+      "הנוף עוצר נשימה",
+      "מי בא איתי?",
+      "עולם אחר לגמרי"
+    ]
+  },
+
+  "hashtags": {
+    "_comment": [
+      "Exactly `broadCount + nicheCount` tags under every post — five, by default.",
+      "",
+      "Broad tags buy the first impressions and niche tags decide who the post is",
+      "then shown to, so the split matters more than the total. Two and three is",
+      "the mix this account is testing.",
+      "",
+      "`useDestination` spends ONE of the niche slots on a tag generated from the",
+      "deck's own country — #פורטוגל on a Portugal deck — rather than adding a",
+      "sixth tag. The count stays exactly five either way; when the deck's country",
+      "cannot be resolved the slot falls back to the niche pool."
+    ],
+    "broad": ["#fyp", "#foryou", "#פוריו", "#ויראלי"],
+    "niche": ["#טיולים", "#חופשה", "#טיפיםלטיול", "#יעדים", "#מטיילים"],
+    "broadCount": 2,
+    "nicheCount": 3,
+    "useDestination": true
+  },
+
+  "overlay": {
+    "_comment": [
+      "The type on a TikTok slide. Small, light, off to one side — a caption",
+      "somebody typed on their own photograph, not a graphic laid over stock.",
+      "",
+      "`sizePct` is measured against `sizeBasis`, and the basis is the frame's",
+      "WIDTH rather than its height. Three percent of 1080 is 32px, which is the",
+      "size this was specified at; three percent of a 1920-tall frame would be",
+      "58px, which is very nearly what it already was. Set sizeBasis to \"height\"",
+      "if you want the other reading.",
+      "",
+      "`bands` are the vertical thirds the text is allowed into, as fractions of",
+      "the frame, and `x` pins it to the left. The placement search still runs —",
+      "it decides which of the two bands the photograph can actually carry, and",
+      "what colour the type has to be — but it can no longer land in the middle.",
+      "",
+      "`assist` is the soft elliptical wash that fades in only when the measured",
+      "contrast was not enough on its own. It is not a background box and cannot",
+      "become one; turn it off and a slide over a busy frame ships illegible."
+    ],
+    "sizePct": 0.03,
+    "sizeBasis": "width",
+    "coverSizePct": 0.034,
+    "weight": 400,
+    "opacity": 0.9,
+    "shadow": "0 1px 3px rgba(0,0,0,0.38)",
+    "maxLines": 2,
+    "align": "left",
+    "x": 0.3,
+    "width": 0.44,
+    "bands": {
+      "upper": [0.2, 0.36],
+      "lower": [0.6, 0.78]
+    },
+    "assist": true
+  },
+
+  "destinations": {
+    "_comment": [
+      "Where this account's audience actually flies, weighted.",
+      "",
+      "destinations.json is 102 places chosen for the same reason, but it is a",
+      "flat list: the idea generator saw Reykjavik and Athens as equally likely",
+      "and the climate rotation reached them in calendar order. Weighting is what",
+      "turns 'we cover these' into 'we lead with these'.",
+      "",
+      "Keyed on the Hebrew country name exactly as destinations.json spells it.",
+      "A country not listed here gets `defaultWeight`, so this file never has to",
+      "be complete — adding a country raises it, removing one does not ban it.",
+      "Long-haul and cold destinations are deliberately left at the default",
+      "rather than zeroed: they are worth a post occasionally, just not a post",
+      "ahead of Greece."
+    ],
+    "defaultWeight": 1,
+    "weights": {
+      "יוון": 10,
+      "קפריסין": 9,
+      "גאורגיה": 9,
+      "איטליה": 8,
+      "תאילנד": 8,
+      "יפן": 7,
+      "פורטוגל": 7,
+      "ספרד": 7,
+      "וייטנאם": 6,
+      "צ׳כיה": 6
+    }
+  }
+}

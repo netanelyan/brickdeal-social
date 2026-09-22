@@ -8,6 +8,7 @@ import {
   escapeHtml,
 } from './theme.js';
 import { emojiHtml } from './emojiArt.js';
+import { postConfig } from '../postConfig.js';
 
 // Slideshow slides, set the way the two accounts this channel is modelled on
 // set them.
@@ -87,10 +88,71 @@ export const INK_LUMINANCE = { info: 0.772, minimal: null };
 // One weight across both styles. The old table ran minimal at 600 and info at
 // 800, which made the same deck's two styles look like two accounts — and the
 // weight difference was doing work that the field list already does.
+//
+// The weight now comes from post-config.json rather than from here — 600 is a
+// semibold, and a semibold place name over a photograph is the single loudest
+// thing on the slide. The default is 400. These stay as the shape of the table
+// and as the fallback for a config that does not answer.
 export const FACES = {
   minimal: { family: 'Arimo', name: 600, note: 600, cover: 600 },
   info: { family: 'Arimo', name: 600, field: 600, cover: 600 },
 };
+
+/**
+ * The type scale for one frame, resolved from post-config.json.
+ *
+ * `sizeBasis` is the frame's WIDTH by default, and that choice is the whole
+ * reason this is a function rather than four constants. "Three percent" of a
+ * 1080x1920 frame is 32px against the width and 58px against the height — an
+ * eightfold difference in how loud the slide is — and 32px is the size these
+ * slides were specified at. Set sizeBasis to "height" in the config for the
+ * other reading; nothing else has to change.
+ *
+ * The length steps stay proportional rather than absolute, so a long name still
+ * steps down and the whole scale still moves with one number.
+ */
+export function typeScale({ w, h }) {
+  const ov = postConfig().overlay;
+  const basis = ov.sizeBasis === 'height' ? h : w;
+  const body = Math.max(10, Math.round(basis * ov.sizePct));
+  const cover = Math.max(10, Math.round(basis * ov.coverSizePct));
+  const step = (px, f) => Math.max(10, Math.round(px * f));
+  return {
+    ov,
+    body,
+    bodyMid: step(body, 0.94),
+    bodyLong: step(body, 0.86),
+    note: step(body, 0.82),
+    field: step(body, 0.9),
+    fieldLong: step(body, 0.8),
+    cover,
+    coverMid: step(cover, 0.92),
+    coverLong: step(cover, 0.84),
+    coverXlong: step(cover, 0.76),
+    // Scaled off the type rather than off the frame. The bronze outline was
+    // sized for 68px letters at max(3px, h*0.0028); at 32px the same stroke
+    // closes the counters and the name becomes a blob.
+    stroke: Math.max(1, Math.round(body * 0.055)),
+  };
+}
+
+/**
+ * Flush left, in a script that runs right to left.
+ *
+ * `.block` is a flex COLUMN, so its cross axis is horizontal and the direction
+ * property decides which end is which: under `direction: rtl`, flex-start is
+ * the RIGHT edge and flex-end is the left. So pinning the words to the physical
+ * left of the frame — which is what "upper-left or lower-left third" asks for —
+ * is align-items: flex-end, and getting that backwards puts a left-placed block
+ * of text against its own right edge, in the middle of the picture.
+ */
+const alignment = (align) =>
+  align === 'right'
+    ? { items: 'flex-start', text: 'right' }
+    : { items: 'flex-end', text: 'left' };
+
+/** One configured weight, applied to every role on the slide. */
+const weightsFrom = (ov) => ({ name: ov.weight, note: ov.weight, field: ov.weight, cover: ov.weight });
 
 // The Hebrew face, overridable.
 //
@@ -106,8 +168,17 @@ export const FACES = {
 // chosen it becomes the default and the seam stays, because the question will
 // come back the next time somebody looks at an Android screenshot.
 const css = ({ w, h, topSafe, bottomSafe }, style, font = null, size = 'tiktok') => {
-  const face = { ...(FACES[style] || FACES.minimal), ...(font?.weights || {}) };
+  const t = typeScale({ w, h });
+  const ov = t.ov;
+  const align = alignment(ov.align);
+  // The configured weight wins over the table, and the table is the fallback
+  // for a font-lab run that supplies its own weights.
+  const face = { ...(FACES[style] || FACES.minimal), ...weightsFrom(ov), ...(font?.weights || {}) };
   const family = font?.family || face.family;
+  // Two lines and no more, in the one declaration that can enforce it. Clamping
+  // is what stops a long Hebrew name becoming four lines of small type, which
+  // is the shape that reads as a caption card rather than as a caption.
+  const clamp = `display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: ${ov.maxLines}; overflow: hidden;`;
   return `
 @font-face {
   font-family: 'Heebo';
@@ -241,33 +312,61 @@ body {
   filter: blur(${Math.round(h * 0.022)}px);
 }
 
+/* Flush to one side, never centred.
+
+   Centred type over a photograph is the arrangement every brand template uses
+   and almost no person does, and it was most of why these slides read as an
+   advertisement: dead centre is where the subject of the picture is, so centred
+   words are words ON the subject, in the one position that cannot look
+   incidental.
+
+   The side is a config value and the inversion is explained at alignment() —
+   under direction: rtl, flex-END is the physical left.
+
+   Held below full opacity as well. At 100% white the type is brighter than
+   anything in the photograph including the sky, which is what makes it read as
+   a layer rather than as part of the frame; a little transparency puts it back
+   into the picture without costing legibility, because the shadow underneath is
+   doing that work. */
 .block {
   position: absolute;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  align-items: ${align.items};
+  text-align: ${align.text};
   transform: translateY(-50%);
+  opacity: ${ov.opacity};
 }
 
 /* --- minimal ------------------------------------------------------------ */
 
-/* The reference sets a place name at roughly 2.5% of the frame height. That is
-   much smaller than feels right in a design tool and exactly right in a feed:
-   it reads as somebody captioning their own photograph rather than as a graphic
-   laid over stock. */
-/* Tight leading, and tighter than feels right in isolation.
+/* Every size on this slide comes from one number in post-config.json.
 
-   A place name that wraps to two lines was set at 1.2 and the gap between the
-   two halves of one name read as a gap between two separate thoughts. Hebrew
-   has almost no descenders, so it takes far less leading than a Latin face
-   needs before lines start to collide — 1.06 keeps a wrapped name reading as
-   one object, which is what it is. */
+   It used to be a column of hand-tuned fractions of the frame HEIGHT — 0.0265
+   for a name, 0.025 and 0.0225 for the two length steps, four more for the
+   cover — which meant "make the type smaller" was an edit to nine literals in
+   this file and a judgement call about each one. They are now one percentage
+   and a set of ratios off it, so the scale moves together and the decision is
+   editable by somebody who is not reading this file.
+
+   At the default the name sets at 32px on a 1080-wide frame, against 51px
+   before. That is a large change and it is the intended one: the old size was
+   read off reference slides at a moment when the type was also outlined and
+   centred, and all three together are what made these read as a graphic laid
+   over stock rather than as somebody captioning their own photograph.
+
+   The leading opens up as the type shrinks, which is the opposite of what the
+   old comment here reasoned — and both are right. 0.98 was holding a 51px name
+   together across a wrap; at 32px the same ratio collides the two lines of a
+   name, because the absolute gap is what the eye reads and it has been cut by a
+   third. Tracking goes back to zero for the same reason: -0.2px is invisible at
+   51px and a visible tightening at 32px. */
 .name {
-  font-size: ${Math.round(h * 0.0265)}px;
+  font-size: ${t.body}px;
   font-weight: ${face.name};
-  line-height: 0.98;
-  letter-spacing: -0.2px;
+  line-height: 1.12;
+  letter-spacing: 0;
+  ${clamp}
 }
 /* The flag sits at the END of the name, inline, not on a line of its own.
    Inline means it wraps with the text and stays part of the name; a line of its
@@ -278,8 +377,8 @@ body {
    and thirty characters carried a class that styled nothing and set at full
    size, which is exactly the length at which a Hebrew place name starts to
    wrap. */
-.name.mid { font-size: ${Math.round(h * 0.025)}px; }
-.name.long { font-size: ${Math.round(h * 0.0225)}px; }
+.name.mid { font-size: ${t.bodyMid}px; }
+.name.long { font-size: ${t.bodyLong}px; }
 
 /* No .flag block any more — see .name .emoji above. The reference puts the flag
    on its own line and it was copied faithfully; in Hebrew, at this size, it
@@ -292,12 +391,12 @@ body {
 .note {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: ${align.text === 'left' ? 'flex-end' : 'flex-start'};
   gap: 0.3em;
-  margin-top: ${Math.round(h * 0.008)}px;
-  font-size: ${Math.round(h * 0.0205)}px;
+  margin-top: ${Math.round(t.body * 0.34)}px;
+  font-size: ${t.note}px;
   font-weight: ${face.note};
-  line-height: 1.04;
+  line-height: 1.12;
   opacity: 0.96;
 }
 
@@ -312,25 +411,26 @@ body {
    that forced .field to use flex does not arise here, because at the END of an
    RTL line — which is its left — is exactly where a trailing image belongs. */
 .title-info {
-  font-size: ${Math.round(h * 0.0315)}px;
+  font-size: ${t.body}px;
   font-weight: ${face.name};
-  line-height: 0.98;
-  letter-spacing: -0.3px;
+  line-height: 1.12;
+  letter-spacing: 0;
   text-wrap: balance;
+  ${clamp}
 }
 .title-info .emoji { margin-inline-start: 0.28em; }
-.title-info.mid { font-size: ${Math.round(h * 0.0295)}px; }
-.title-info.long { font-size: ${Math.round(h * 0.027)}px; }
+.title-info.mid { font-size: ${t.bodyMid}px; }
+.title-info.long { font-size: ${t.bodyLong}px; }
 
 /* A clear blank line between the name and the numbers, exactly as the
    reference has it. This is the ONLY generous gap on the slide; everywhere else
    the leading does the work, which is what keeps four fields reading as one
    block instead of four separate thoughts. */
 .fields {
-  margin-top: ${Math.round(h * 0.022)}px;
+  margin-top: ${Math.round(t.body * 0.7)}px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: ${align.items};
 }
 /* Laid out as a flex row rather than as a line of text, and that is a fix
    rather than a preference.
@@ -344,39 +444,40 @@ body {
 .field {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: ${align.text === 'left' ? 'flex-end' : 'flex-start'};
   gap: 0.32em;
-  font-size: ${Math.round(h * 0.0265)}px;
+  font-size: ${t.field}px;
   font-weight: ${face.field ?? face.name};
-  line-height: 1.1;
+  line-height: 1.24;
   white-space: nowrap;
 }
-.field.long { font-size: ${Math.round(h * 0.023)}px; }
+.field.long { font-size: ${t.fieldLong}px; }
 
 /* --- cover -------------------------------------------------------------- */
 
+/* A hair larger than a place name and no more — overlay.coverSizePct against
+   overlay.sizePct, 34 against 32 by default.
+
+   The cover used to be set a third larger again, and differently per style, on
+   the theory that the first slide is a title card. It is not: it is the frame
+   somebody decides in half a second whether to swipe past, and type that fills
+   a third of it is what tells them it is an advertisement. The four length
+   steps stay, because a cover is a sentence and sentences vary; they are ratios
+   off the one number now rather than eight more fractions of the frame.
+
+   Clamped to the same two lines as everything else. A cover that needs three is
+   a cover that needs rewriting, and the truncation is the signal. */
 .cover {
   font-weight: ${face.cover};
-  /* Below 1, which looks alarming written down and is right for this script.
-     Hebrew has no ascenders on most letters and descenders on four, so a font's
-     default line box carries a band of empty air above every line; 1.06 still
-     left the four lines of a cover reading as four separate sentences. The
-     cap-to-cap distance at 0.94 is about what 1.15 gives a Latin face. */
-  line-height: 0.94;
-  letter-spacing: -0.5px;
-  font-size: ${Math.round(h * (style === 'info' ? 0.042 : 0.0355))}px;
+  line-height: 1.16;
+  letter-spacing: 0;
+  font-size: ${t.cover}px;
   text-wrap: balance;
+  ${clamp}
 }
-/* Three steps down by length, and the whole scale a notch below where it was.
-   A cover is a caption on a photograph, not a poster over it: set at the old
-   sizes a two-line title filled a third of the frame and the picture became a
-   background. The fourth step exists because covers got longer when they
-   started naming the country - "המפלים הכי יפים באיסלנד" is four characters
-   more than "המפלים הכי יפים", and that is exactly the width at which a line
-   used to break badly. */
-.cover.mid { font-size: ${Math.round(h * (style === 'info' ? 0.037 : 0.0315))}px; }
-.cover.long { font-size: ${Math.round(h * (style === 'info' ? 0.032 : 0.0275))}px; }
-.cover.xlong { font-size: ${Math.round(h * (style === 'info' ? 0.028 : 0.024))}px; }
+.cover.mid { font-size: ${t.coverMid}px; }
+.cover.long { font-size: ${t.coverLong}px; }
+.cover.xlong { font-size: ${t.coverXlong}px; }
 
 /* Hebrew has no capitals, so the one word the reference covers shout — "you
    HAVE to visit WYOMING" — is carried by colour instead.
@@ -446,12 +547,21 @@ function ink(spot, style, { cover = false } = {}) {
   // if every word is cream, no word is shouted.
   const colour = spot?.color || '#FFFFFF';
 
-  // Dark type over a pale photograph needs the opposite of a drop shadow: a
-  // faint halo of the background's own brightness, which separates the letters
-  // from a busy pale field without ever looking like a glow.
+  // One configured drop shadow, and it is meant to be barely visible.
+  //
+  // This was two stacked shadows whose radius and opacity both scaled with the
+  // measured shortfall — up to a 26px spread at 0.64 alpha, which is not a
+  // shadow, it is a dark halo the size of the word. That was doing legibility
+  // work that now has a better owner: `assist` measures the same shortfall and
+  // fades a soft wash in behind the block, and the type colour still flips to
+  // near-black over a genuinely pale frame.
+  //
+  // Dark type over a pale photograph keeps the inverse treatment — a faint halo
+  // of the background's own brightness — because a black drop shadow under
+  // near-black letters separates nothing.
+  const light = String(postConfig().overlay.shadow);
   const shadow = onDark
-    ? `0 1px ${2 + Math.round(force * 2)}px rgba(0,0,0,${(0.26 + force * 0.34).toFixed(2)}), ` +
-      `0 2px ${14 + Math.round(force * 12)}px rgba(0,0,0,${(0.3 + force * 0.34).toFixed(2)})`
+    ? light
     : `0 1px 2px rgba(255,255,255,${(0.4 + force * 0.3).toFixed(2)}), ` +
       `0 2px ${12 + Math.round(force * 10)}px rgba(255,255,255,${(0.36 + force * 0.34).toFixed(2)})`;
 
@@ -508,6 +618,11 @@ const photoTag = (image) =>
  * measured contrast was not enough on its own.
  */
 function assistTag(spot, { w, h }, blockH) {
+  // Switchable, and off means off. It is a soft-edged radial fade rather than a
+  // panel — there is no box on these slides and this is not one — but it is the
+  // only thing on the frame that puts anything behind the words, so the switch
+  // for "nothing behind the words, ever" belongs here.
+  if (!postConfig().overlay.assist) return '';
   const strength = spot?.assist || 0;
   if (strength < 0.06) return '';
 
@@ -542,11 +657,24 @@ function assistTag(spot, { w, h }, blockH) {
 export function renderSlideHtml(slide, { size = 'tiktok', cover = false, style = 'minimal', spot = null, font = null } = {}) {
   const s = SIZES[size] || SIZES.tiktok;
   const { w, h } = s;
+  const t = typeScale(s);
+  const ov = t.ov;
 
   // A sane default when measurement was unavailable — no photograph, or an
-  // image that would not decode. Centre-left, white, which is the safest guess
-  // over the gradient placeholder.
-  const place = spot || { x: 0.5, y: 0.5, width: 0.8, color: '#FFFFFF', onDark: true, assist: 0, accent: null };
+  // image that would not decode. The configured column, in the upper band,
+  // white: the same place a measured slide would have put it, so an unmeasured
+  // slide in a deck does not visibly jump out of the series. It used to fall
+  // back to dead centre at 0.8 of the frame width, which is the one arrangement
+  // the rest of this file exists to avoid.
+  const place = spot || {
+    x: ov.x,
+    y: (ov.bands.upper[0] + ov.bands.upper[1]) / 2,
+    width: ov.width,
+    color: '#FFFFFF',
+    onDark: true,
+    assist: 0,
+    accent: null,
+  };
 
   const blockH = slide.blockH || (cover ? 0.16 : style === 'info' ? 0.22 : 0.1);
 
@@ -566,10 +694,9 @@ export function renderSlideHtml(slide, { size = 'tiktok', cover = false, style =
   // frame the emphasis goes to a deep amber instead, which is legible there for
   // the same reason cream is not.
   const accent = place.accent || (place.onDark === false ? '#8A5300' : CREAM);
-  const vars = [
-    `--accent:${accent}`,
-    `--stroke:${Math.max(3, Math.round(h * 0.0028))}px`,
-  ].join(';');
+  // Sized off the type, not off the frame — see typeScale. A stroke that was
+  // right around 68px letters closes the counters of 32px ones.
+  const vars = [`--accent:${accent}`, `--stroke:${t.stroke}px`].join(';');
 
   let body;
   if (cover) {

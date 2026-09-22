@@ -14,7 +14,9 @@ import * as store from '../src/store.js';
 import { candidateId, tripGap } from '../src/candidate.js';
 import { renderHtml, LAYOUTS, PHOTO_LAYOUTS, isPhotoLayout, SCRIM_FALLBACK } from '../src/render/templates.js';
 import { assertGenericAiPrompt, ImagePolicyError, imageQueries } from '../src/images.js';
-import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, deckTiktokCaption, evidenceReport, deckApprovalMessage } from '../src/format.js';
+import { approvalMessage, instagramCaption, tiktokCaption, deckCaption, deckTiktokCaption, evidenceReport, deckApprovalMessage, captionHook, assertNoUrl, URL_LIKE } from '../src/format.js';
+import { postConfig, byWeight, destinationWeight } from '../src/postConfig.js';
+import { hashtagsFor, destinationTag } from '../src/hashtags.js';
 import { renderSlideHtml, SIZES, sizeClass, INK_LUMINANCE, FACES } from '../src/render/deckTemplates.js';
 import { renderInstagramSlideHtml } from '../src/render/deckInstagram.js';
 import { sizesFor } from '../src/deck/candidate.js';
@@ -2023,7 +2025,11 @@ const deckEv = evidenceReport(deckFixture);
 ok('evidence is grouped per slide, not flattened', deckEv.includes('המוזיאון הלאומי') && deckEv.includes('Admission 250 CZK'));
 ok('with the page each quote came from', deckEv.includes('nm.cz'));
 
-const dcap = deckCaption(deckFixture.deck);
+// A fixed hook, so the assertions below are about the shape of the caption
+// rather than about which of twenty lines came up. The randomness itself is
+// tested in its own group further down.
+const HOOK = postConfig().caption.lines[0];
+const dcap = deckCaption(deckFixture.deck, { hook: HOOK });
 // The title and the shoutout, nothing else. This used to carry the angle and
 // then every place, numbered — the deck retyped underneath the deck. Anyone
 // who wants the list swipes; what the description is for is saying what this
@@ -2032,27 +2038,39 @@ const dcap = deckCaption(deckFixture.deck);
 // Two descriptions, because one platform has a title field and the other does
 // not. Repeating the title in TikTok's description spends the first line of the
 // only place a link can be asked for on a line already read two centimetres up.
-eq('TikTok gets the shoutout alone', deckTiktokCaption().split('\n')[0], 'למתכנן טיולים חכם בביו שלנו');
-ok('and never the title', !deckTiktokCaption().includes('פראג'));
-ok('the caption is the title', dcap.startsWith('המוזיאונים של פראג'));
+const dtik = deckTiktokCaption(deckFixture.deck, { hook: HOOK });
+eq('TikTok opens on the line, not on a call to action', dtik.split('\n')[0], HOOK);
+ok('and never the title', !dtik.includes('פראג'));
+ok('the Instagram caption is the title', dcap.startsWith('המוזיאונים של פראג'));
 ok('and does not list the places', !dcap.includes('1. המוזיאון'));
 ok('and drops the angle', !dcap.includes('מה פתוח'));
 
-// A deck publishes to Instagram and TikTok, and neither makes a caption link
-// tappable — so it asks for the bio, which is the only clickable route either
-// platform offers. The card signature still points at the URL; a card's caption
-// is read somewhere a URL is worth printing.
-ok('a deck caption asks for the bio', dcap.includes('בביו'));
-ok('and still carries the domain for recall', dcap.includes('www.tiyulplus.com'));
+// NOTHING published under a slideshow carries a URL, and this is the assertion
+// that used to say the opposite.
+//
+// The old caption was "למתכנן טיולים חכם בביו שלנו" over "www.tiyulplus.com",
+// and the domain was defended here as being worth carrying for recall. It is
+// not: an external domain in a TikTok description is a demotion, the string was
+// never tappable on either platform, and the bio link is reachable from the
+// post regardless. The card signature still prints a URL — a card's caption is
+// read somewhere a URL is worth printing — which is why this rule is enforced
+// per deck rather than globally.
+ok('a deck caption carries no domain', !dcap.includes('tiyulplus.com'));
+ok('nor does the TikTok description', !dtik.includes('tiyulplus.com'));
+ok('and neither asks for anything', !dcap.includes('בביו') && !dtik.includes('בביו'));
+ok('nor names the brand', !dcap.includes('טיול+') && !dtik.includes('טיול+'));
 
-// The "always" in "always ends with the call to action", which the old version
-// could not keep. It built the whole string and sliced it to 2200, so on a long
-// deck the signature was what fell off the end — and a deck with many places is
-// exactly the one that runs long. The truncation read as a finished caption
-// that had simply stopped asking anyone to go anywhere.
-const longCap = deckCaption({ idea: { angleHe: 'א'.repeat(2500) }, slides: [{ nameHe: 'מקדש א' }] });
+// The "always" in "always ends with the hashtags", which the old version could
+// not keep for the thing it was reserving space for. It built the whole string
+// and sliced it to 2200, so on a long deck the last block was what fell off the
+// end — and the last block is now what the post is filed under.
+const longCap = deckCaption(
+  { titleHe: 'א'.repeat(2500), slides: [{ nameHe: 'מקדש א' }] },
+  { hook: HOOK }
+);
 ok('a caption over the limit is still within it', longCap.length <= 2200);
-ok('and the call to action survives being over the limit', longCap.endsWith('בביו שלנו\nwww.tiyulplus.com'));
+ok('and the tags survive being over the limit', longCap.trimEnd().endsWith(longCap.trim().split('\n').pop()));
+eq('which is five of them', longCap.trim().split('\n').pop().split(' ').length, 5);
 
 // A slide is a numbered NAME, and fields only where the category has them.
 // Never a sentence: prose on a slide is what made these read like a guidebook,
@@ -2085,10 +2103,14 @@ const flagged = renderSlideHtml(
 ok('the flag sits inside the name', /class="name[^"]*">[^<]*החוף האדום[^<]*<img/.test(flagged));
 ok('and there is no separate flag line', !flagged.includes('class="flag"'));
 
-// Leading, which is the thing that was wrong twice. Hebrew has almost no
-// descenders and takes far less than a Latin face; at 1.2 a wrapped place name
-// read as two separate thoughts rather than one name.
-ok('a wrapped name is set tight', flagged.includes('line-height: 0.98'));
+// Leading, which is the thing that has now been wrong three times and in both
+// directions. Hebrew has almost no descenders and takes less than a Latin face,
+// so at 1.2 a wrapped place name set at 51px read as two separate thoughts —
+// and at 0.98 the same name set at 32px collides with itself, because the gap
+// the eye reads is absolute and the type is a third smaller. Sub-1 leading is
+// now the bug rather than the fix.
+ok('a wrapped name is not set sub-1', !flagged.includes('line-height: 0.98'));
+ok('it has room to wrap', /\.name \{[^}]*line-height: 1\.1/s.test(flagged));
 
 // The country is named only when the deck spans countries; in a one-city deck
 // every slide would repeat the same word.
@@ -2252,8 +2274,16 @@ ok(
   'no style asks for a weight the file does not have',
   [FACES.minimal, FACES.info].every((f) => Object.values(f).filter((v) => typeof v === 'number').every((w) => w === 600))
 );
-ok('the weight reaches the stylesheet', placed.includes(`font-weight: ${FACES.minimal.name};`));
-ok('and the info weight does too', slideHtml.includes(`font-weight: ${FACES.info.name};`));
+// ...and the weight that reaches the stylesheet is no longer either of them.
+//
+// FACES is now the shape of the table and the fallback for a font-lab run that
+// supplies its own weights; the weight an actual slide is set in comes from
+// post-config.json, because 600 is a semibold and a semibold place name over a
+// photograph is the loudest thing on the slide.
+const cfgWeight = postConfig().overlay.weight;
+ok('the configured weight reaches the stylesheet', placed.includes(`font-weight: ${cfgWeight};`));
+ok('and it reaches the info style too', slideHtml.includes(`font-weight: ${cfgWeight};`));
+ok('the table weight no longer does', !placed.includes(`font-weight: ${FACES.minimal.name};`));
 
 // The wash behind the text is the last resort and has to stay rare, or every
 // slide grows a panel and the look is gone.
@@ -2871,7 +2901,10 @@ for (const [mod, expected] of [
   ['../src/deck/facts.js', ['factsFor', 'countryFor', 'enoughFor', 'applyCountryVisibility', 'lengthValue', 'yearValue']],
   ['../src/render/deck.js', ['renderDeck', 'renderDeckSize', 'slideStem']],
   ['../src/render/photo.js', ['analyseSlides', 'measureCardScrims', 'scrimAlpha', 'underScrim']],
-  ['../src/render/deckTemplates.js', ['renderSlideHtml', 'SIZES', 'FACES', 'INK_LUMINANCE']],
+  ['../src/render/deckTemplates.js', ['renderSlideHtml', 'SIZES', 'FACES', 'INK_LUMINANCE', 'typeScale']],
+  ['../src/postConfig.js', ['postConfig', 'destinationWeight', 'byWeight']],
+  ['../src/hashtags.js', ['hashtagsFor', 'hashtagLine', 'destinationTag']],
+  ['../src/format.js', ['captionHook', 'assertNoUrl', 'URL_LIKE', 'deckCaption', 'deckTiktokCaption']],
   ['../src/deck/attempt.js', ['buildWithFallback', 'describeAttempt']],
   ['../src/deck/request.js', ['resolveRequest', 'parseLocally']],
   ['../src/deck/hebrew.js', ['hebrewNames', 'isHebrew']],
@@ -3233,6 +3266,183 @@ eq('a zero-width region yields no mask', photoTest.maskFromBox({ x0: 0.5, y0: 0.
 ok('a box under the button rail is penalised', photoTest.railOverlap(0.8, 0.6, 0.4, 0.2) > 0);
 ok('one above it is not', photoTest.railOverlap(0.8, 0.2, 0.4, 0.1) === 0);
 ok('nor one away to the left', photoTest.railOverlap(0.3, 0.6, 0.4, 0.2) === 0);
+
+// Confinement — the measurement still runs, it just no longer gets to answer
+// "the middle".
+//
+// This is the assertion the whole change rests on. The free search is a good
+// answer to "put the words where the photograph is quietest" and the wrong
+// answer to "put them in the upper-left or lower-left third": on a landscape
+// the quietest region IS the middle of the sky, so left as it was it would
+// keep choosing dead centre and the config would be decoration.
+{
+  // A frame that is uniformly calm everywhere, so nothing but the confinement
+  // can decide where the block lands. Any bias in the scorer would show up as a
+  // centre or right-hand answer.
+  const flat = { lum: new Array(45 * 80).fill(0.08), sat: new Array(45 * 80).fill(0), hue: new Array(45 * 80).fill(0) };
+  const ov = postConfig().overlay;
+  const args = { topSafe: 300 / 1920, bottomSafe: 400 / 1920, blockH: 0.08, blockW: ov.width };
+
+  const free = photoTest.place(flat, args);
+  const held = photoTest.place(flat, {
+    ...args,
+    confine: { x: ov.x, width: ov.width, bands: [ov.bands.upper, ov.bands.lower] },
+  });
+
+  ok('unconfined, the search can land anywhere', free !== null);
+  ok('confined, it still finds a spot', held !== null);
+  eq('and the spot is in the configured column', held.cx, ov.x);
+  ok('which is the left third of the frame', held.cx < 0.4);
+  ok(
+    'and in one of the two allowed bands',
+    (held.cy >= ov.bands.upper[0] - 0.05 && held.cy <= ov.bands.upper[1] + 0.05) ||
+      (held.cy >= ov.bands.lower[0] - 0.05 && held.cy <= ov.bands.lower[1] + 0.05),
+    `cy=${held.cy}`
+  );
+  ok('never the middle of the frame', Math.abs(held.cy - 0.5) > 0.1);
+
+  // A hint aims candidates at wherever the sky actually is, which is exactly
+  // the freedom being withdrawn — and a hint candidate carries its own cx, so
+  // honouring one would walk straight out of the allowed column.
+  const hinted = photoTest.place(flat, {
+    ...args,
+    confine: { x: ov.x, width: ov.width, bands: [ov.bands.upper, ov.bands.lower] },
+    hint: { x0: 0.6, y0: 0.44, x1: 0.98, y1: 0.56 },
+  });
+  eq('a hint cannot drag a confined block out of its column', hinted.cx, ov.x);
+}
+
+/* -------------------------------------------------------------------------- */
+group('post-config — the caption, the tags, and where the account leans');
+
+// The whole reason this file exists: every one of these was a literal in a
+// module, and every one of them is a decision that gets revisited after looking
+// at a week of numbers.
+
+const pcfg = postConfig();
+
+// The caption pool. Short, emotional, asking for nothing — and above all not a
+// template, because one opening line across twenty posts IS a template and the
+// template is what the old signature was.
+ok('there is a pool, not a line', pcfg.caption.lines.length >= 10);
+ok(
+  'every line is short enough to read before the picture does',
+  pcfg.caption.lines.every((l) => l.split(/\s+/).length <= 6),
+  pcfg.caption.lines.find((l) => l.split(/\s+/).length > 6)
+);
+ok('and none of them carries a URL', pcfg.caption.lines.every((l) => !URL_LIKE.test(l)));
+ok('nor the brand name', pcfg.caption.lines.every((l) => !l.includes('טיול+') && !l.includes('tiyulplus')));
+
+// Randomness is the point of a pool. Drawn from a fixed sequence rather than
+// from Math.random, because a test that samples a real random source either
+// flakes or proves nothing.
+{
+  const seen = new Set();
+  for (let i = 0; i < pcfg.caption.lines.length; i++) {
+    let k = 0;
+    seen.add(captionHook({ rand: () => (i + k++) / pcfg.caption.lines.length }));
+  }
+  ok('the pool is actually drawn from', seen.size === pcfg.caption.lines.length);
+  eq('the first draw is the first line', captionHook({ rand: () => 0 }), pcfg.caption.lines[0]);
+  eq('and a draw at the top of the range stays in bounds', typeof captionHook({ rand: () => 0.999999 }), 'string');
+}
+
+// The URL guard. Broader than a URL parser on purpose: what gets a post demoted
+// is a domain a human can retype, and "tiyulplus.com" with no scheme and no www
+// is the same signal as a well-formed link.
+for (const bad of ['http://x.io', 'https://x.io', 'www.tiyulplus.com', 'tiyulplus.com', 'קישור: ynet.co.il']) {
+  ok(`rejected: ${bad}`, URL_LIKE.test(bad));
+}
+for (const good of ['מקומות שנראים לא אמיתיים', '5.3 ק״מ', '#טיולים #fyp', 'יעד לרשימה']) {
+  ok(`allowed: ${good}`, !URL_LIKE.test(good));
+}
+// And it throws rather than stripping. A caption assembled from a pool with a
+// domain in it is a configuration error; silently repairing it would leave
+// post-config.json broken and every future post quietly fixed.
+ok(
+  'a caption with a URL never becomes something you can approve',
+  (() => {
+    try {
+      assertNoUrl('בואו ל www.tiyulplus.com');
+      return false;
+    } catch {
+      return true;
+    }
+  })()
+);
+eq('a clean caption passes through untouched', assertNoUrl('יעד לרשימה'), 'יעד לרשימה');
+
+// Five tags, and EXACTLY five whether or not the deck's country resolved. The
+// destination tag replaces a niche draw rather than being appended to it —
+// otherwise the count moves for a reason that has nothing to do with the thing
+// being tested.
+{
+  const withCountry = { category: 'museum', slides: [{ iso: 'PT' }, { iso: 'PT' }] };
+  const noCountry = { category: 'museum', slides: [{ iso: 'PT' }, { iso: 'JP' }, { iso: 'BR' }] };
+  const n = pcfg.hashtags.broadCount + pcfg.hashtags.nicheCount;
+
+  eq('five tags on a deck with a country', hashtagsFor(withCountry).length, n);
+  eq('and five on a deck without one', hashtagsFor(noCountry).length, n);
+  eq('the destination tag is the country, in Hebrew', destinationTag(withCountry), '#פורטוגל');
+  eq('a deck spanning three countries has no country tag', destinationTag(noCountry), null);
+  ok('the destination tag is on the post', hashtagsFor(withCountry).includes('#פורטוגל'));
+
+  const tags = hashtagsFor(withCountry);
+  eq('no tag appears twice', new Set(tags).size, tags.length);
+  ok('every tag is a tag', tags.every((t) => /^#\S+$/.test(t)));
+  eq(
+    'broad tags lead, because the first line is what gets read',
+    tags.slice(0, pcfg.hashtags.broadCount).filter((t) => pcfg.hashtags.broad.includes(t)).length,
+    pcfg.hashtags.broadCount
+  );
+
+  // A country read off the SLIDES, not off deck.where. `where` is the English
+  // string the map was searched with, and the Hebrew country name does not
+  // survive the build: applyCountryVisibility strips it from every slide once
+  // they all agree on one, which is the common case.
+  eq(
+    'a Czech deck is filed under Czechia even after the name was stripped',
+    destinationTag({ where: 'Prague', category: 'museum', slides: [{ iso: 'CZ', countryHe: null }] }),
+    '#צ׳כיה'
+  );
+  eq('a deck with no slides at all has no tag', destinationTag({ slides: [] }), null);
+}
+
+// Destination weighting. What it buys, given that the climate rotation caps a
+// destination at one post a year, is ORDER — the places this audience books
+// flights to get posted early and the cold ones get what is left.
+{
+  const dests = JSON.parse(readFileSync(new URL('../destinations.json', import.meta.url), 'utf8')).destinations;
+  const ordered = byWeight(dests);
+  const favoured = ['יוון', 'קפריסין', 'גאורגיה', 'איטליה', 'תאילנד', 'יפן', 'פורטוגל', 'ספרד', 'וייטנאם', 'צ׳כיה'];
+
+  ok('every favoured country is actually in the catalogue', favoured.every((c) => dests.some((d) => d.country === c)));
+  ok('Greece outranks Iceland', destinationWeight({ country: 'יוון' }) > destinationWeight({ country: 'איסלנד' }));
+  ok('and Cyprus outranks Canada', destinationWeight({ country: 'קפריסין' }) > destinationWeight({ country: 'קנדה' }));
+  ok('an unlisted country is not banned, only unpromoted', destinationWeight({ country: 'קנדה' }) > 0);
+
+  ok('the first ten are all favoured', ordered.slice(0, 10).every((d) => favoured.includes(d.country)));
+  ok('nothing is dropped', ordered.length === dests.length);
+  // Stable, which is what lets the climate adapter keep its day-of-year
+  // rotation INSIDE each weight tier — the thing that stops the same Greek
+  // island coming up every morning.
+  const greek = ordered.filter((d) => d.country === 'יוון').map((d) => d.id);
+  eq('ties keep their incoming order', greek.join(','), dests.filter((d) => d.country === 'יוון').map((d) => d.id).join(','));
+}
+
+// The overlay, as numbers. The rendered result is asserted in the deck slide
+// group; this is the contract those assertions read from.
+{
+  const ov = pcfg.overlay;
+  const px = Math.round((ov.sizeBasis === 'height' ? 1920 : 1080) * ov.sizePct);
+  ok('the type lands near 30px on a 1080x1920 frame', px >= 26 && px <= 36, `${px}px`);
+  ok('it is lighter than a semibold', ov.weight <= 500);
+  ok('and held below full opacity', ov.opacity > 0.7 && ov.opacity < 1);
+  eq('two lines and no more', ov.maxLines, 2);
+  ok('the column is in the left third', ov.x < 0.4);
+  ok('and the block cannot reach across the middle', ov.x + ov.width / 2 <= 0.56);
+  ok('neither band is the middle of the frame', ov.bands.upper[1] < 0.45 && ov.bands.lower[0] > 0.55);
+}
 
 /* -------------------------------------------------------------------------- */
 group('font guard — the check that was silently passing');

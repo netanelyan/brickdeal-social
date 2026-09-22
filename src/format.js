@@ -4,6 +4,8 @@ import { provenanceHe } from './images.js';
 import { targetsHe } from './publish/targets.js';
 import { privacyHe } from './publish/tiktok.js';
 import { KINDS } from './sources/places.js';
+import { postConfig } from './postConfig.js';
+import { hashtagLine } from './hashtags.js';
 
 // Two different texts, for two different readers.
 //
@@ -54,14 +56,74 @@ export function channelCaption(cand) {
 // the wording is fixed and reviewable in one place.
 const SIGNATURE = ['לסוכן הטיולים החכם שלנו:', 'www.tiyulplus.com'].join('\n');
 
-// The same line for a slideshow, pointing at the bio rather than at a URL.
+// A slideshow carries NO signature, no call to action and no URL.
 //
-// Decks publish to Instagram and TikTok, and neither makes a link in a caption
-// tappable. "www.tiyulplus.com" under a carousel is a string somebody has to
-// retype; the bio link is the only clickable route either platform offers, so
-// that is what a deck asks for. The domain stays on the second line because it
-// is the brand and it is what someone searching later will remember.
-const DECK_SIGNATURE = ['למתכנן טיולים חכם בביו שלנו', 'www.tiyulplus.com'].join('\n');
+// It used to carry all three: "למתכנן טיולים חכם בביו שלנו" over
+// "www.tiyulplus.com", which was the entire TikTok description. Three things
+// were wrong with it and they compound.
+//
+// The URL is the expensive one. An external domain in a TikTok description is
+// a demotion — the app has no reason to send traffic off itself — and the link
+// was never tappable there in the first place, so it bought nothing to offset
+// the cost. The bio is where the link lives, and the bio is reachable from the
+// post regardless of what the description says.
+//
+// The call to action is the second. A post whose first line asks for something
+// reads as an advertisement before anyone has looked at the picture, and this
+// account's problem is that it reads as an advertisement.
+//
+// And the brand name is the third, for the same reason.
+//
+// What replaces it is one short line with no ask in it, drawn at random from a
+// pool in post-config.json, and five hashtags. See captionHook below.
+const HOOK_POOL = () => postConfig().caption.lines;
+
+/**
+ * The line that opens a published slideshow.
+ *
+ * Random per post rather than fixed, because the pool is the point: twenty
+ * openings across twenty posts is a feed somebody wrote, one opening across
+ * twenty posts is a template, and the template is what the previous signature
+ * was.
+ */
+export const captionHook = ({ rand = Math.random } = {}) => {
+  const lines = HOOK_POOL();
+  return lines[Math.floor(rand() * lines.length)];
+};
+
+/**
+ * Anything that reads as a link: a scheme, a www host, or a .com / .co.il.
+ *
+ * Deliberately broader than a URL parser. What gets a post demoted is not a
+ * well-formed URL, it is a domain a human can retype — "tiyulplus.com" with no
+ * scheme and no www is the same signal to the platform and the same signal to
+ * the reader, and a parser would pass it.
+ */
+export const URL_LIKE = /(?:https?:\/\/)|(?:\bwww\.)|(?:\.(?:com|co\.il)\b)/i;
+
+/**
+ * The guard between a built caption and the approval queue.
+ *
+ * Here rather than at publish time on purpose. The rule is about what we choose
+ * to publish, so it has to fire before anything is shown for approval — a
+ * caption with a URL in it must never become something you can tap approve on,
+ * because at that point the only thing standing between it and TikTok is
+ * whether you happened to read the last line.
+ *
+ * Throws rather than stripping. A caption assembled from a pool that has a
+ * domain in it is a configuration error, and silently editing it would leave
+ * post-config.json broken and every future post quietly repaired.
+ */
+export function assertNoUrl(caption, where = 'caption') {
+  const text = String(caption || '');
+  const hit = text.match(URL_LIKE);
+  if (hit) {
+    throw new Error(
+      `${where} contains a URL ("${hit[0]}") — nothing published may carry one; the link lives in the bio`
+    );
+  }
+  return text;
+}
 
 // Instagram's caption limit, and the shortest of the three a deck publishes to.
 const CAPTION_LIMIT = 2200;
@@ -104,33 +166,40 @@ export const tiktokCaption = (cand) => publishedDescription(cand, 4000); // TikT
 /**
  * What goes under a deck on TIKTOK.
  *
- * The shoutout and nothing else, because TikTok has a separate title field and
- * the title is already in it. Repeating it in the description spends the first
- * line of the only place a link can be asked for on a line the viewer has
- * already read, two centimetres higher.
+ * One line and five tags. The title is NOT here — TikTok carries it in
+ * post_info.title, and repeating it in the description spends the first line of
+ * the description on a line the viewer has already read two centimetres higher.
  *
  * Instagram is the other way round — see deckCaption — because a carousel has
  * no title field and the caption is the only text there is.
+ *
+ * Checked before it is returned, not after it is staged: see assertNoUrl.
  */
-export function deckTiktokCaption() {
-  return DECK_SIGNATURE;
+export function deckTiktokCaption(deck, opts = {}) {
+  const hook = opts.hook || captionHook(opts);
+  const tags = hashtagLine(deck, opts);
+  return assertNoUrl([hook, '', tags].join('\n').trim(), 'the TikTok description');
 }
 
-export function deckCaption(deck) {
-  // The title and the shoutout. Nothing else.
+export function deckCaption(deck, opts = {}) {
+  // The title, one line, and the tags.
   //
   // This listed the angle and then every place, numbered — which is the deck
   // itself, retyped underneath the deck. A viewer who wants the list swipes;
-  // the description's job on a slideshow is to say what it is and where to go
-  // next, and a wall of names pushes the only line that asks for anything below
-  // the fold.
+  // the description's job on a slideshow is to say what it is, and a wall of
+  // names pushes everything else below the fold.
   //
-  // The signature is RESERVED out of the limit rather than appended and hoped
-  // for: the old version built the whole string and sliced it to 2200, so on a
-  // long deck the call to action was the part that fell off the end.
-  const tail = `\n\n${DECK_SIGNATURE}`;
+  // The title survives here and not on TikTok because a carousel has no title
+  // field: drop it and the post has no title at all.
+  //
+  // The tags are RESERVED out of the limit rather than appended and hoped for.
+  // The old version built the whole string and sliced it to 2200, so on a long
+  // deck the last thing was the part that fell off the end — and the last thing
+  // is now what the post is filed under.
+  const hook = opts.hook || captionHook(opts);
+  const tail = `\n\n${hook}\n\n${hashtagLine(deck, opts)}`;
   const body = String(deck.titleHe || '').trim().slice(0, CAPTION_LIMIT - tail.length);
-  return `${body}${tail}`.trim();
+  return assertNoUrl(`${body}${tail}`.trim(), 'the Instagram caption');
 }
 
 /**
@@ -160,6 +229,21 @@ export function deckApprovalMessage(cand) {
   lines.push(`🖼️ על השער: ${clean(deck.titleHe)}`);
   if (deck.idea?.emphasisHe) lines.push(`   בצבע: ${clean(deck.idea.emphasisHe)}`);
   lines.push('');
+
+  // The description, shown before you approve it.
+  //
+  // It was not shown at all until the caption stopped being a fixed signature.
+  // A constant needs reviewing once; a line drawn at random from a pool of
+  // twenty, followed by five tags one of which is generated from the deck's own
+  // country, is a different post every time and is the thing this account is
+  // currently testing. Printed as it will publish, TikTok's version, because
+  // that is the destination the change was made for.
+  const desc = cand.tiktokCaption || cand.instagramCaption;
+  if (desc) {
+    lines.push('📝 התיאור:');
+    for (const l of String(desc).split('\n')) lines.push(`   ${l}`.trimEnd());
+    lines.push('');
+  }
 
   lines.push(`📑 ${deck.slides.length + 1} שקופיות (שער + ${deck.slides.length} מקומות):`);
   for (const [i, s] of deck.slides.entries()) {

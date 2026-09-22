@@ -3,6 +3,7 @@ import { record as recordUsage } from '../usage.js';
 import { KINDS, kindIds, isSourcedKind, subjectEn } from '../sources/places.js';
 import { namesPlace } from './region.js';
 import { loadDestinations } from '../sources/climate.js';
+import { byWeight, postConfig } from '../postConfig.js';
 
 // What deck to make. The step before any data is fetched.
 //
@@ -38,13 +39,28 @@ const getClient = () => (client ??= new Anthropic());
  * A preference, not a whitelist. The Dolomites are not in the file and are a
  * perfectly good deck, and a list that forbade everything outside itself would
  * make the file a cage rather than a starting point.
+ *
+ * WEIGHTED, since the flat version fixed only half the problem. Handed 102
+ * places in file order, a model treats Reykjavik and Athens as equally likely
+ * and returns whichever is more photogenic — which is how a list chosen for
+ * where Israelis fly still produced decks about the Arctic. post-config.json
+ * says which countries this account leads with, the menu is sorted by it, and
+ * the countries at the top are named again above the list, because "first in a
+ * hundred-line list" is not emphasis a model can see.
  */
 let destinationMenu = null;
 function destinationsForPrompt() {
   if (destinationMenu) return destinationMenu;
   try {
-    const rows = loadDestinations();
-    destinationMenu = rows.map((d) => `  ${d.en} — ${d.he}, ${d.country}`).join('\n');
+    const rows = byWeight(loadDestinations());
+    const { weights } = postConfig().destinations;
+    const lead = Object.keys(weights);
+    const menu = rows.map((d) => `  ${d.en} — ${d.he}, ${d.country}`).join('\n');
+    destinationMenu = lead.length
+      ? `Lead with these countries — they are where this audience actually books flights:\n  ${lead.join(
+          ', '
+        )}\n\n${menu}`
+      : menu;
   } catch {
     // The file is optional as far as this call is concerned. A missing or
     // malformed catalogue should cost the grounding, never the idea.

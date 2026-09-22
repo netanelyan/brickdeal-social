@@ -397,7 +397,44 @@ message says when the slot frees.
 | `src/deck/region.js` | which country a deck is in, and the check that it says so |
 | `src/images.js` | image provenance policy |
 | `src/usage.js` | token accounting, exposed as `/usage` |
+| `post-config.json` | the editorial dials: caption pool, hashtags, slide type, destination weights |
+| `src/postConfig.js` | reads and checks the above; the only module that knows the path |
+| `src/hashtags.js` | the five tags under a slideshow, one of them the deck's own country |
 | `scripts/` | selftest, source probe, card-hosting check, one-off runs |
+
+### What a slideshow says, and what it does not
+
+Four things about a published deck are decisions rather than code, and they all
+live in `post-config.json`:
+
+- **The caption is one short line, drawn at random from a pool of twenty, and it
+  carries no URL, no call to action and no brand name.** It used to be
+  `למתכנן טיולים חכם בביו שלנו` over `www.tiyulplus.com` on every post. An
+  external domain in a TikTok description is a demotion, and the string was
+  never tappable on either platform anyway — the bio link is reachable from the
+  post regardless of what the description says. `format.js` enforces this rather
+  than trusting it: `assertNoUrl` runs before a deck can become a candidate, and
+  a caption containing `http`, `www.`, `.com` or `.co.il` throws in the build
+  instead of becoming something you can approve by tapping.
+- **Five hashtags, two broad and three niche.** There were none. The deck's own
+  country — `#פורטוגל` — spends one of the niche slots rather than adding a
+  sixth, so the count is the same whether or not the country resolved.
+- **The type on a slide is small, light, and pinned to the upper-left or
+  lower-left third.** Roughly 3% of the frame's short edge, ~32px on 1080x1920,
+  regular weight, 90% opacity, one soft shadow, two lines maximum, no box and no
+  brand mark. The measurement in `render/photo.js` still runs and still decides
+  *which* of the two bands this photograph can carry and what colour the words
+  have to be — it just no longer gets to answer "the middle", which on a
+  landscape is where the subject is.
+- **Destinations are weighted** toward where this audience actually flies —
+  Greece, Cyprus, Georgia, Italy, Thailand, Japan, Portugal, Spain, Vietnam,
+  Czechia. An unlisted country is not banned, only unpromoted. Because the
+  climate rotation caps a destination at one post a year, what the weighting
+  really buys is order: the favoured places get posted early in the year and the
+  cold and long-haul ones get whatever is left.
+
+The news **card** path is deliberately untouched. A card never publishes to
+TikTok, and its caption is read somewhere a URL is worth printing.
 
 ## Honest caveats
 

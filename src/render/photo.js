@@ -466,7 +466,7 @@ function inkContrast(mean, inkLum) {
   return a > b ? a / b : b / a;
 }
 
-function place(grid, { topSafe, bottomSafe, blockH, blockW = 0.46, rail = true, inkLum = null, mask = null, hint = null }) {
+function place(grid, { topSafe, bottomSafe, blockH, blockW = 0.46, rail = true, inkLum = null, mask = null, hint = null, confine = null }) {
   const boxes = [];
   // Three columns, each already inside the frame's margin.
   //
@@ -481,15 +481,45 @@ function place(grid, { topSafe, bottomSafe, blockH, blockW = 0.46, rail = true, 
   // one long one, ragged down the left. The width a block needs is a property
   // of the text, so it comes in as blockW and nothing below may go under it.
   const wide = (bw) => Math.max(blockW, bw);
-  const columns = [
-    { side: 'right', cx: 0.66, bw: wide(0.52) },
-    { side: 'center', cx: 0.5, bw: wide(0.76) },
-    { side: 'left', cx: 0.34, bw: wide(0.52) },
-  ];
+  const columns = confine
+    ? // One column, where the design says the words go.
+      //
+      // The free sweep below is the right search for "put this wherever the
+      // photograph is quietest" and the wrong one for "put this in the
+      // upper-left or lower-left third" — given three columns and thirteen
+      // rows it will find dead centre whenever the middle of the frame happens
+      // to be sky, which on a landscape is most of the time.
+      //
+      // What the measurement is still for, and it is most of what it was for:
+      // WHICH of the two allowed bands this particular photograph can carry,
+      // what colour the type has to be there, and how much help it needs. That
+      // is the part a person cannot do by eye for six slides a day.
+      [{ side: confine.x < 0.42 ? 'left' : confine.x > 0.58 ? 'right' : 'center', cx: confine.x, bw: wide(confine.width) }]
+    : [
+        { side: 'right', cx: 0.66, bw: wide(0.52) },
+        { side: 'center', cx: 0.5, bw: wide(0.76) },
+        { side: 'left', cx: 0.34, bw: wide(0.52) },
+      ];
 
   const yMin = topSafe + blockH / 2;
   const yMax = 1 - bottomSafe - blockH / 2;
   if (yMax <= yMin) return null;
+
+  // The allowed rows, when the caller confined the search.
+  //
+  // Each band is sampled rather than taken as a single y, so a band that is
+  // half sky and half ridge can still be entered at the sky end. Clamped into
+  // the safe range rather than intersected with it: a band that falls entirely
+  // inside the app's own furniture would otherwise contribute no candidates at
+  // all, and the slide would come back unplaced.
+  const bandRows = (band) => {
+    const lo = Math.max(yMin, Math.min(yMax, band[0] + blockH / 2));
+    const hi = Math.max(yMin, Math.min(yMax, band[1] - blockH / 2));
+    const n = 5;
+    if (!(hi > lo)) return [lo];
+    return Array.from({ length: n }, (_, k) => lo + ((hi - lo) * k) / (n - 1));
+  };
+  const confinedYs = confine ? confine.bands.flatMap(bandRows) : null;
 
   // Candidates aimed AT the hinted region, not just the standing grid.
   //
@@ -498,7 +528,11 @@ function place(grid, { topSafe, bottomSafe, blockH, blockW = 0.46, rail = true, 
   // of sky off to one side, no column fell inside it and the winning box scored
   // zero coverage — the hint was obtained and then effectively ignored. These
   // are centred on the region that was actually identified.
-  if (hint) {
+  // Skipped entirely when the search is confined. The hint's whole purpose is
+  // to aim candidates at wherever the sky actually is, which is precisely the
+  // freedom being withdrawn — and a hint candidate carries its own cx, so it
+  // would walk straight out of the allowed column.
+  if (hint && !confine) {
     // Widened to what the text needs even when the hinted region is narrower.
     // The box then spills past the region, its coverage drops, and the scorer
     // prefers a wider patch of background elsewhere — which is the right answer
@@ -520,7 +554,10 @@ function place(grid, { topSafe, bottomSafe, blockH, blockW = 0.46, rail = true, 
   for (const col of columns) {
     // A column carrying its own cy is a hint candidate and is placed exactly
     // there; the standing columns are swept down the frame as before.
-    const ys = col.cy !== undefined ? [col.cy] : Array.from({ length: STEPS }, (_, s) => yMin + ((yMax - yMin) * s) / (STEPS - 1));
+    const ys =
+      col.cy !== undefined
+        ? [col.cy]
+        : confinedYs || Array.from({ length: STEPS }, (_, s) => yMin + ((yMax - yMin) * s) / (STEPS - 1));
     for (const cy of ys) {
       const stats = region(
         grid,
@@ -692,7 +729,7 @@ function colourFor(stats, hue, inkLum = null) {
  * would not decode) or a placement the renderer can apply without interpreting
  * anything further.
  */
-export async function analyseSlides(items, { topSafe, bottomSafe, height, inkLum = null, regionHint = null }) {
+export async function analyseSlides(items, { topSafe, bottomSafe, height, inkLum = null, regionHint = null, confine = null }) {
   const grids = await sampleGrids(items.map((it) => it.src || null));
   const top = topSafe / height;
   const bottom = bottomSafe / height;
@@ -700,9 +737,12 @@ export async function analyseSlides(items, { topSafe, bottomSafe, height, inkLum
   // Where the background is, asked for once per slide when a hint source is
   // supplied. Sequential rather than parallel: it is one cheap call per slide
   // and the deck is seven slides, so the concurrency is not worth the burst.
+  // Not asked for at all when the placement is confined: the answer decides
+  // where to aim, there is nowhere left to aim, and it is a model call per
+  // slide. Six slides a deck, every deck.
   const hints = [];
   for (const [i, grid] of grids.entries()) {
-    if (!grid || !regionHint) {
+    if (!grid || !regionHint || confine) {
       hints.push(null);
       continue;
     }
@@ -728,6 +768,7 @@ export async function analyseSlides(items, { topSafe, bottomSafe, height, inkLum
       inkLum,
       mask,
       hint: hintBox,
+      confine,
     });
     if (!spot) {
       out.push(null);

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fetchFeed } from './rss.js';
 import { fetchClimate, loadDestinations } from './climate.js';
+import { byWeight } from '../postConfig.js';
 import * as store from '../store.js';
 
 // The registry is data, not code (sources.json), so adding a source is an edit
@@ -149,7 +150,16 @@ async function gatherClimate(source, { limit, now }) {
   const out = [];
   const dests = loadDestinations();
   const offset = Math.floor(now.getTime() / 86_400_000) % Math.max(1, dests.length);
-  const ordered = [...dests.slice(offset), ...dests.slice(0, offset)];
+  // Weighted first, rotated second — the sort is stable, so the day-of-year
+  // rotation survives INSIDE each weight tier and is what still stops the same
+  // Greek island coming up every morning.
+  //
+  // What the weighting actually buys, given that a destination is capped at one
+  // post per year by the dedupe key, is ORDER: the places Israelis fly to get
+  // posted early in the year and the cold and long-haul ones get whatever is
+  // left. That is the bias, stated plainly — Reykjavik may not come up at all
+  // in a busy year, and that is the intended outcome rather than a side effect.
+  const ordered = byWeight([...dests.slice(offset), ...dests.slice(0, offset)]);
 
   for (const dest of ordered) {
     if (out.length >= limit) break;

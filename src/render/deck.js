@@ -3,6 +3,7 @@ import { renderSlideHtml, SIZES, isStyle, INK_LUMINANCE } from './deckTemplates.
 import { renderInstagramSlideHtml } from './deckInstagram.js';
 import { analyseSlides, measureCardScrims } from './photo.js';
 import { findTextRegion } from '../images/textbox.js';
+import { postConfig } from '../postConfig.js';
 
 // A deck to files on disk, twice.
 //
@@ -35,11 +36,19 @@ export const slideStem = (deckId, size, index) => `deck-${deckId}-${size}-${Stri
  * cover squeezed into a narrow strip of sky looked like.
  */
 function blockWidth({ cover = false, style = 'minimal' } = {}) {
-  // A cover is a sentence and wants room. At 0.68 a thirty-character title
-  // broke into three lines of 9, 17 and 6 characters — balanced wrapping cannot
-  // rescue a column that is simply too narrow for the words.
-  if (cover) return 0.78;
-  return style === 'info' ? 0.54 : 0.48;
+  // One width, from the config, for everything on a TikTok slide.
+  //
+  // It used to be three — 0.78 for a cover, 0.54 and 0.48 for the two styles —
+  // sized so a large centred title could break into even lines across most of
+  // the frame. A block pinned to the left third cannot be 78% of the frame
+  // wide, because its far edge is then past the middle of the picture and the
+  // whole point of the position is lost. At the current type size it does not
+  // need to be: a cover at 37px fits roughly twice the characters per line it
+  // did at 68px.
+  const { width } = postConfig().overlay;
+  // A cover is still a sentence and still wants a little more room than a place
+  // name, which is two words.
+  return cover ? Math.min(0.6, width * 1.18) : width;
 }
 
 function blockHeight(slide, { cover = false, style = 'minimal' } = {}) {
@@ -118,6 +127,15 @@ export async function renderDeckSize(deck, { size = 'tiktok', outDir = cardOutpu
       bottomSafe: geometry.bottomSafe,
       height: geometry.h,
       inkLum: INK_LUMINANCE[style],
+      // The two zones the words are allowed into, from post-config.json: the
+      // configured column, in the upper or the lower band. The measurement
+      // still chooses between them and still chooses the colour — what it no
+      // longer gets to do is put the type across the middle of the picture.
+      confine: {
+        x: postConfig().overlay.x,
+        width: postConfig().overlay.width,
+        bands: [postConfig().overlay.bands.upper, postConfig().overlay.bands.lower],
+      },
       // Where the background is. The pixel heuristic could not tell sky from a
       // snowfield — see the note in images/textbox.js — so the semantic half of
       // the question is asked, and the measurements then search inside the

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { renderDeck } from '../render/deck.js';
-import { deckCaption, deckTiktokCaption } from '../format.js';
+import { deckCaption, deckTiktokCaption, captionHook } from '../format.js';
 import { targetsForKind } from '../publish/targets.js';
 import { overrideActive, overrideNotes } from '../override.js';
 import { recentPublished } from '../store.js';
@@ -170,14 +170,26 @@ export async function toDeckCandidate(
   // Not the same text, and the difference is one field.
   //
   // TikTok carries the title separately in post_info.title, so its description
-  // is the shoutout alone — repeating the title there spends the first line of
-  // the only place a link can be asked for on a line the viewer just read two
+  // opens with the line rather than with the title — repeating the title there
+  // spends the description's first line on a line the viewer just read two
   // centimetres higher. Instagram has no title field on a carousel, so its
   // caption has to open with the title or the post has none.
-  const caption = deckCaption(deck);
+  //
+  // ONE hook for the post, drawn here and handed to both. Calling captionHook
+  // twice would draw twice, and the same slideshow would go out under two
+  // different opening lines — which is not a variation, it is a bug that looks
+  // like one post made by two people.
+  //
+  // Both calls run the URL guard and THROW rather than returning something
+  // unpublishable. A deck that cannot produce a clean caption fails here, in
+  // the build, which is upstream of everything: it never becomes a candidate,
+  // never reaches the queue, and never becomes something that can be approved
+  // by tapping without reading the last line.
+  const hook = captionHook();
+  const caption = deckCaption(deck, { hook });
   cand.channelCaption = [deck.titleHe, '', caption].join('\n');
   cand.instagramCaption = caption;
-  cand.tiktokCaption = deckTiktokCaption();
+  cand.tiktokCaption = deckTiktokCaption(deck, { hook });
 
   // A deck publishes from its slide URLs, but Telegram uploads bytes and the
   // held/retry paths look for a file — the cover stands in as "the card".
