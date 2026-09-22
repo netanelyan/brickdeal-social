@@ -1,6 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { KNOWN } from '../deck/emoji.js';
 
 // Emoji as pictures, not as characters.
 //
@@ -49,7 +48,14 @@ export function emojiDataUri(ch) {
   return uri;
 }
 
-export const haveArtFor = (ch) => KNOWN.has(ch) && Boolean(emojiDataUri(ch));
+// Whether we have artwork for this character.
+//
+// Was `KNOWN.has(ch) && emojiDataUri(ch)`, where KNOWN was a hand-kept list in
+// the travel vocabulary. The list was belt and braces over a filesystem check
+// that already answers the question, and it answered it WRONGLY for every
+// emoji added outside that file — which, once BrickDeal had its own set, was
+// most of them. The file on disk is the fact.
+export const haveArtFor = (ch) => Boolean(emojiDataUri(ch));
 
 /**
  * One emoji, ready to drop into a line.

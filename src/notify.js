@@ -1,5 +1,3 @@
-import { reasonHe } from './verify.js';
-import { pillarHe, PILLAR_KEYS, quotaConfig } from './pillars.js';
 import { TARGET_HE, targetsHe } from './publish/targets.js';
 
 // The Hebrew status messages, as pure formatters plus one thin `send` — same
@@ -20,83 +18,18 @@ export async function send(telegram, chatId, text) {
     });
 }
 
-export function startupPing({ sourceCount, queueSize, stagingSize, targets, images }) {
+export function startupPing({ queueSize, stagingSize, proposalSize = 0, targets, images }) {
   // One line. Four facts that never needed four lines, none of them something
   // to act on — /status answers all of it on demand and in full.
-  return `🟢 עלה · ${sourceCount} מקורות · ${stagingSize} לאישור · ${queueSize} בתור · ${targetsHe(targets)}${
-    images ? '' : ' · בלי תמונות'
+  //
+  // "sources" came out with the feed registry: there is one feed now, and the
+  // number that replaced it is the one worth seeing at a glance, which is how
+  // many proposals are already waiting on a tap.
+  return `🟢 עלה · ${proposalSize} הצעות · ${stagingSize} לאישור · ${queueSize} בתור · ${targetsHe(targets)}${
+    images ? '' : ' · בלי תמונות מיוצרות'
   }`;
 }
 
-/** After a daily gather run — what came in, what survived, what was dropped. */
-export function runReport({
-  gathered,
-  ranked,
-  staged,
-  rejected,
-  sourceErrors,
-  perSource,
-  draftCalls,
-  budgetExhausted,
-}) {
-  // One line, plus a line for each thing that needs you.
-  //
-  // This printed a heading, four counters, a token count, and then every source
-  // that returned anything — twenty-one bullets to say that a routine gather
-  // worked. None of it is actionable: the items it found arrive as their own
-  // approval cards, which is where a decision actually gets made. The
-  // per-source breakdown is a diagnostic, and /sources is where diagnostics
-  // belong.
-  const lines = [`📥 איסוף: ${gathered} → ${ranked} נבדקו → ${staged} לאישור${rejected ? ` · ${rejected} נפסלו` : ''}`];
-
-  // A run that ran out of budget looks exactly like a quiet news day unless it
-  // says so. The difference matters: one means there was nothing to post, the
-  // other means we stopped looking. This one stays because it changes what you
-  // would do next.
-  if (budgetExhausted) lines.push('⚠️ תקציב הקריאות נגמר — ייתכן שנשארו פריטים טובים');
-
-  // Failures stay too, named, because a source that has quietly stopped
-  // returning anything is invisible in a count that only reports successes.
-  if (sourceErrors?.length) {
-    lines.push(`⚠️ ${sourceErrors.length} מקורות נכשלו: ${sourceErrors.map((e) => e.name).join(', ')}`);
-  }
-
-  return lines.join('\n');
-}
-
-/**
- * Rejected candidates, with their reason and their URL.
- *
- * This exists because of the note in BrickDeal's own README: its quality filter
- * used to drop things silently, which made it impossible to tell whether it was
- * saving you from junk or quietly throwing away good posts. The filters here are
- * more opinionated than that one — a primary-source rule, a quote check, topic
- * quotas — so seeing what they killed matters more, not less.
- */
-export function rejectDigest(items, hours) {
-  if (!items.length) return null;
-  const lines = items.map((it, i) => {
-    const detail = it.detail ? ` — ${String(it.detail).slice(0, 160)}` : '';
-    return `${i + 1}. [${reasonHe(it.reason)}] ${it.title}${detail}\n   ${it.url}`;
-  });
-  return `🗑️ ${items.length} מועמדים נפסלו ב-${hours} השעות האחרונות:\n\n${lines.join('\n\n')}`;
-}
-
-export function rejectSingle(item) {
-  const detail = item.detail ? ` — ${String(item.detail).slice(0, 200)}` : '';
-  return `🗑️ נפסל [${reasonHe(item.reason)}] ${item.title}${detail}\n${item.url}`;
-}
-
-/** Everything this card owed has now gone out. */
-/**
- * A destination was given up on for this card alone.
- *
- * Deliberately not phrased as a failure, because nothing is wrong with the
- * destination and nothing will be retried. The card carries something that
- * destination cannot accept — most often a TikTok privacy level that was never
- * attached, on a card approved while TikTok was unreachable — and the honest
- * report is that this one copy will not be made.
- */
 export function targetAbandoned(headline, abandoned = []) {
   const why = abandoned.map((a) => `${TARGET_HE[a.target] || a.target}: ${a.message}`).join(' · ');
   return `⤫ ויתרנו: ${why} — ${headline}`;
@@ -376,45 +309,37 @@ export function humanDuration(ms) {
 export function statusReport({
   stagedToday,
   rejectedToday = 0,
-  remainingToday,
-  dailyTarget: target,
-  nextGatherInMin,
-  sourceCount,
   stagingSize,
+  proposalSize = 0,
   queueSize,
-  gathered,
   staged,
-  rejected,
-  rejectedByReason,
   publishedToday,
-  lastRunAgoMs,
   postIntervalMinutes,
   targets,
+  decksToday = 0,
+  decksPerDay = 0,
   heldCount = 0,
   targetHealth = {},
 }) {
-  const breakdown = Object.entries(rejectedByReason || {})
-    .sort((a, b) => b[1] - a[1])
-    .map(([reason, n]) => `   • ${reasonHe(reason)} (${reason}): ${n}`);
-
+  // Rewritten when the card half came out, and it is shorter for a real reason
+  // rather than because things were trimmed. Most of what this used to report
+  // was about GATHERING — how many items came off twenty feeds, how many the
+  // verifier threw away and why, when the next pass would run. None of that
+  // exists now: there is one feed, it is a file, and a slideshow is built when
+  // you ask for one or when the timer offers.
+  //
+  // What is left is the only thing the old report never answered directly,
+  // which is what is waiting on YOU.
   return [
     '🔎 סטטוס',
-    `📚 ${sourceCount} מקורות פעילים`,
-    `⏳ ${stagingSize} ממתינים לאישור · 📦 ${queueSize} בתור לפרסום`,
+    `💡 ${proposalSize} הצעות ממתינות · ⏳ ${stagingSize} מצגות לאישור · 📦 ${queueSize} בתור`,
     `📤 ${publishedToday} פורסמו היום`,
     '',
     'ב-24 השעות האחרונות:',
-    `👀 נאספו: ${gathered}`,
     `✅ עלו לאישור: ${staged}`,
-    `🗑️ נפסלו: ${rejected}`,
-    ...breakdown,
     '',
-    `⏱️ סבב אחרון: ${lastRunAgoMs == null ? 'עדיין לא רץ' : `לפני ${humanDuration(lastRunAgoMs)}`}`,
-    // The two questions "why is it quiet" actually splits into: have we already
-    // filled today's quota, and when does it next look? Both, in one line.
-    `🎯 עלו היום: ${stagedToday ?? 0}/${target ?? '?'}` +
-      (rejectedToday ? ` (${rejectedToday} נדחו והוחזרו למכסה)` : '') +
-      (remainingToday <= 0 ? ' (הושלמה המכסה היומית)' : ` · סבב הבא בעוד ${nextGatherInMin ?? '?'} דק'`),
+    `🎯 הצעות היום: ${decksToday}/${decksPerDay}`,
+    `📝 אושרו היום: ${stagedToday ?? 0}` + (rejectedToday ? ` (${rejectedToday} נדחו)` : ''),
     `⚙️ דריפ כל ${postIntervalMinutes} דק' · מפרסם ל${targetsHe(targets)}`,
     // Per destination, because "published today" hides the case that matters:
     // one destination working and another blocked.
@@ -426,34 +351,5 @@ export function statusReport({
       return `   ⚪ ${name}: עוד לא פורסם`;
     }),
     ...(heldCount ? [`⏸️ ${heldCount} מוחזקים — /held`] : []),
-  ].join('\n');
-}
-
-/** /mix — the pillar and tag balance the quotas are actually computed from. */
-export function mixReport(history) {
-  if (!history.length) return '📊 עדיין לא פורסם כלום — אין ממה לחשב תמהיל';
-
-  const total = history.length;
-  const counts = Object.fromEntries(PILLAR_KEYS.map((k) => [k, 0]));
-  for (const p of history) if (counts[p.pillar] !== undefined) counts[p.pillar]++;
-
-  const rows = PILLAR_KEYS.map((k) => {
-    const n = counts[k];
-    const pct = Math.round((n / total) * 100);
-    const bar = '█'.repeat(Math.round(pct / 5)) || '·';
-    return `${pillarHe(k).padEnd(14)} ${String(pct).padStart(3)}%  ${bar}`;
-  });
-
-  const kosher = history.filter((p) => (p.tags || []).includes('kosher')).length;
-  const kosherPct = Math.round((kosher / total) * 100);
-  const { kosherMaxShare, pillarMaxShare } = quotaConfig();
-
-  return [
-    `📊 תמהיל ${total} הפוסטים האחרונים`,
-    '',
-    ...rows,
-    '',
-    `כשרות/שבת: ${kosherPct}% (תקרה ${Math.round(kosherMaxShare * 100)}%)`,
-    `תקרה לנושא בודד: ${Math.round(pillarMaxShare * 100)}%`,
   ].join('\n');
 }

@@ -5,22 +5,16 @@ import { Telegraf, Markup } from 'telegraf';
 import * as store from './src/store.js';
 import { usageReport } from './src/usage.js';
 import * as notify from './src/notify.js';
-import { runOnce, dailyTarget } from './src/pipeline.js';
-import { toCandidate, RejectedError } from './src/candidate.js';
-import { primaryAuthority, enabledSources, registry } from './src/sources/index.js';
-import { approvalMessage, decidedMessage, evidenceReport, channelCaption, instagramCaption, tiktokCaption } from './src/format.js';
-import { renderCard, closeBrowser } from './src/render/index.js';
+import { closeBrowser } from './src/render/index.js';
 import { publishTelegram, publishTelegramDeck, sendForApproval } from './src/publish/telegram.js';
-import { proposeIdeas, titleForRequest, reviseIdea, freeformIdea, freeformFromIdea } from './src/deck/ideas.js';
-import { buildDeck } from './src/deck/build.js';
-import { toDeckCandidate, deckTopic } from './src/deck/candidate.js';
-import { placeOverCap } from './src/pillars.js';
-import { canonicalKind } from './src/sources/tiyulplus.js';
-import { KINDS, isSourcedKind } from './src/sources/places.js';
-import { resolveRequest } from './src/deck/request.js';
-import { buildWithFallback, describeAttempt } from './src/deck/attempt.js';
-import { buildFreeformDeck } from './src/deck/build.js';
-import { searchConfigured, remaining as searchRemaining, dailyBudget as searchBudget } from './src/search.js';
+// The BrickDeal path, in two halves on purpose. `planDeck` is free - the feed
+// is a file, Brickset is cached, the rate is one call a day - and `buildProposed`
+// is what costs a model call and a generated photograph per slide. The two taps
+// in the approval flow sit exactly between them.
+import { proposeDeck as planDeck, buildProposed } from './src/brick/build.js';
+import { toBrickCandidate, brickApprovalMessage, decidedMessage } from './src/brick/candidate.js';
+import { proposalMessage, proposalWarning } from './src/brick/proposal.js';
+import { brickConfig } from './src/brick/config.js';
 import {
   publishInstagram,
   instagramConfigured,
@@ -58,11 +52,9 @@ import {
   TARGET_HE,
   allowedForKind,
 } from './src/publish/targets.js';
-import { imagesEnabled } from './src/images.js';
+import { configured as imagesEnabled } from './src/images/homeShot.js';
 import { runOverridden, noteOverride, overrideNotes } from './src/override.js';
 import { startOAuthServer, stopOAuthServer } from './src/oauthServer.js';
-import { reasonHe } from './src/verify.js';
-import { LAYOUT_HE } from './src/render/templates.js';
 
 // Kept from BrickDeal for the same reason it exists there: a third-party
 // promise chain we never get a reference to can reject, and Node's default
@@ -82,13 +74,12 @@ const {
   OWNER_ID,
   POST_INTERVAL_MINUTES = '240',
   RUN_HOUR = '8',
-  // Gather repeatedly through the day, not once. Cards should arrive when the
-  // news does; the daily cap is what keeps that honest.
+  // How often the timer may offer a deck, through the day rather than all at
+  // once in the morning. Kept under its old name because it is still the same
+  // dial and it is what .env and the deploy notes call it.
   GATHER_EVERY_HOURS = '2',
-  // Last hour a gather may start. Nothing should arrive overnight.
+  // Last hour a proposal may arrive. Nothing should turn up overnight.
   GATHER_UNTIL_HOUR = '22',
-  REJECT_DIGEST_HOURS = '6',
-  REJECT_NOTIFY = 'digest', // off | each | digest
   QUIET_ALERT_HOURS = '30',
 } = process.env;
 
@@ -195,14 +186,17 @@ function stagingButtons(key, cand) {
   const rows = [
     [Markup.button.callback('✅ אשר ופרסם', `ok:${key}`), Markup.button.callback('❌ דחה', `no:${key}`)],
   ];
-  // Editing a headline re-renders one card. On a deck it would re-render every
-  // slide at both sizes, and the title lives on the cover alone — so a deck is
-  // approved or rejected as a whole, and a wrong title is a re-run.
-  rows.push(
-    cand?.kind === 'deck'
-      ? [Markup.button.callback('📎 ציטוטים', `ev:${key}`)]
-      : [Markup.button.callback('✏️ ערוך כותרת', `edit:${key}`), Markup.button.callback('📎 ציטוטים', `ev:${key}`)]
-  );
+  // Two buttons, and there used to be four.
+  //
+  // "Edit the headline" re-rendered one card. On a deck it would mean
+  // re-rendering every slide at both sizes, and the hook lives on the cover
+  // alone — so a deck is approved or rejected as a whole, and a wrong hook is a
+  // re-run, which now costs nothing but the photographs it already paid for.
+  //
+  // "Quotes" showed the sourced sentences behind a claim. A slideshow's claims
+  // are prices, and every one of them is already on the message above with the
+  // region, the currency and the rate it was converted at. A button that opened
+  // a second screen to repeat that would be a button nobody taps twice.
   // Only when there is a real choice to make. With one privacy level available
   // — the unaudited case, where TikTok offers SELF_ONLY and nothing else — a
   // button that cycles back to the same value is a button that lies about
@@ -252,7 +246,7 @@ async function stage(candidate) {
   const cand = await attachTikTok(candidate);
   const key = store.addStaging(cand);
   try {
-    await sendForApproval(bot.telegram, staging, cand, approvalMessage(cand), stagingButtons(key, cand));
+    await sendForApproval(bot.telegram, staging, cand, brickApprovalMessage(cand), stagingButtons(key, cand));
   } catch (e) {
     // A send that fails leaves a post staged and INVISIBLE. It has to be added
     // before the send — the key is what the buttons carry — so the item exists,
@@ -332,18 +326,11 @@ bot.action(/^no:(.+)$/, async (ctx) => {
   // Give the day's quota slot back. A rejected card is not one of "the best two
   // or three a day", and charging the day for it meant rejecting the morning's
   // three ended the day: remaining hit zero, the gather stopped looking, and
-  // nothing could publish until tomorrow. offerCeiling() is what stops the
+  // nothing could publish until tomorrow. DECK_BACKLOG_MAX is what stops the
   // refund turning into an endless supply — see tick().
   store.noteRejected(localDay(new Date()));
   await ctx.answerCbQuery('❌ נדחה');
   await markDecided(ctx, '❌ נדחה', cand);
-});
-
-bot.action(/^ev:(.+)$/, async (ctx) => {
-  const cand = store.getStaging(ctx.match[1]);
-  if (!cand) return ctx.answerCbQuery('כבר טופל');
-  await ctx.answerCbQuery();
-  await notify.send(bot.telegram, staging, evidenceReport(cand));
 });
 
 /**
@@ -368,42 +355,25 @@ bot.action(/^tp:(.+)$/, async (ctx) => {
   await ctx.answerCbQuery(`🔒 ${privacyHe(privacy)}`);
   const isPhoto = Boolean(ctx.callbackQuery?.message?.photo);
   const edit = isPhoto ? ctx.editMessageCaption.bind(ctx) : ctx.editMessageText.bind(ctx);
-  await edit(approvalMessage(updated), stagingButtons(key, updated)).catch((e) =>
+  await edit(brickApprovalMessage(updated), stagingButtons(key, updated)).catch((e) =>
     console.error('approval UX: privacy edit failed:', e.message)
   );
 });
 
-bot.action(/^edit:(.+)$/, async (ctx) => {
-  const key = ctx.match[1];
-  const cand = store.getStaging(key);
-  if (!cand) return ctx.answerCbQuery('כבר טופל');
-
-  const chatId = ctx.chat.id;
-  const cardMessageId = ctx.callbackQuery.message.message_id;
-  const cardIsPhoto = Boolean(ctx.callbackQuery.message.photo);
-
-  await ctx.answerCbQuery('✏️ שלח כותרת מתוקנת');
-  // Freeze the card mid-edit so it can't be approved against text that's about
-  // to change underneath it. The item stays in staging throughout.
-  await markDecided(ctx, '✏️ ממתין לכותרת מתוקנת...', cand);
-
-  const prompt = await ctx.reply('✏️ שלח כותרת חדשה לכרטיס שלמעלה (בתשובה להודעה הזו)', {
-    reply_parameters: { message_id: cardMessageId },
-    ...Markup.forceReply(),
-  });
-
-  // Keyed by the staged item, never by chat — several cards can be mid-edit at
-  // once without one tap stealing another's reply.
-  store.setPendingEdit(key, { chatId, promptMessageId: prompt.message_id, cardMessageId, cardIsPhoto });
-});
-
-// --- deck proposals (the text stage, before anything is built) ---------------
+// --- deck proposals (the text stage, before anything is paid for) -----------
+//
+// A proposal is not a plan here. Every set on it is already in the feed and
+// already priced, so what it names is what the slides will carry. What the
+// second tap buys is the cover line and the photographs, and the photographs
+// are the reason the two stages exist: one generated image per slide is the
+// slowest and least predictable step in the pipeline, and the cheapest moment
+// to decide against a post is before paying for five of them.
 
 bot.action(/^db:(.+):(instagram|tiktok|both)$/, async (ctx) => {
   const key = ctx.match[1];
   const choice = ctx.match[2];
   // Instagram first in the pair, because it is the one that publishes by
-  // itself — the approval message previews whichever size comes first, and
+  // itself - the approval message previews whichever size comes first, and
   // previewing the crop that needs no further action from you is the useful
   // way round.
   const targets = choice === 'both' ? ['instagram', 'tiktok'] : [choice];
@@ -412,9 +382,9 @@ bot.action(/^db:(.+):(instagram|tiktok|both)$/, async (ctx) => {
   if (!store.getProposal(key)) return ctx.answerCbQuery('כבר טופל');
 
   // Said at the tap, not after the build. Choosing a destination that is not
-  // connected is allowed — the deck is built and held until it is — but
-  // learning that after waiting minutes for twelve renders is the wrong order
-  // to find it out in.
+  // connected is allowed - the deck is built and held until it is - but
+  // learning that after waiting for the photographs is the wrong order to find
+  // it out in.
   const configured = targetsForKind('deck');
   const missing = targets.filter((t) => !configured.includes(t));
   await ctx.answerCbQuery(
@@ -426,11 +396,12 @@ bot.action(/^db:(.+):(instagram|tiktok|both)$/, async (ctx) => {
   );
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
 
-  // Detached for the same reason the command was: a build is minutes of work
-  // and holding it inside the handler overran Telegraf's timeout. And wrapped
-  // in runOverridden again, because an AsyncLocalStorage context cannot survive
-  // the wait for you to tap a button — without this, a deck you asked for by
-  // name would be judged by guards the override exists to step over.
+  // Detached for the same reason the command was: generating five photographs
+  // is minutes of work and holding it inside the handler overran Telegraf's
+  // timeout. Wrapped in runOverridden again, because an AsyncLocalStorage
+  // context cannot survive the wait for you to tap a button - without this, a
+  // deck you asked for by name would be judged by the guards the override
+  // exists to step over.
   const chatId = ctx.chat.id;
   const messageId = ctx.callbackQuery.message.message_id;
   detach(
@@ -445,7 +416,9 @@ bot.action(/^dx:(.+)$/, async (ctx) => {
   if (!store.getProposal(key)) return ctx.answerCbQuery('כבר טופל');
   store.clearProposal(key);
   await ctx.answerCbQuery('❌ נדחה');
-  await ctx.editMessageText(`❌ נדחה\n\n${ctx.callbackQuery.message.text || ''}`).catch(() => {});
+  await ctx.editMessageText(`❌ נדחה
+
+${ctx.callbackQuery.message.text || ''}`).catch(() => {});
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
 });
 
@@ -455,14 +428,10 @@ bot.action(/^dr:(.+)$/, async (ctx) => {
 
   const proposalMessageId = ctx.callbackQuery.message.message_id;
   await ctx.answerCbQuery('🤖 כתוב מה לשנות');
-  const prompt = await ctx.reply('🤖 מה לשנות בהצעה שלמעלה? כתוב בתשובה להודעה הזו', {
+  const prompt = await ctx.reply('מה לבנות במקום? נושא, מחיר או שם של סט — כתוב בתשובה להודעה הזו', {
     reply_parameters: { message_id: proposalMessageId },
     ...Markup.forceReply(),
   });
-
-  // Same pendingEdit table and the same routing by prompt message id, so two
-  // proposals can be mid-revision at once without one reply reaching the other.
-  // `kind` is what tells the reply handler which of the two it is holding.
   store.setPendingEdit(key, {
     kind: 'idea',
     chatId: ctx.chat.id,
@@ -472,21 +441,22 @@ bot.action(/^dr:(.+)$/, async (ctx) => {
 });
 
 /**
- * Apply an instruction to a proposed deck.
+ * Re-plan a proposal from what you typed.
  *
- * The reply is an instruction, not a replacement — "make it autumn", "Osaka
- * instead", "six places" — which is the difference between this and the ✏️
- * button on a card, where what you type IS the new headline.
+ * NOT a model call, and that is a deliberate departure from the travel side,
+ * where revising an idea costs an Opus round trip because the thing being
+ * revised is prose. Here the request language is small and closed - a theme, a
+ * price, or a set name - and `chooseRecipe` already interprets all three,
+ * falling through to something buildable rather than answering with a
+ * complaint. Asking a model to translate "cheaper" into "under 100₪" would be
+ * paying for a worse version of a function that already exists.
  *
- * It can only work before the build. Once a deck is rendered its title is baked
- * into the cover JPEG and toDeckCandidate has dropped the photograph that would
- * be needed to draw a new one, so this is the last point at which the words are
- * still words.
+ * It re-reads the feed, so a set that sold out between the two messages is
+ * gone from the new proposal rather than carried forward.
  */
 async function handleIdeaReply(ctx, key, pending) {
   store.clearPendingEdit(key);
-  const proposal = store.getProposal(key);
-  if (!proposal) return ctx.reply('ההצעה הזו כבר לא ממתינה');
+  if (!store.getProposal(key)) return ctx.reply('ההצעה הזו כבר לא ממתינה');
 
   const said = (ctx.message.text || ctx.message.caption || '').trim();
   if (!said) {
@@ -494,120 +464,58 @@ async function handleIdeaReply(ctx, key, pending) {
     return ctx.reply('שלח טקסט (לא תמונה/מדבקה)');
   }
 
-  await ctx.reply('🤖 חושב...');
   const chatId = pending.chatId;
-  // Detached: one Opus call, and blocking the update loop on it delays every
-  // other button in the chat.
   detach(
     'שינוי הצעה',
     async () => {
-      let revised;
+      let proposal;
       try {
-        revised = await reviseIdea(proposal.idea, said);
+        proposal = await planDeck(said);
       } catch (e) {
-        // The proposal is untouched and still answerable, so the prompt goes
-        // back rather than leaving a dead end — replying again retries.
+        // The old proposal is untouched and still answerable, so the prompt
+        // goes back rather than leaving a dead end — replying again retries.
         store.setPendingEdit(key, pending);
         return bot.telegram.sendMessage(chatId, notify.withDetail('❌ השינוי נכשל', e));
       }
-      if (!store.updateProposal(key, { idea: revised })) {
+      if (!store.updateProposal(key, { proposal })) {
         return bot.telegram.sendMessage(chatId, 'ההצעה הזו כבר לא ממתינה');
       }
-      await bot.telegram.sendMessage(chatId, `🤖 עודכן:\n\n${proposalMessage(revised)}`, proposalButtons(key));
+      const warning = proposalWarning(proposal);
+      await bot.telegram.sendMessage(
+        chatId,
+        `🤖 עודכן:
+
+${proposalMessage(proposal)}${warning ? `
+
+⚠️ ${warning}` : ''}`,
+        proposalButtons(key)
+      );
     },
     chatId
   );
 }
 
-/**
- * Apply an edited headline.
- *
- * Unlike BrickDeal's equivalent, this cannot just swap a line of text: the
- * headline is baked into a rendered JPEG, so the card has to be re-rendered or
- * the image and the caption would disagree — and the image is what publishes.
- */
-async function handleEditReply(ctx, key) {
-  const pending = store.getPendingEdit(key);
-  // Both stages route through the same prompt-id lookup, so this is where they
-  // part: an idea is still text and gets revised, a staged card is a rendered
-  // JPEG and gets its headline replaced.
-  if (pending?.kind === 'idea') return handleIdeaReply(ctx, key, pending);
-  store.clearPendingEdit(key);
-  const cand = store.getStaging(key);
-  if (!pending || !cand) return ctx.reply('הפריט הזה כבר לא ממתין לעריכה');
-
-  const newHeadline = (ctx.message.text || ctx.message.caption || '').replace(/\s+/g, ' ').trim();
-  if (!newHeadline) {
-    store.setPendingEdit(key, pending); // nothing consumed — leave it pending
-    return ctx.reply('שלח טקסט (לא תמונה/מדבקה)');
-  }
-
-  const updated = { ...cand, headline: newHeadline };
-  try {
-    updated.card = await renderCard(updated, { id: cand.id, data: cand.data, image: cand.image });
-  } catch (e) {
-    store.setPendingEdit(key, pending);
-    return ctx.reply(notify.withDetail('❌ רינדור הכרטיס נכשל', e));
-  }
-  updated.channelCaption = channelCaption(updated);
-  updated.instagramCaption = instagramCaption(updated);
-  updated.tiktokCaption = tiktokCaption(updated);
-  store.updateStaging(key, updated);
-
-  // The old message carried the old image, so it can't be edited in place —
-  // the card is re-sent with fresh buttons instead.
-  await sendForApproval(bot.telegram, pending.chatId, updated, approvalMessage(updated), stagingButtons(key, updated));
-  await ctx.reply('✏️ הכותרת עודכנה והכרטיס רונדר מחדש — אשר/דחה למעלה');
-}
-
 // ---------------------------------------------------------------------------
-// Manual submission
+// Replies
 // ---------------------------------------------------------------------------
-
-const URL_RE = /https?:\/\/[^\s<>"')]+/gi;
-
-async function ingestUrl(url, ctx) {
-  const authority = primaryAuthority(url);
-  if (!authority) {
-    return ctx.reply(
-      `⛔ ${new URL(url).hostname} לא ברשימת המקורות הראשוניים.\n` +
-        'אפשר להוסיף אותו ל-sources.json אם הוא באמת מקור ראשוני.'
-    );
-  }
-
-  await ctx.reply('⏳ בודק את המקור וכותב טיוטה...');
-  const item = {
-    sourceId: 'manual',
-    sourceName: 'הגשה ידנית',
-    authority: 'government',
-    lang: 'en',
-    pillarHints: [],
-    title: url,
-    summary: '',
-    url,
-    publishedAt: null,
-  };
-
-  try {
-    const cand = await toCandidate(item);
-    await stage(cand);
-    logReject(null);
-  } catch (err) {
-    const reason = err instanceof RejectedError ? err.reason : 'error';
-    const detail = err instanceof RejectedError ? err.detail : err.message;
-    await ctx.reply(`❌ נפסל: ${reasonHe(reason)}\n${detail || ''}`.trim());
-  }
-}
 
 bot.on('message', async (ctx, next) => {
+  // The only thing a reply can be now is an instruction to re-plan a proposal.
+  //
+  // The card path used to own this handler twice over: a reply could be a new
+  // headline for a staged card, and a bare message containing a URL was a
+  // manual submission. Neither exists for a slideshow. A deck's title is baked
+  // into the cover JPEG, so there is no line to swap - it is re-proposed
+  // instead, which costs nothing - and there is nothing to submit by hand
+  // because the deals come from the feed rather than from a link.
   const replyToId = ctx.message?.reply_to_message?.message_id;
   const editKey = replyToId ? store.findPendingEditByPrompt(replyToId) : null;
-  if (editKey) return handleEditReply(ctx, editKey);
+  if (!editKey) return next?.();
 
-  const text = ctx.message?.text || ctx.message?.caption || '';
-  const urls = text.match(URL_RE) || [];
-  if (!urls.length) return next?.();
-  for (const url of urls) await ingestUrl(url, ctx);
+  const pending = store.getPendingEdit(editKey);
+  if (pending?.kind === 'idea') return handleIdeaReply(ctx, editKey, pending);
+  store.clearPendingEdit(editKey);
+  return ctx.reply('הפריט הזה כבר לא ממתין');
 });
 
 // ---------------------------------------------------------------------------
@@ -650,7 +558,9 @@ const publishedFacts = (cand) => ({
   tags: cand.tags,
   layout: cand.layout,
   sourceId: cand.sourceId,
-  topic: cand.deck ? deckTopic(cand.deck) : null,
+  // What a run of posts would look like the same. For a slideshow that is its
+  // theme, or its recipe when it has no theme - see brickRepeats.
+  topic: cand.deck ? cand.deck.theme || cand.deck.recipe : null,
   headline: cand.headline || null,
   // Where the post was about. A deck names its region; a card names it on the
   // trip, which is the field verify.js already insists every card have.
@@ -973,102 +883,17 @@ async function publishNext(item = null) {
 // Gather runs
 // ---------------------------------------------------------------------------
 
-let running = false;
-let lastRunAt = null;
 let lastRunDay = null;
-let lastAnnouncedDay = null;
 // Epoch 0, so the first tick after a start gathers immediately rather than
 // waiting out a full interval.
-let lastGatherAt = 0;
 let quietAlertSent = false;
 // The fallback anchor for the quiet alarm. An install that has never staged or
 // published anything has no timestamp to measure from, and "no timestamp" must
 // not read as "not quiet" — that is the state a brand new silence starts in.
 const bootedAt = Date.now();
 
-// Rolling record of what the filters rejected, so /why and the digest can show
-// the actual items rather than a count.
-let rejectLog = [];
-let rejectQueue = [];
-const REJECT_LOG_MAX = 300;
 let activity = [];
 
-function logReject(entry) {
-  if (!entry) return;
-  const row = { ts: Date.now(), ...entry };
-  rejectLog.push(row);
-  if (rejectLog.length > REJECT_LOG_MAX) rejectLog.shift();
-  if (REJECT_NOTIFY === 'each') {
-    notify.send(bot.telegram, staging, notify.rejectSingle(row)).catch(() => {});
-  } else if (REJECT_NOTIFY === 'digest') {
-    rejectQueue.push(row);
-  }
-}
-
-// The Instagram Login path issues 60-day tokens. Nothing about their expiry is
-// visible until publishing simply starts failing, so this runs on boot and once
-// a day; refreshToken() itself decides whether it is actually due.
-async function maybeRefreshIgToken() {
-  if (!instagramConfigured() || authMode() === 'facebook') return;
-  try {
-    const r = await refreshToken();
-    // Routine housekeeping working is not news. It notified on every successful
-    // refresh, which is a message that says "nothing needs you" — and TikTok's
-    // identical refresh has always been log-only, so the two destinations were
-    // reporting the same event at different volumes.
-    if (r.refreshed) console.log(`   instagram: token refreshed, ${Math.round(r.daysLeft)} days left`);
-  } catch (e) {
-    // The failure still notifies. Left alone, publishing stops in 60 days.
-    console.error('instagram: token refresh failed:', e.message);
-    await notify.send(
-      bot.telegram,
-      staging,
-      notify.withDetail('🔴 חידוש טוקן אינסטגרם נכשל\nאם לא יחודש, הפרסום יפסיק לעבוד. הרץ npm run ig-token.', e)
-    );
-  }
-}
-
-// TikTok's access token lives about a day, so this is not the same kind of
-// housekeeping as Instagram's 60-day one: a bot that only refreshed on a daily
-// timer would spend part of every day holding a dead token. The publish path
-// refreshes too (see liveToken) — this is the belt to that's braces, and the
-// place a failure gets reported while there is still time to act on it.
-async function maybeRefreshTikTokToken() {
-  if (!tiktokConfigured()) return;
-  try {
-    const r = await refreshTikTokToken();
-    if (r.refreshed) console.log(`   tiktok: token refreshed, ${Math.round(r.hoursLeft)}h left`);
-  } catch (e) {
-    console.error('tiktok: token refresh failed:', e.message);
-    await notify.send(
-      bot.telegram,
-      staging,
-      `🔴 חידוש טוקן טיקטוק נכשל: ${describeTikTokError(e)}
-אם לא יחודש, הפרסום לטיקטוק יפסיק לעבוד. הרץ npm run tiktok-token.`
-    );
-  }
-
-  // The refresh token is the one that cannot be renewed from here. A year is
-  // long enough to forget it exists entirely, which is why it is worth saying
-  // out loud before it lapses rather than after.
-  const days = tiktokRefreshDaysLeft();
-  if (days != null && days <= 14) {
-    await notify.send(
-      bot.telegram,
-      staging,
-      `🔑 טוקן הרענון של טיקטוק פג בעוד ${days} ימים — הרץ npm run tiktok-token כדי לחדש`
-    );
-  }
-}
-
-/**
- * Ask Instagram whether it is actually reachable, at boot.
- *
- * A read-only quota call, which hits the same Graph endpoint publishing does and
- * fails the same way. Without it the first news of an app-level block arrives at
- * the first publish attempt — which, on a drip of one post every four hours, can
- * be most of a day after the bot came up believing it was fine.
- */
 async function probeInstagram() {
   if (!instagramConfigured()) return;
   try {
@@ -1081,85 +906,9 @@ async function probeInstagram() {
   }
 }
 
-async function doRun({ announce = true, target } = {}) {
-  if (running) return null;
-  running = true;
-  try {
-    const summary = await runOnce({
-      ...(target ? { target } : {}),
-      onStaged: async (cand) => {
-        await stage(cand);
-        // Counted here rather than from the summary, so a card that reached
-        // Telegram is what counts against the day — not one that was built and
-        // then failed to send.
-        store.noteStaged(localDay(new Date()));
-        activity.push({ ts: Date.now(), type: 'staged' });
-      },
-      onRejected: async (r) => {
-        logReject(r);
-        activity.push({ ts: Date.now(), type: 'rejected', reason: r.reason });
-      },
-    });
-    lastRunAt = Date.now();
-    activity.push({ ts: lastRunAt, type: 'run', gathered: summary.gathered });
-    if (announce) await notify.send(bot.telegram, staging, notify.runReport(summary));
-    return summary;
-  } finally {
-    running = false;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
-
-/**
- * A gather the owner asked for.
- *
- * `/run` is the daily target; `/run 7` is however many you say, and everything
- * in the way of getting there gives way — the topic quotas, the dedupe window,
- * the daily cap itself. Each bypass is collected as it happens and travels on
- * the candidate to the approval card and to Telegram before the post goes out.
- *
- * The bot is not deciding whether the owner may do this. It is making sure the
- * owner knows they did.
- */
-bot.command('run', async (ctx) => {
-  if (running) return ctx.reply('⏳ כבר רץ סבב איסוף');
-
-  const asked = Number((ctx.message?.text || '').trim().split(/\s+/)[1]);
-  const target = Number.isFinite(asked) && asked > 0 ? Math.min(asked, 25) : null;
-
-  await ctx.reply(
-    target
-      ? `⏳ מריץ סבב — עד ${target} פריטים (עוקף את המכסה היומית ${dailyTarget()})`
-      : `⏳ מריץ סבב — עד ${dailyTarget()} פריטים`
-  );
-
-  detach(
-    'סבב איסוף',
-    () => runOverridden('/run', () => doRun(target ? { target } : {})),
-    ctx.chat.id
-  );
-});
-
-// Re-run the same sources from scratch.
-//
-// /run alone will not do this: every item the previous run touched is marked
-// seen, so a change to the layout or the copy rules stays invisible until
-// tomorrow's news arrives. This forgets the claims first, which is what you
-// want while iterating on how the cards look — and nothing else, so the
-// Instagram token and the published log both survive.
-bot.command('redo', async (ctx) => {
-  if (running) return ctx.reply('⏳ כבר רץ סבב איסוף');
-  const cleared = store.clearStaging();
-  const forgotten = store.forgetAllSeen();
-  await ctx.reply(
-    `🔄 שכחתי ${forgotten} פריטים שכבר נראו${cleared ? ` וניקיתי ${cleared} ממתינים` : ''} — מריץ מחדש` +
-      `\n(${store.publishedCount()} פוסטים שכבר פורסמו לא יחזרו)`
-  );
-  detach('סבב איסוף', () => runOverridden('/redo', () => doRun()), ctx.chat.id);
-});
 
 // Both queues, because both are waiting on the same thing — a tap from you.
 // Counting only the built ones would report "0 pending" at the exact moment
@@ -1203,7 +952,7 @@ bot.command('resend', async (ctx) => {
       let sent = 0;
       for (const { key, cand } of rows) {
         try {
-          await sendForApproval(bot.telegram, staging, cand, approvalMessage(cand), stagingButtons(key, cand));
+          await sendForApproval(bot.telegram, staging, cand, brickApprovalMessage(cand), stagingButtons(key, cand));
           sent += 1;
         } catch (e) {
           console.error(`resend: ${cand.headline} — ${e?.message || e}`);
@@ -1445,115 +1194,24 @@ bot.command('clear_pending', (ctx) => {
   ctx.reply(`🧹 נוקו ${n} פריטים ממתינים`);
 });
 
-/**
- * The registry, with how each feed is actually behaving.
- *
- * `/sources` lists them; `/sources off <id>` and `/sources on <id>` switch one
- * without editing sources.json on the server and restarting. The declaration in
- * the file stays the place a source is turned off FOR GOOD, with its probe
- * result recorded; this is the switch for right now.
- */
-bot.command('sources', (ctx) => {
-  const { sources } = registry();
-  const parts = (ctx.message?.text || '').trim().split(/\s+/);
-  const verb = parts[1]?.toLowerCase();
-  const id = parts[2];
-
-  if (verb === 'on' || verb === 'off') {
-    if (!id) return ctx.reply(`שימוש: /sources ${verb} <id>`);
-    const src = sources.find((s) => s.id === id);
-    if (!src) return ctx.reply(`אין מקור בשם "${id}" — /sources לרשימה`);
-    if (verb === 'on' && !src.enabled) {
-      return ctx.reply(
-        `"${id}" מוצהר כבוי ב-sources.json ולא ניתן להדליק אותו מכאן.\nהסיבה שנרשמה: ${src.note?.split('.')[0] || '—'}`
-      );
-    }
-    store.setSourceEnabled(id, verb === 'on');
-    if (verb === 'on') store.clearSourceDegraded(id);
-    return ctx.reply(verb === 'on' ? `✅ "${id}" הודלק` : `⬜ "${id}" כובה (זמנית, עד /sources on ${id})`);
-  }
-
-  const mark = (s) => {
-    if (store.isSourceOff(s.id)) return '⏸️';
-    if (store.isSourceDegradedLatched(s.id)) return '🔴';
-    const h = store.sourceHealth(s.id);
-    if (h.failures) return '🟡';
-    return '✅';
-  };
-
-  const on = sources
-    .filter((s) => s.enabled)
-    .map((s) => {
-      const h = store.sourceHealth(s.id);
-      const bits = [`${mark(s)} ${s.id}`];
-      if (h.lastOkAt) bits.push(`${h.lastItems ?? '?'} פריטים לפני ${notify.humanDuration(Date.now() - h.lastOkAt)}`);
-      else if (h.failures) bits.push('עוד לא הצליח');
-      if (store.isSourceDegradedLatched(s.id)) {
-        const due = store.sourceRecoveryDueAt(s.id);
-        bits.push(
-          `הושבת אחרי ${h.failures} כשלונות` +
-            (due ? `, ניסיון חוזר בעוד ${notify.humanDuration(Math.max(0, due - Date.now()))}` : '')
-        );
-      } else if (h.failures) {
-        bits.push(`${h.failures} כשלונות ברצף`);
-      }
-      const line = bits.join(' · ');
-      return h.lastError && (h.failures || store.isSourceDegradedLatched(s.id))
-        ? `${line}\n     ⛔ ${h.lastError.slice(0, 120)}`
-        : line;
-    });
-
-  const off = sources.filter((s) => !s.enabled).map((s) => `⬜ ${s.id} — ${s.note?.split('.')[0] || 'כבוי'}`);
-
-  ctx.reply(
-    [
-      `📚 מקורות — ${enabledSources().length} פעילים מתוך ${sources.length} מוצהרים`,
-      ...on,
-      '',
-      'מוצהרים כבויים:',
-      ...off,
-      '',
-      '/sources off <id> · /sources on <id>',
-    ].join('\n')
-  );
-});
-
-bot.command('mix', (ctx) => ctx.reply(notify.mixReport(store.recentPublished())));
 bot.command('usage', (ctx) => ctx.reply(usageReport(), { parse_mode: 'Markdown' }));
-
-bot.command('why', (ctx) => {
-  const arg = Number((ctx.message.text || '').split(' ')[1]);
-  const n = Number.isFinite(arg) && arg > 0 ? Math.min(Math.floor(arg), 25) : 10;
-  const items = rejectLog.slice(-n).reverse();
-  if (!items.length) return ctx.reply('✅ שום דבר לא נפסל לאחרונה');
-  ctx.reply(notify.rejectDigest(items, 'האחרונות'));
-});
 
 bot.command('status', async (ctx) => {
   const dayAgo = Date.now() - 24 * 3_600_000;
   const recent = activity.filter((a) => a.ts >= dayAgo);
   const day = localDay(new Date());
-  const rejectedByReason = {};
-  for (const r of rejectLog.filter((r) => r.ts >= dayAgo)) {
-    rejectedByReason[r.reason] = (rejectedByReason[r.reason] || 0) + 1;
-  }
   await ctx.reply(
     notify.statusReport({
-      sourceCount: enabledSources().length,
       stagingSize: store.stagingSize(),
+      proposalSize: store.proposalSize(),
       queueSize: store.queueSize(),
-      gathered: recent.filter((a) => a.type === 'run').reduce((s, a) => s + (a.gathered || 0), 0),
       staged: recent.filter((a) => a.type === 'staged').length,
-      rejected: recent.filter((a) => a.type === 'rejected').length,
-      rejectedByReason,
       publishedToday: store.publishedToday(),
-      lastRunAgoMs: lastRunAt ? Date.now() - lastRunAt : null,
       postIntervalMinutes: POST_INTERVAL_MINUTES,
       stagedToday: store.stagedToday(day) - store.rejectedToday(day),
       rejectedToday: store.rejectedToday(day),
-      remainingToday: remainingToday(day),
-      dailyTarget: dailyTarget(),
-      nextGatherInMin: Math.max(0, Math.round((gatherIntervalMs - (Date.now() - lastGatherAt)) / 60000)),
+      decksToday,
+      decksPerDay: DECKS_PER_DAY,
       heldCount: store.heldCount(),
       targetHealth: Object.fromEntries(liveTargets().map((t) => [t, store.targetHealth(t)])),
       targets: liveTargets(),
@@ -1596,205 +1254,67 @@ bot.command('igquota', async (ctx) => {
 });
 
 /**
- * Build one slideshow.
+ * Build a slideshow.
  *
- * `/deck` lets the model choose what to make; `/deck Prague museum` names it
- * outright, which is what you want when you are testing a change or when the
- * channel needs a specific destination this week.
+ * `/deck` lets the feed choose what to make; `/deck harry-potter`, `/deck 100`
+ * or `/deck בונסאי` names it. A request that parses is honoured and one that
+ * does not is interpreted rather than refused - a thin result falls through to
+ * whatever the feed can best make rather than answering with a complaint,
+ * because a deck you asked for and did not get costs a message and a deck of
+ * the wrong kind costs nothing at all.
  *
- * Deliberately on demand rather than on the daily timer. A deck costs an idea
- * call, a search per place and a drafting call per place, and the failure modes
- * (a thin region, an exhausted search budget) are ones you want to read about
- * while you are sitting there, not discover in a digest.
+ * Deliberately on demand rather than on a timer. A deck costs a model call and
+ * a generated photograph per slide, and the failure modes - a feed with
+ * nothing fresh on it, a run of sets Brickset has never heard of - are ones you
+ * want to read about while you are sitting there.
  */
 bot.command('deck', async (ctx) => {
   const arg = (ctx.message.text || '').replace(/^\/deck(@\S+)?\s*/, '').trim();
 
-  // `/deck 5` — five SUGGESTIONS, the same convention /run 7 uses for cards.
+  // Owner-triggered, so the guards give way - and a deck asked for by name is
+  // the case the override was written for. "Two Harry Potter decks back to
+  // back" is a legitimate request; it is only a problem if it happens without
+  // anyone saying so, which is what the disclosure on the card prevents.
   //
-  // A bare number cannot be a region, so it is unambiguous, and it is the
-  // shape already in the muscle memory. Like /run it steps over the daily
-  // budget: DECKS_PER_DAY paces what arrives unasked, and asking is not that.
-  // It costs one model call and builds nothing — each idea still waits for its
-  // own tap.
-  // `/deck free <anything>` — a deck the seven categories cannot express.
-  //
-  // Opt-in rather than a fallback, because what it produces is a different
-  // artefact: names and photographs, no sourced facts. That is the right trade
-  // for "northern lights in Norway" and the wrong one for "museums in Prague",
-  // and the difference should be something you asked for rather than something
-  // the resolver decided when it ran out of categories.
-  const free = /^free\s+(.+)$/i.exec(arg);
-  if (free) {
-    const asked = free[1].trim();
-    await ctx.reply(`⏳ ${asked}...`);
-    detach(
-      'רעיון חופשי',
-      () =>
-        runOverridden('/deck', async () => {
-          const idea = await freeformIdea(asked);
-          await proposeDeck(idea, [], ctx.chat.id);
-        }),
-      ctx.chat.id
-    );
-    return;
-  }
-
-  const wanted = Number(arg);
-  if (arg && Number.isInteger(wanted) && wanted > 0) {
-    const n = Math.min(wanted, 8);
-    await ctx.reply(`⏳ ${n} רעיונות...`);
-    detach(
-      'רעיונות למצגות',
-      () => runOverridden('/deck', () => suggestDecks(n, ctx.chat.id)),
-      ctx.chat.id
-    );
-    return;
-  }
-
-  if (!searchConfigured()) {
-    await ctx.reply(
-      '⚠️ חיפוש לא מוגדר (GOOGLE_CSE_KEY, GOOGLE_CSE_CX) — נשתמש רק בעמוד הראשי של כל מקום, מה שבדרך כלל לא מספיק לעובדות'
-    );
-  }
-
-  // A deck is minutes of work: an idea call, a search and a drafting call per
-  // place, then twelve renders. Held inside the handler it overran Telegraf's
-  // timeout and took the process down with it.
-  // Owner-triggered, so the guards give way — and a deck asked for by name is
-  // the case the override was written for. "Two Dolomites decks back to back"
-  // is a legitimate request; it is only a problem if it happens without anyone
-  // saying so, which is what the disclosure on the approval card prevents.
-  detach(
-    'בניית מצגת',
-    () => runOverridden('/deck', () => buildAndStageDeck(arg, ctx.chat.id)),
-    ctx.chat.id
-  );
+  // Detached because reading the feed and pricing five sets against Brickset
+  // can take a few seconds on a cold cache, and holding that inside the handler
+  // is how Telegraf's timeout gets overrun.
+  detach('הצעת מצגת', () => runOverridden('/deck', () => proposeAndAsk(arg, ctx.chat.id)), ctx.chat.id);
 });
 
-async function buildAndStageDeck(arg, chatId) {
+/**
+ * Plan a deck and put it in front of the owner, having spent nothing.
+ *
+ * The proposal is where a deck stops until it is answered. Everything below it
+ * - the cover call, one generated photograph per slide, twelve renders - takes
+ * minutes and real money, and all of it used to happen before anything had
+ * been seen.
+ */
+async function proposeAndAsk(request, chatId) {
   const say = (text) => notify.send(bot.telegram, chatId, text).catch(() => {});
-
-  let idea;
-  let alternatives = [];
   try {
-    if (arg) {
-      // Anything at all: "Prague museum", "mountains Italy", "japan autumn",
-      // "הרים בשווייץ". Parsed when it parses and interpreted when it does not,
-      // so the command answers with a slideshow rather than with a grammar
-      // complaint.
-      const req = await resolveRequest(arg);
-      alternatives = req.alternatives;
-      console.log(`deck: resolving request ${req.where} / ${req.kind}`);
-      // A requested deck gets a written cover too. Naming it "Prague · museum"
-      // put a filename on the front of a Hebrew slideshow.
-      const cover = await titleForRequest({ where: req.where, kind: req.kind, count: req.want }).catch(() => ({
-        titleHe: req.titleHe,
-      }));
-      // `asked` is what YOU typed, kept so the proposal can show it beside what
-      // the resolver made of it. A request naming a country is narrowed to the
-      // part travellers mean — Austria + trails becomes Tyrol — because a
-      // country-wide bounding box returns places that do not belong on one
-      // list. That is a defensible rule, and it was invisible: the card showed
-      // "Tyrol" with nothing to say where Tyrol had come from.
-      //
-      // whyNow was the literal English 'asked for directly', which is how an
-      // English sentence ended up in the middle of a Hebrew card. Dropped: the
-      // asked line says the same thing, in Hebrew, and says something useful.
-      // `freeform` is derived from the category here too, and from the same
-      // predicate. A deck asked for by name does not go through normaliseIdea,
-      // so before this it was the one route that ignored the routing entirely:
-      // "/deck mountains Switzerland" went off to source official pages for
-      // five summits that do not have any.
-      idea = {
-        ...cover,
-        where: req.where,
-        kind: req.kind,
-        want: req.want,
-        whyNow: null,
-        asked: arg,
-        freeform: !isSourcedKind(req.kind),
-      };
-    } else {
-      console.log('deck: proposing ideas');
-      const picked = await pickIdea();
-      if (!picked) return say('❌ לא חזרו רעיונות');
-      idea = picked.idea;
-      alternatives = picked.alternatives;
-    }
-
-    // The idea is now TEXT, and text is where it stops until you say otherwise.
-    //
-    // Everything below the proposal — sourcing each place, a drafting call per
-    // place, twelve renders — takes minutes and real quota, and all of it used
-    // to happen before you had seen anything. A deck you did not want cost the
-    // whole build and was rejected at the end of it. Now it costs one message.
-    return proposeDeck(idea, alternatives, chatId);
+    const proposal = await planDeck(request || null);
+    const key = store.addProposal({ proposal, chatId });
+    const warning = proposalWarning(proposal);
+    await bot.telegram.sendMessage(
+      chatId,
+      `${proposalMessage(proposal)}${warning ? `\n\n⚠️ ${warning}` : ''}`,
+      proposalButtons(key)
+    );
+    return key;
   } catch (e) {
-    console.error('deck idea failed:', e);
-    return say(notify.withDetail('❌ לא הצלחתי להציע מצגת', e));
+    console.error('deck proposal failed:', e);
+    // The feed's own rejections are the useful part of this failure: "every
+    // deal is stale" and "the feed did not parse" look identical otherwise, and
+    // only one of them is something to fix here.
+    const why = e.feedDropped?.length
+      ? ['', ...e.feedDropped.slice(0, 5).map((d) => `   ✗ ${d.id}: ${String(d.why).slice(0, 90)}`)].join('\n')
+      : '';
+    return say(notify.withDetail(`❌ לא הצלחתי להציע מצגת${why}`, e));
   }
 }
 
-/** The proposal itself: what would be built, and the three ways to answer it. */
-/** Did the resolver hand back a different region from the one you named? */
-const narrowedFrom = (idea) => {
-  const asked = String(idea.asked || '').trim();
-  const where = String(idea.where || '').trim().toLowerCase();
-  return asked && where && !asked.toLowerCase().includes(where) ? asked : null;
-};
-
-function proposalMessage(idea) {
-  // `ownWords`, not `freeform`. A deck you described in your own words is what
-  // this branch is for — no category, and the request quoted back. Landscape
-  // proposals are free-form too now and DO have a category, so they take the
-  // ordinary branch below and pick up the no-facts line there. Not `asked`
-  // either: a deck requested by name carries that too.
-  if (idea.ownWords) {
-    return [
-      `💡 ${idea.titleHe}`,
-      `📍 ${idea.whereEn} · חופשי · ${idea.places.length} מקומות`,
-      `🗣 ביקשת "${idea.asked}"`,
-      '────────────',
-      ...idea.places.map((p, i) => `${i + 1}. ${p.nameHe}${p.noteHe ? ` (${p.noteHe})` : ''}`),
-      '',
-      '(מצגת חופשית — שמות ותמונות בלבד, בלי שעות, מחירים או עובדות מאומתות)',
-    ].join('\n');
-  }
-
-  return [
-    `💡 ${idea.titleHe}`,
-    idea.angleHe,
-    `📍 ${idea.where} · ${KINDS[idea.kind]?.he || idea.kind} · ${idea.want} מקומות`,
-    // Shown only when the resolver moved. Typing "מסלולים אוסטריה" and being
-    // offered Tyrol with no explanation reads as the bot ignoring the request,
-    // when it is in fact the documented narrowing doing its job. Suppressed
-    // when the request already names the region, where repeating it back costs
-    // a line and says nothing.
-    narrowedFrom(idea) ? `🗣 ביקשת "${idea.asked}" — צומצם ל-${idea.where}, אזור שמפה יכולה לחפש בו` : null,
-    idea.whyNow ? `🗓 ${idea.whyNow}` : null,
-    // The content, so the decision here is about the post rather than about a
-    // headline. This is the PLAN: the build sources its own places from the
-    // site or the map and may not find every one of them, which is why the
-    // last line says so rather than letting you discover it at the album.
-    idea.places?.length ? '────────────' : null,
-    ...(idea.places || []).map((p, i) => `${i + 1}. ${p}`),
-    // Two different sentences, because the list means two different things.
-    // On a sourced deck it is a plan the build may not be able to keep. On a
-    // landscape deck nothing is looked up, so the list IS the slides — and the
-    // fact that they will carry no hours and no prices is the thing to know
-    // before tapping, not after.
-    idea.places?.length
-      ? idea.freeform
-        ? '\n(שמות ותמונות בלבד — בלי שעות, מחירים או עובדות מאומתות)'
-        : '\n(רשימה מתוכננת — הבנייה מאתרת את המקומות בפועל ויכולה להחליף חלק)'
-      : null,
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-// The destination is chosen here, before anything is built — which is the only
+// The destination is chosen here, before anything is built - which is the only
 // point at which choosing it saves anything. A deck renders twelve slides
 // across two aspect ratios; picking the platform first halves that, and the
 // approval card then previews the crop that is actually going out rather than
@@ -1803,12 +1323,12 @@ const proposalButtons = (key) =>
   Markup.inlineKeyboard([
     [
       Markup.button.callback('📸 אינסטגרם', `db:${key}:instagram`),
-      // TikTok is ALWAYS a draft now. There were two buttons and the direct one
-      // had nothing to recommend it: the API cannot name a sound, so a direct
-      // post gets whatever TikTok picks and can never be changed afterwards —
-      // sound is the one thing not editable after publishing. A draft costs one
-      // tap in the app and buys the sound, the cover and the caption. It is
-      // also not subject to the audit, which the direct path is.
+      // TikTok is ALWAYS a draft. There were two buttons and the direct one had
+      // nothing to recommend it: the API cannot name a sound, so a direct post
+      // gets whatever TikTok picks and can never be changed afterwards - sound
+      // is the one thing not editable after publishing. A draft costs one tap
+      // in the app and buys the sound, the cover and the caption. It is also
+      // not subject to the audit, which the direct path is.
       Markup.button.callback('🎵 טיקטוק (טיוטה)', `db:${key}:tiktok`),
     ],
     [Markup.button.callback('📸🎵 שניהם', `db:${key}:both`)],
@@ -1816,115 +1336,27 @@ const proposalButtons = (key) =>
   ]);
 
 /**
- * Ask for ideas and pick the one whose place the feed has least of.
- *
- * Shared by /deck and the daily suggestions, so both get the same reordering
- * and the same fallbacks. It is the cheap half of making a deck — one call, no
- * sourcing, no renders — which is what makes suggesting a few a day reasonable.
- */
-async function pickIdea() {
-  const ideas = await proposeIdeas({ count: 3, recent: store.recentTitles() });
-  if (!ideas.length) return null;
-
-  const history = store.recentPublished();
-  const fresh = ideas.filter((i) => !placeOverCap(i.where, history));
-  const ordered = fresh.length ? [...fresh, ...ideas.filter((i) => !fresh.includes(i))] : ideas;
-  if (fresh.length && fresh[0] !== ideas[0]) {
-    console.log(`deck: "${ideas[0].where}" is over its share — starting from "${fresh[0].where}" instead`);
-  }
-  return {
-    idea: ordered[0],
-    alternatives: ordered.slice(1).map((i) => ({ where: i.where, kind: i.kind })),
-  };
-}
-
-/**
- * A few deck ideas a day, unasked, the way cards arrive.
- *
- * Only the IDEA is produced here. Nothing is sourced, drafted or rendered until
- * you tap בנה — which is the whole reason this can run on a timer at all: a
- * suggestion costs one model call, and a deck costs minutes and a search budget.
- *
- * Capped two ways. DECKS_PER_DAY is the day's budget, and a ceiling on
- * unanswered proposals stops a week away from returning fourteen stale ideas —
- * the same reasoning as the daily card cap, which exists because an approval
- * queue you cannot face is a queue you stop reading.
- */
-const DECKS_PER_DAY = Math.max(0, Number(process.env.DECKS_PER_DAY ?? '2'));
-const DECK_BACKLOG_MAX = Math.max(1, Number(process.env.DECK_BACKLOG_MAX ?? '3'));
-let deckDay = null;
-let decksToday = 0;
-let lastDeckSuggestAt = 0;
-
-/**
- * N ideas at once, each its own proposal card.
- *
- * One model call for the lot rather than N calls, which is most of why asking
- * for five is reasonable. They are reordered by place share the same way a
- * single suggestion is, so five at once cannot come back as five Kyotos.
- *
- * Each still waits for its own tap: this produces five things to decide about,
- * not five decks.
- */
-async function suggestDecks(n, chatId) {
-  const ideas = await proposeIdeas({ count: n, recent: store.recentTitles() });
-  if (!ideas.length) return notify.send(bot.telegram, chatId, '❌ לא חזרו רעיונות');
-
-  const history = store.recentPublished();
-  const fresh = ideas.filter((i) => !placeOverCap(i.where, history));
-  const ordered = fresh.length ? [...fresh, ...ideas.filter((i) => !fresh.includes(i))] : ideas;
-
-  for (const idea of ordered) {
-    // Alternatives are the OTHER ideas — each proposal keeps its own fallbacks
-    // for when its region turns out to be thin.
-    const alternatives = ordered
-      .filter((o) => o !== idea)
-      .slice(0, 2)
-      .map((o) => ({ where: o.where, kind: o.kind }));
-    await proposeDeck(idea, alternatives, chatId);
-  }
-  return true;
-}
-
-async function suggestDeck() {
-  const picked = await pickIdea();
-  if (!picked) {
-    console.log('deck: no ideas came back');
-    return false;
-  }
-  await proposeDeck(picked.idea, picked.alternatives, staging);
-  return true;
-}
-
-async function proposeDeck(idea, alternatives, chatId) {
-  const key = store.addProposal({ idea, alternatives, chatId });
-  await bot.telegram.sendMessage(chatId, proposalMessage(idea), proposalButtons(key));
-  return key;
-}
-
-/**
  * Build a proposal that was approved, and stage what comes out.
  *
- * The second half of what used to be one straight-through function. It is
- * reached from a button tap rather than from the command, so it re-enters
+ * Reached from a button tap rather than from the command, so it re-enters
  * runOverridden: the override is what lets a deck the owner asked for step over
  * the repeat guards, and an AsyncLocalStorage context does not survive the wait
  * for you to tap a button.
  */
 async function buildProposal(key, chatId, messageId = null, targets = ['instagram'], draft = false) {
   const say = (text) => notify.send(bot.telegram, chatId, text).catch(() => {});
-  const proposal = store.getProposal(key);
-  if (!proposal) return say('ההצעה הזו כבר לא ממתינה');
-  const { idea, alternatives = [] } = proposal;
+  const held = store.getProposal(key);
+  if (!held) return say('ההצעה הזו כבר לא ממתינה');
+  const { proposal } = held;
   store.clearProposal(key);
 
   // Progress rewrites the proposal message instead of sending new ones.
   //
-  // A deck takes minutes, and silence looks like a hang — that is why these
-  // lines existed at all. But each one was a fresh notification, so watching a
-  // deck build meant four buzzes to learn three things you could not act on.
-  // Editing one message in place keeps the reassurance and costs one
-  // notification, which is what the message already spent.
+  // A deck takes minutes, and silence looks like a hang - that is why these
+  // lines exist at all. But each one as a fresh message meant four buzzes to
+  // learn three things you could not act on. Editing one message in place keeps
+  // the reassurance and costs one notification, which is what the message had
+  // already spent.
   const progress = async (text) => {
     console.log(`deck: ${text}`);
     if (!messageId) return;
@@ -1932,45 +1364,23 @@ async function buildProposal(key, chatId, messageId = null, targets = ['instagra
   };
 
   try {
-    await progress(`⏳ ${idea.titleHe}\n${idea.freeform ? 'מחפש תמונות' : 'מחפש מקורות'}...`);
+    await progress(`⏳ ${proposal.subject}\nכותב שער...`);
 
-    // A free-form deck has no sources to find — its places are already named
-    // and it carries no facts — so it goes straight to the photographs. There
-    // is no fallback ladder either, because there is no region to fall back to.
-    // A free-form idea from /deck free already IS the builder's shape; one from
-    // a proposal has to be adapted, because its places were chosen when the
-    // idea was and must not be asked for a second time.
-    const built = idea.freeform
-      ? await buildFreeformDeck(idea.ownWords ? idea : freeformFromIdea(idea), {
-          // Rewrites the same message, so a seven-place image hunt reports
-          // itself without costing seven notifications.
-          onProgress: ({ done, of, name, ok }) =>
-            progress(`⏳ ${idea.titleHe}
-${done}/${of} · ${ok ? '📷' : '✗'} ${name}`),
-        })
-      : await buildWithFallback(idea, alternatives, {
-          // Said out loud, because a deck takes minutes and silence looks like
-          // a hang. "Bernese Alps came back with two slides, trying Valais" is
-          // also the most useful thing to know afterwards.
-          onAttempt: (attempt, i, why) => {
-            if (i > 0) progress(`↩️ ${idea.titleHe}\nלא הסתדר, מנסה ${describeAttempt(attempt)}...`);
-          },
-        });
+    const built = await buildProposed(proposal, {
+      onProgress: (s) => progress(`⏳ ${proposal.subject}\n${s}`),
+    });
+
     if (!built?.slides?.length) {
-      // Still a suggestion rather than a dead end: the request was understood,
-      // the region just has nothing mappable in it, and the next thing to try
-      // is worth saying out loud.
-      const next = alternatives[0];
       return say(
         [
-          `😕 לא הצלחתי לבנות מצגת על ${idea.where} / ${KINDS[idea.kind]?.he || idea.kind}`,
-          next ? `💡 שווה לנסות: /deck ${next.where} ${next.kind}` : '💡 נסה אזור ממוקד יותר, למשל /deck Dolomites trail',
+          `😕 לא נשארו שקופיות ב"${proposal.subject}"`,
+          ...(built?.dropped || []).slice(0, 4).map((d) => `   ✗ ${d.id}: ${String(d.why).slice(0, 90)}`),
         ].join('\n')
       );
     }
 
     // Rendered for the chosen destination only, and staged owing just that one.
-    const cand = await toDeckCandidate(built, { targets, tiktokDraft: draft });
+    const cand = await toBrickCandidate(built, { targets, tiktokDraft: draft });
 
     if (store.hasPublished(cand.id)) {
       return say(`⏭️ המצגת הזו כבר פורסמה (${cand.id}) — /deck שוב לרעיון אחר`);
@@ -1982,26 +1392,19 @@ ${done}/${of} · ${ok ? '📷' : '✗'} ${name}`),
     if (messageId) await bot.telegram.deleteMessage(chatId, messageId).catch(() => {});
     await stage(cand);
 
-    // No summary message. It said slide count, style and search budget — and
-    // the approval card above it already carries the first two in its header,
-    // so it was a second notification to repeat what you were already reading.
-    // The budget line goes to the log, where a number you check occasionally
-    // belongs.
     console.log(
-      `deck: staged ${built.slides.length} slides · style ${built.style}` +
-        (built.short ? ` · asked for ${idea.want}` : '') +
-        (searchConfigured() ? ` · ${searchRemaining()}/${searchBudget()} searches left today` : ' · no search')
+      `deck: staged ${built.slides.length} slides · ${built.recipe} · cover from ${built.hookFrom}` +
+        (built.dropped.length ? ` · ${built.dropped.length} dropped` : '')
     );
   } catch (e) {
     console.error('deck failed:', e);
-    // The dropped list is the useful part of a failure here: "nothing had an
-    // official page" and "the search budget ran out" look identical otherwise.
     const why = e.deck?.dropped?.length
-      ? ['', ...e.deck.dropped.slice(0, 5).map((d) => `   ✗ ${d.place}: ${String(d.why).slice(0, 90)}`)].join('\n')
+      ? ['', ...e.deck.dropped.slice(0, 5).map((d) => `   ✗ ${d.id}: ${String(d.why).slice(0, 90)}`)].join('\n')
       : '';
     await say(notify.withDetail(`❌ בניית המצגת נכשלה${why}`, e));
   }
 }
+
 
 /**
  * What a working connection needs, and the two ways to get one.
@@ -2144,34 +1547,30 @@ bot.command('help', (ctx) =>
   ctx.reply(
     [
       'פקודות:',
-      '/run — סבב איסוף עכשיו',
-      '/run <מספר> — סבב עם יעד גדול יותר, עוקף מכסות (מדווח מה נעקף)',
-      '/redo — שכח מה כבר נראה והרץ שוב (לבדיקת שינויים בעיצוב/נוסח)',
+      '/deck — מציע מצגת מהדילים שיש עכשיו',
+      '/deck harry-potter — מצגת על נושא מסוים',
+      '/deck 100 — מצגת של סטים עד 100 ₪',
+      '/deck בונסאי — מצגת על סט מסוים',
+      '',
       '/status — סטטוס מלא',
       '/health — בריאות כל יעד בנפרד, והשגיאה האחרונה',
-      '/pending — רשימת הממתינים לאישור',
+      '/usage — טוקנים ועלות',
+      '/pending — הצעות ומצגות שממתינות לך',
       '/resend — שולח שוב את כרטיסי האישור (אם לא הגיעו)',
       '/queue — מה בתור, לפי הסדר, ממוספר',
       '/next — מפרסם את הבא בתור',
       '/post <מספר> — מפרסם אחד מסוים מהתור, מדלג על הסדר',
       '/draft <מספר> — שולח את החצי של טיקטוק לטיוטות עכשיו',
-      '/held — פוסטים מאושרים שממתינים ליעד שנפל',
-      '/retry — אחרי שתיקנת: מחזיר אותם לתור',
-      '/clear_held — מוותר על המוחזקים ומסמן את היעדים כתקינים',
-      '/why [n] — מה נפסל ולמה',
-      '/mix — תמהיל הנושאים שפורסמו',
-      '/sources — רשימת המקורות',
-      '/igquota — מכסת אינסטגרם',
-      '/tiktok_connect — קישור חיבור לטיקטוק עם ההרשאות הנכונות',
-      '/deck — מציע רעיון למצגת',
-      '/deck 5 — חמישה רעיונות בבת אחת (עוקף את המכסה היומית)',
-      '/deck Kyoto temple — רעיון על יעד מסוים',
-      '/deck free <בקשה> — מצגת חופשית: שמות ותמונות, בלי עובדות מאומתות',
-      '/deck <מקום> <קטגוריה> — מצגת מוזמנת, למשל: /deck Prague museum',
-      '/tiktok — חיבור טיקטוק, טוקנים ורמות פרטיות',
+      '/held — מצגות מאושרות שממתינות ליעד שנפל',
+      '/retry — אחרי שתיקנת: מחזיר אותן לתור',
+      '/clear_held — מוותר על המוחזקות ומסמן את היעדים כתקינים',
       '/clear_pending',
       '',
-      'אפשר גם להדביק כתובת של מקור ראשוני והיא תיבדק ותיכתב.',
+      '/igquota — מכסת אינסטגרם',
+      '/tiktok — חיבור טיקטוק, טוקנים ורמות פרטיות',
+      '/tiktok_connect — אילו הרשאות צריך ואיך לחבר',
+      '',
+      'תשובה להצעה משנה אותה: כתוב נושא, מחיר או שם של סט.',
     ].join('\n')
   )
 );
@@ -2196,34 +1595,22 @@ const localDay = (d) =>
  * the queue back up, and twenty cards a day is exactly how a human gate quietly
  * turns into a rubber stamp.
  */
-const offerCeiling = () =>
-  Math.max(dailyTarget(), Number(process.env.DAILY_OFFER_CEILING || dailyTarget() * 3));
-
 /**
- * How many more cards today may stage — the smaller of the two limits above.
+ * How many deck proposals may arrive unasked in a day.
  *
- * `live` is what is still standing: staged-and-awaiting-you, or approved. Those
- * are the ones that count as today's two or three.
+ * Capped two ways. DECKS_PER_DAY is the day's budget, and a ceiling on the
+ * backlog stops them accumulating: three unanswered proposals sitting in the
+ * chat is a signal to stop offering, not to offer a fourth.
+ *
+ * A proposal is free — the feed is a file and the prices are cached — so what
+ * this paces is your attention rather than any cost.
  */
-function remainingToday(day) {
-  const offered = store.stagedToday(day);
-  const live = offered - store.rejectedToday(day);
-  return Math.min(dailyTarget() - live, offerCeiling() - offered);
-}
+const DECKS_PER_DAY = Math.max(0, Number(process.env.DECKS_PER_DAY ?? '2'));
+const DECK_BACKLOG_MAX = Math.max(1, Number(process.env.DECK_BACKLOG_MAX ?? '3'));
+let deckDay = null;
+let decksToday = 0;
+let lastDeckSuggestAt = 0;
 
-/**
- * The alarm that should have caught this and did not.
- *
- * It measured from an in-memory `lastStagedAt` that started as null and was only
- * ever set by a successful staging, behind an `if (lastStagedAt)` guard — so a
- * bot that staged nothing, which is the whole point of the alarm, skipped the
- * check forever, and any restart reset it.
- *
- * It also asked whether anything published, globally. That is the wrong
- * question when there is more than one destination: Telegram publishing every
- * day kept the answer yes while Instagram was blocked at the API and had not
- * published in days. The question is per destination.
- */
 function quietCheck() {
   const hours = Math.max(1, Number(QUIET_ALERT_HOURS));
   const limitMs = hours * 3_600_000;
@@ -2274,26 +1661,21 @@ function tick() {
   const day = localDay(now);
   const hour = now.getHours();
 
-  // Gather through the day rather than once at RUN_HOUR.
-  //
-  // One pass a day meant a source publishing at 14:00 waited until 11:00 the
-  // next morning, and the only way to see it sooner was to type /run. Cards
-  // should arrive when the news does; you approve them when you have time.
-  //
-  // Three things keep that from becoming a firehose:
-  //   - a daily cap on what is standing plus a hard ceiling on what is offered
-  //     (see remainingToday), so "the best two or three a day" stays true no
-  //     matter how many times it looks, and rejecting the morning's three does
-  //     not end the day;
-  //   - quiet hours, so nothing arrives overnight;
-  //   - the gather itself is free, and it costs a drafting call only when
-  //     something genuinely new survives ranking.
   const inHours = hour >= Number(RUN_HOUR) && hour < Number(GATHER_UNTIL_HOUR);
-  const remaining = remainingToday(day);
-  const due = Date.now() - lastGatherAt >= gatherIntervalMs;
 
-  // Deck ideas, on the same rhythm as cards and in the same hours. Only the
-  // idea — nothing is built until you tap. Spaced by the gather interval so
+  // The token refresh used to ride along with the daily gather, which is where
+  // it lived because a gather happened every day. There is no gather now, so it
+  // gets its own day-change check - otherwise the Instagram token quietly
+  // stopped being refreshed the moment the card path came out.
+  if (day !== lastRunDay) {
+    lastRunDay = day;
+    maybeRefreshIgToken().catch(() => {});
+    maybeRefreshTikTokToken().catch(() => {});
+  }
+
+  // Deck proposals through the day, in waking hours. Only the PROPOSAL - the
+  // feed is read and the sets are priced, both of which are free, and nothing
+  // is written or generated until you tap. Spaced by the gather interval so
   // they arrive through the day rather than three at once at 08:00.
   if (deckDay !== day) {
     deckDay = day;
@@ -2308,37 +1690,16 @@ function tick() {
   ) {
     lastDeckSuggestAt = Date.now();
     decksToday += 1;
-    suggestDeck().catch((e) => console.error('deck suggestion failed:', e.message));
-  }
-
-  if (inHours && remaining > 0 && due) {
-    lastGatherAt = Date.now();
-    if (day !== lastRunDay) {
-      lastRunDay = day;
-      maybeRefreshIgToken().catch(() => {});
-      maybeRefreshTikTokToken().catch(() => {});
-    }
-    // Announce only the first pass of the day. The later ones are routine and a
-    // "0 staged" report every few hours is noise you would learn to ignore.
-    doRun({ target: remaining, announce: day !== lastAnnouncedDay }).then(() => {
-      lastAnnouncedDay = day;
-    }).catch((e) => console.error('gather failed:', e.message));
+    proposeAndAsk(null, staging).catch((e) => console.error('deck suggestion failed:', e.message));
   }
 
   quietCheck();
 }
 
-function sendRejectDigest() {
-  if (REJECT_NOTIFY !== 'digest' || !rejectQueue.length) return;
-  const items = rejectQueue;
-  rejectQueue = [];
-  return notify.send(bot.telegram, staging, notify.rejectDigest(items, REJECT_DIGEST_HOURS));
-}
-
 // ---------------------------------------------------------------------------
 
 async function main() {
-  console.log('starting tiyul+ ...');
+  console.log('starting brickdeal-social ...');
 
   // launch() never resolves during normal operation — it *is* the long-poll
   // loop. Awaiting it queues everything after it behind a promise that only
@@ -2353,19 +1714,23 @@ async function main() {
 
   console.log(`bot live (@${me.username})`);
   console.log(`   owner lock: ON (only ${OWNER_ID})`);
-  console.log(`   sources: ${enabledSources().length} enabled`);
   // Per kind, because that is now the whole rule and a combined list would be a
   // lie in both directions: it would name Telegram, which receives nothing, and
   // it would not say that a card and a deck go to different places.
-  console.log(`   cards to: ${targetsForKind('card').join(' + ') || 'NOWHERE (Instagram not configured)'}`);
-  console.log(`   decks to: ${targetsForKind('deck').join(' + ') || 'NOWHERE (TikTok not connected)'}`);
+  console.log(`   decks to: ${targetsForKind('deck').join(' + ') || 'NOWHERE (nothing is connected)'}`);
   console.log('   telegram: approval only — nothing publishes to a channel');
-  console.log(`   images: ${imagesEnabled() ? 'a provider is configured' : 'text-led cards only'}`);
+  console.log(
+    `   photographs: ${
+      imagesEnabled() ? 'generated at home-shot quality' : 'NOT configured — slides fall back to catalogue images'
+    }`
+  );
   // Connecting TikTok from a browser instead of pasting a code into a terminal.
   // In this process rather than a service of its own, so pm2 supervises it and
   // so the token it writes goes through the same store this process holds open.
   startOAuthServer();
-  console.log(`   daily run at ${RUN_HOUR}:00 · target ${dailyTarget()} · drip every ${POST_INTERVAL_MINUTES} min`);
+  console.log(
+    `   proposals ${DECKS_PER_DAY}/day between ${RUN_HOUR}:00 and ${GATHER_UNTIL_HOUR}:00 · drip every ${POST_INTERVAL_MINUTES} min`
+  );
 
   await maybeRefreshIgToken();
   await maybeRefreshTikTokToken();
@@ -2376,18 +1741,14 @@ async function main() {
   }, intervalMs);
 
   setInterval(tick, 60_000);
-  setInterval(
-    () => sendRejectDigest()?.catch?.((e) => console.error('reject digest error:', e.message)),
-    Math.max(1, Number(REJECT_DIGEST_HOURS)) * 3_600_000
-  );
 
   await notify.send(
     bot.telegram,
     staging,
     notify.startupPing({
-      sourceCount: enabledSources().length,
       queueSize: store.queueSize(),
       stagingSize: store.stagingSize(),
+      proposalSize: store.proposalSize(),
       targets: liveTargets(),
       images: imagesEnabled(),
     })

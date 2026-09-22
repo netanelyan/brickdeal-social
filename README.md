@@ -1,237 +1,174 @@
-# tiyul+ · טיול+
+# brickdeal-social
 
-A Hebrew travel-content pipeline for Israeli travellers. It reads primary
-sources, drafts a post, renders a card, sends it to one person on Telegram for
-approval, and publishes only when that person taps approve.
+Turns the BrickDeal deal feed into Hebrew TikTok slideshows. It picks five sets,
+prices them against the original brand's retail price, photographs them as
+though somebody built them at home, renders the slides, and sends them to one
+person on Telegram for approval. Nothing publishes without a tap.
 
-One destination per kind of post: a news **card** goes to Instagram, a
-slideshow **deck** goes to TikTok. Telegram is where posts are approved, not
-somewhere they publish.
-
-Nothing publishes without a human tap. No claim is made without a source that
-was fetched, right then, from a domain on an allowlist.
+```
+deals.json → pick five → Brickset + FX → hook → photographs → render
+     → Telegram proposal → ✅ → build → Telegram album → ✅ → TikTok + Instagram
+```
 
 <p align="center">
-  <img src="assets/samples/card-volcano.jpg" width="270" alt="Card: the alert level at Mount Aso">
-  <img src="assets/samples/card-europe-heat.jpg" width="270" alt="Card: the air conditioning missing from most homes in Europe">
-  <img src="assets/samples/card-phuket.jpg" width="270" alt="Card: Phuket, 7 rain days in February">
+  <img src="assets/samples/slide-cover.jpg" width="240" alt="Cover slide: איך אנשים עדיין משלמים מחיר מלא?">
+  <img src="assets/samples/slide-comparison.jpg" width="240" alt="A set with its community price, list price and saving">
+  <img src="assets/samples/slide-no-comparison.jpg" width="240" alt="A set with no Brickset match, carrying its price alone">
 </p>
 
-<p align="center"><em>Real output. Left to right: a Smithsonian volcano report, a NASA
-Earth Observatory piece, and ten years of ERA5 climate normals.</em></p>
+<p align="center"><em>Rendered output, from <code>npm run brick-lab</code>, over the white wall that
+is the hardest background and the most common one. Left to right: a cover with
+its emphasis in cream, an ordinary slide, and the case where Brickset has never
+heard of the set — which carries the price alone and must not look like an
+error.</em></p>
 
----
+The account this is modelled on is [@lego_from_ali](https://www.tiktok.com/@lego_from_ali)
+(`בונים וחוסכים-מאלי אקספרס`), which does 120K–200K views on the format with
+under five thousand followers. Its anatomy is copied closely and departed from
+in exactly one place, which is documented below and enforced in code.
 
-## The loop
+## What a slide is
 
-```
-sources → rank → draft (Claude) → verify → render → Telegram → you tap ✅ → Instagram
-                                    ↑                              ↓
-                              reject with a reason            queue, drip out
-```
-
-1. **Gather.** Twenty enabled feeds and one dataset, fetched live.
-2. **Rank.** A cheap sort on titles and summaries, because the next step costs
-   money. Authority, recency, specificity, topic balance.
-3. **Draft.** One Claude call returns Hebrew copy, a layout choice, an image
-   query, and a verbatim quote for every claim it makes.
-4. **Verify.** The quotes must literally appear in the page that was fetched.
-   No fares, no decimals on a card, no word used twice in a headline.
-5. **Render.** Headless Chromium, because Hebrew needs real bidirectional text
-   layout. 1080×1350 JPEG.
-6. **Approve.** A Telegram DM with the card, the source URL, where the image
-   came from, how many quotes were checked, and — when TikTok is a destination —
-   the privacy level it would publish at, with a button to change it.
-7. **Publish.** Instagram Graph API for cards; the TikTok Content Posting API
-   for decks. One post drips out every four hours; a destination that fails is
-   retried on its own, without re-posting to the one that worked.
-
-## Two kinds of post
-
-A **card** is one verified claim from one source, 1080×1350, and it goes to
-Instagram. That is the loop above.
-
-A **deck** is a slideshow — a cover and five to seven places — and it goes to
-TikTok, and to Instagram as a carousel. It is built the other way round: Claude
-proposes what would be worth watching, and only then does the pipeline go
-looking for whether it can be sourced.
-
-A deck is rendered **twice, in two design languages**. The TikTok set is
-1080×1920 with no branding on it at all and the text placed wherever the
-photograph is quietest — it is read over a video player's furniture, at arm's
-length, for two seconds. The Instagram set is 1080×1350 drawn as a *card*: the
-same wordmark, the same accent rule, the same type scale as the news cards, so a
-slideshow in the grid looks like the account that posted it. Same words, same
-photographs, two designs — one deck published twice, never two decks.
-
-**Decks are suggested to you, a few a day.** Only the idea is produced on the
-timer — one model call, no sourcing, no renders — and it arrives as text you
-approve before anything is built. See below.
-
-**A slide carries a place name and nothing else, unless a number decides
-something.** That is copied from the posts this channel is modelled on, and it
-was arrived at the hard way: the first decks put a sentence under each name, and
-a sentence on a slide reads as a guidebook no matter how it is set.
-
-### Two styles, chosen per deck
-
-The reference accounts use two different systems and averaging them produced
-slides that belonged to neither. So a deck picks one, once, and every slide in
-it matches:
-
-| | **minimal** | **info** |
-|---|---|---|
-| looks like | a photograph you captioned | a card you would screenshot |
-| type | Heebo 600, ~2.6% of the frame, **no outline** | Rubik 800, cream `#F7E3A1` over a bronze outline |
-| colour | white or near-black, measured per photograph | always cream |
-| carries | name, country, flag, at most one short note | name, flag, and the same fields in the same order |
-| chosen when | most slides have fewer than one measured fact | most slides have one or more |
-
-The type is deliberately **small**. A place name sits at about 2.6% of the frame
-height, which feels wrong in a design tool and is right in a feed: it reads as
-somebody captioning their own photograph rather than as a graphic laid over
-stock. The minimal style carries **no outline at all** — a stroke around every
-letter is not something TikTok's own text tool can produce, so the eye reads it
-as foreign however good the rest of the slide is.
-
-### Where the words go is measured, not guessed
-
-`src/render/photo.js` draws each photograph to a 45×80 grid in the renderer's own
-Chromium and reads the pixels back. For every candidate position it has the mean
-luminance, the spread, and the texture — the mean step between neighbouring
-cells, which is what tells a smooth gradient from a chequerboard. It returns the
-centre of the quietest region as a fraction of the frame, the colour the type
-has to be to survive there, and how hard the shadow has to work.
-
-This replaced asking the vision model which third of the picture was "emptiest".
-A model is the right tool for *is this actually the Eiger* and the wrong tool for
-*what is the mean luminance of the region the text will occupy* — the second has
-an exact answer, it is free, and it is the one that decides whether the slide is
-legible. TikTok's button rail is excluded as a rectangle, which is why text on a
-TikTok slide drifts left and on the Instagram render does not.
+A photograph filling the whole 9:16 frame — no card, no border, no badge, no
+logo chip — with four centred lines near the top:
 
 ```
-idea (Claude) → places (OpenStreetMap + Wikidata) → facts → photographs (curated by looking)
-   → measure each photograph → render 1080×1920 and 1080×1350
-   → Telegram album → you tap ✅ → TikTok + Instagram
+סחלב פרחים 🌸
+בקהילה: 45₪
+מחיר מחירון: 269₪
+חיסכון: 224₪ 💰      ← this line in cream, not white
 ```
 
-**OpenStreetMap chooses the places; it never states a fact.** A place's tags
-select it and rank it by how many language Wikipedias write about it, and then
-every *sentence* on a slide is quoted from the official site of the place, of the
-body that runs it, or of the body that contains it — checked
-character-for-character, exactly like a card.
+White, bold, with a fine dark outline and a soft shadow. A small
+semi-transparent watermark bottom centre, clear of TikTok's own furniture.
 
-**The one documented exception is a structured measurement.** A summit has no
-official website, no operator and no opening hours, so there is no page to quote
-and summit decks came back as bare names — with the one fact anybody wants, the
-height, sitting unread in Wikidata's P2044. `src/deck/facts.js` reads those
-properties directly: an elevation, a length, a founding year. A property is not
-prose. Nothing is written, the value is copied with its unit normalised, and the
-QID travels with it. Prose about a place still needs its official page.
+**Two treatments were built and the lighter one won.** The first came straight
+off the reference: type hard against the right edge in a ~7px black outline,
+which is what TikTok's own editor produces. Rendered beside the posts this
+channel already publishes it was the louder of the two, and the owner picked the
+other — so what is here now is the travel channel's treatment, centred and
+finer.
 
-**Every name is Hebrew.** Wikidata has a Hebrew label for the famous places and
-not for the rest, and the old code fell back to the English one — which is how
-"Piz Bernina" and "Aletschhorn" shipped on a Hebrew slide. `src/deck/hebrew.js`
-transliterates the rest and then *checks*: a name that still contains a Latin
-letter is not used and the place is dropped.
+That moves where legibility comes from. At 2px the outline is a definition edge
+rather than a border, and the scrim and shadow do the work — which matters,
+because a home shot of a white wall in daylight is exactly the background a fine
+outline struggles on and the heavy one would not. `brick-lab` renders that case
+first for this reason, and `strokePct` in `brick-config.json` dials back to the
+heavy version in one line.
 
-`/deck` builds one from an idea of the model's choosing. `/deck Prague museum`
-builds the one you asked for — and so does `/deck mountains Italy`,
-`/deck japan autumn` or `/deck Santorini`, because the request is parsed when it
-parses and interpreted when it does not. A thin result falls back to another
-category or region rather than answering with a failure.
+**One phrase per cover is set in cream.** Hebrew has no capitals, so a shout has
+to be carried by colour. It is one phrase and not the line: if every word is
+cream then no word is shouted. On a slide the same colour goes on the saving,
+which is the one number the whole post is an argument about. Cover emphasis is
+marked with `*stars*` in the config and the model is asked for it by name; the
+stars are stripped at load, so one unbalanced marker can never reach a slide.
 
-## What makes it different from "an AI wrote a post"
+One post is a **roundup**: five slides, five different sets, five chances to
+hook a viewer, and every swipe is a watch-time signal.
 
-**A claim without a quote does not ship.** The drafting step returns
-`evidence: [{ claim, quote }]`, and every `quote` is checked to appear
-character-for-character in the text that was actually fetched. A model asked for
-a quote will occasionally paraphrase one — and a paraphrased quote is precisely
-the case where the claim came from the model's memory rather than the source.
+## Three decisions that are enforced rather than hoped for
 
-**The rules are code, not prompt text.** A style rule that lives only in a
-prompt holds until the model meets a source that pushes against it. The fare
-ban, the rounding rule, the repeated-word check, the allowlist and the quote
-check are all enforced after the model has spoken, and each returns a reason you
-can read in Hebrew. So is the shape of the copy: a headline outside 3-11 words,
-a caption past four sentences, a filler adjective (מדהים, מרהיב, קסום...), or a
-post that opens on a rhetorical question or "ידעתם ש" is sent back for another
-draft rather than published. The brief also carries one real published post as
-the standard every draft is measured against — headline that names and
-withholds, subhead that answers, two-sentence caption, one emoji, two hashtags.
+**The trademark never appears.** The reference writes the original brand's name
+on every slide (`בחנות של לגו: 269₪`) and spends one of five hashtags on it.
+That tag is what this audience actually searches, so keeping the rule costs real
+discovery — and the rule was kept, because the same one governs brickdeal-website
+and its generated pages, and one vocabulary across the site, the channel and
+TikTok is worth more than one tag. `src/brick/copy.js` refuses any slide line,
+caption or hashtag carrying it, at build time, so a string that breaks the rule
+never becomes something approvable by tapping. One boolean in
+`brick-config.json` stands the guard down if the numbers ever argue for it.
 
-**Every filter is visible.** Rejections arrive as a digest with the reason and
-the URL. A filter you cannot see is a filter you cannot disagree with.
+The pattern is fussier than it looks and each detail fixes a real case: Hebrew
+glues its prefixes on, so `בלגו` and `הלגו` are the trademark; `דלגו` is an
+ordinary verb and is not; `לגור` and `לגוף` are common words that open with the
+same three letters; and in Latin a trailing `\b` would miss "LEGOs" while
+dropping the leading one matches "allegory".
 
-## Sources
+**No retail price means no comparison.** The middle line comes from Brickset,
+keyed by set number, preferring the German price because it includes VAT and
+Israel has VAT — the American one does not and is quietly about 17% flattering.
+It is converted at an ECB rate that is fetched once per deck and **stored on the
+deck**, so a slide's number can still be checked six weeks later.
 
-Primary sources only — the publisher of the fact, not someone reporting it.
+When Brickset has never heard of the set — which happens often, because set
+numbers are scraped out of seller titles — the slide carries the price alone and
+says nothing about what the set is worth. That is a correct slide, not a broken
+one. The same posture governs the feed's own `originalPrice`, which was
+considered for this job and rejected: it is a marketplace strike-through, not a
+price anyone ever charged.
 
-| Source | What it gives |
+**A slide has no warning band.** brickdeal-website renders a stale or
+placeholder deal with a red band and a dimmed date; the reader can see something
+is wrong and the page is still honest. Once a price is on TikTok it cannot be
+dimmed, corrected or taken down quietly. So `src/brick/feed.js` refuses where the
+site merely warns: a placeholder affiliate link, a price nobody has checked, a
+price last checked more than fourteen days ago.
+
+## The photographs
+
+This is the hardest part of the format to automate, and the reason it works.
+
+The reference's pictures are his own builds on his own shelf — white wall,
+daylight, other sets in the background. A marketplace catalogue image will look
+like a catalogue image regardless of the overlay. So the product photo is
+restaged by an image model using the prompt from the `brickdeal-product-shot`
+skill, where every constraint in it was added to fix a real failure.
+
+Three rules, in `src/images/homeShot.js`:
+
+1. **Build from the photo of what the link sells**, not the nicer official
+   render of the original set. The feed carries both — `sourceImage` present
+   means `image` was swapped for a render — and the seller's photo wins. A post
+   showing one product while the link sells another is what causes refunds and
+   affiliate complaints, whatever the caption says.
+2. **Check what came back.** A cheap vision call compares the generated photo
+   against the original and has to agree it is the same build. Any failure — no
+   key, an API error, an unparseable answer — is a "no", never a pass.
+3. **Never substitute silently.** A failure falls back to the catalogue photo
+   with its provenance *changed*, and the approval card prints it. The decision
+   to publish one anyway is made by a person looking at it.
+
+The approval card also says when a deck carries generated photographs, because
+the post then has to be labelled as AI-generated in the app and nothing here can
+do that for you.
+
+## Two taps, and what sits between them
+
+```
+proposal (free)  →  ✅  →  hook + photographs + render  →  album  →  ✅  →  publish
+```
+
+The first card is the **proposal**: the recipe, the five sets, and every price
+claim the deck will make. Everything in it is free — the feed is a file, Brickset
+is cached, the rate is one call a day — so rejecting it costs one message.
+
+What the second tap buys is a model call and one generated photograph per slide,
+which is the slowest and least predictable step in the pipeline and the one most
+worth not spending on a post nobody wanted.
+
+Unlike the travel pipeline this grew out of, the proposal is not a plan that the
+build might not keep. Every set on it is already in the feed and already priced,
+so what it names is what the slides will carry.
+
+## Three ways to choose five sets
+
+`src/brick/recipes.js`, in the order they are tried when nothing is asked for:
+
+| | |
 |---|---|
-| FCDO travel advice (`gov.uk`) | entry rules, safety changes, per country |
-| UNESCO World Heritage Centre | new inscriptions, site decisions |
-| NASA Earth Observatory | one specific place on Earth per day, from orbit |
-| Smithsonian Global Volcanism Program | eruptions and unrest, weekly |
-| JNTO (Japan) | Japanese-language travel news, plus the English Travel Japan blog |
-| Kyoto City Tourism Association | festival seats, guided tours, tax rules — the things a visitor books |
-| This is Athens (City of Athens) | closures, car-free days, what's new in the most-flown city |
-| Tourism Authority of Thailand | the newsroom, with its trade half scored down |
-| Vietnam National Authority of Tourism | islands, street food, heritage villages |
-| My Helsinki, Sydney.com + Visit NSW (Destination NSW) | neighbourhood and day-trip guides with addresses; the Blue Mountains from Sydney |
-| Visit Sevilla (Turismo de Sevilla) | a "¿Sabías que…" series — one odd fact per post about a street, a painting, a tower |
-| Visit Sicily, Visit Lazio (regional governments) | the places the national portal never names: Ustica, the Nebrodi, a walk out of Frosinone |
-| Visit Greenland, Tahiti Tourisme | slow feeds, long essays — when to go, a new marine reserve |
-| Destination BC, Tourism Panama | seasonal long-form and trail-and-waterfall lists with named places |
-| Open-Meteo ERA5 | ten years of daily values → monthly climate normals |
+| **theme** | one theme's best current deals — the most specific post available, so the best one when it is available at all |
+| **savings** | the largest real savings on the feed, whatever they cost |
+| **price** | everything under a ceiling, walking the ceilings upward so `5 סטים עד 100₪` is the tightest true claim rather than a safe round number |
 
-The official-DMO batch came from probing ~150 tourism-board and city-guide
-domains for a feed our parser accepts, then reading what each one actually
-publishes; a second pass over ~360 more (regions, provinces, states, parks,
-museums, met offices) found that national boards almost never publish a feed
-and regional ones often do. Twenty-two more are declared and switched off, each
-with the probe result recorded in `sources.json` rather than quietly omitted —
-the Cyprus feed is a restaurant directory, the Maldives one is resort marketing,
-the US park feeds are mostly fatalities, Emilia-Romagna's item links all resolve
-to its homepage, UNESCO's intangible-heritage feed is committee minutes except
-for one week in December. `npm run check-sources` re-probes every enabled
-one; `npm run eval-feed <url>` sizes up a candidate before it goes in.
+There is also a **single-set** post, and it is the one place the format departs
+from the reference structurally: with only one price block to show, repeating it
+five times is not a post. So the set appears once with its prices and the
+remaining slides carry one short fact each, drawn from what the feed actually
+knows.
 
-The allowlist matches on a domain-label boundary, so `evil-gov.uk` and
-`gov.uk.attacker.com` do not pass as `gov.uk`.
-
-## Cards
-
-Ten layouts in two families. Photo-led is the default — this is a travel
-channel, and a wall of typography is what a spreadsheet looks like. Text-led is
-for the cases with no single place to photograph: a rule spanning many
-countries, a comparison, a figure with no address.
-
-**The card carries the headline and nothing else.** The subhead is written, and
-it opens the description instead. A card that answers its own headline gives
-nobody a reason to tap "more".
-
-Headlines name a subject rather than narrating it. `קרחון ענק צף במיצר` is a
-complete sentence, so it answers itself; `הקרחון הענק בין גרינלנד לאיסלנד` is a
-definite noun phrase that names a specific thing and withholds the story. The
-verb is what gives it away.
-
-Images are commercial-license stock, our own catalogue, or AI-generated — never
-lifted from a news article or a business's page. Which one it was is printed in
-the approval message. AI imagery may only ever be generic; a prompt naming the
-post's own place is rejected in code.
-
-A photo post should almost never fall back to a text card, so the picture is
-looked for five times before giving up: the scene the draft asked for, a broader
-second search it also supplies, the place by its English name, the country. Each
-search ranks the library's thirty results by their own descriptions — a scene
-beats a person posing in front of it, a product shot is refused outright — and
-asks for a portrait first, anything second. The bytes come from the CDN as an
-exact 1080×1350 crop rather than the 800×1200 thumbnail that was being upscaled
-before. A `fact` card about somewhere with a name is promoted to `photoFull` in
-code, because on a travel channel a dark card with a headline is a photograph
-that was not asked for.
+**The order within a deck is not a plain sort.** The strongest slide goes first,
+where it decides whether anybody swipes, and the second-strongest goes *last*,
+where it decides whether anybody follows.
 
 ## Running it
 
@@ -241,331 +178,151 @@ Requires Node 18+ (developed on 24) and no build step.
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env      # then fill it in
-npm test                  # 744 offline checks, no credentials needed
-npm run check-sources     # probe every feed
-npm run eval-feed <url>   # size up a feed before adding it
-npm run run-once          # a full pass, printed to the terminal, publishes nothing
+npm test                  # 180 offline checks, no credentials needed
+npm run brick-lab         # look at the slides, ~15s a round
+npm run brick-once -- --fixture --no-images   # the whole path, publishing nothing
 npm start
 ```
 
-Slides cannot be reviewed by reading the HTML — Hebrew shaping, bidi, where a
-line breaks, whether white type survives on that particular sky, all of it
-happens at render time. Two scripts exist to look at them:
+Slides cannot be reviewed by reading the HTML. Hebrew shaping, bidi, whether
+`1,234₪` lands on the correct side of its label, whether a heavy outline closes
+the counters of Rubik at 45px, whether white type survives on a white wall — all
+of it happens at render time. Two scripts exist to look at them:
 
-```bash
-npm run deck-lab                      # fixed content, cached photographs, no model calls
-npm run deck-once -- "Dolomites trails" "Kyoto temples"
-```
+- **`brick-lab`** renders hand-written fixtures over three synthetic
+  backgrounds. The fixtures are the cases that actually break: a two-word name,
+  a name past two lines, Latin inside Hebrew, a four-figure saving, and a slide
+  with no comparison at all. The backgrounds are a white wall in daylight (the
+  worst and the most common), an oak shelf, and a dim bedroom. No model calls, no
+  network, no keys. **The white-wall column is the one to look at** — it is where
+  a fine outline gives out first.
+- **`brick-once`** is the whole pipeline — feed, Brickset, FX, cover,
+  photographs, render — written to `out/brick/` with a contact sheet, every price
+  claim printed with its source, and nothing written to the store. `--fixture`
+  generates a feed with today's dates so it works offline; `--no-images` skips
+  the expensive step.
 
-`deck-lab` is the fast one: hand-written fixtures against real photographs, so a
-number in the stylesheet can be argued with in about fifteen seconds.
-`deck-once` is the whole pipeline — request, places, facts, curation, render —
-written to `out/decks/` instead of to Telegram, with a contact sheet showing
-every slide in a row and the measurements that placed each block underneath it.
-Neither writes to the store and neither publishes anything.
-
-TikTok, if you want it, is connected once with `npm run tiktok-token` — it
-prints an authorization URL, you paste back the address you land on, and the
-token pair is stored. Nothing about it goes in `.env` except the client key,
-secret and redirect URI, because the access token lasts a day and is refreshed
-continuously.
-
-You need a Telegram bot token, your own Telegram user id, an Anthropic API key,
-a Pexels key for photos, and an Instagram Business account with the Graph API.
-[`SETUP.md`](SETUP.md) walks through each one, including the parts of Meta's
-dashboard that are genuinely confusing.
-
-[`DEPLOY.md`](DEPLOY.md) covers the VPS: it has to run there, because Instagram
-fetches the card image from a public URL rather than receiving bytes.
-
-## How a deck actually gets made
-
-Two approvals, because the expensive half sits between them.
-
-```
-idea (text)  →  ✅ בנה  →  source + draft + render  →  album + card  →  ✅ אשר
-   ~1 call                  minutes, search budget                     publishes
-```
-
-The first card is the **proposal**: a title, the region, the category, and the
-list of places it intends to carry. Nothing has been sourced or rendered yet, so
-rejecting it costs one message rather than a full build. Three answers:
-
-| | |
-|---|---|
-| `📸 אינסטגרם` | build it for Instagram |
-| `🎵 טיקטוק (טיוטה)` | build it for TikTok |
-| `📸🎵 שניהם` | both |
-| `🤖 שנה בהוראה` | reply with what to change — "make it autumn", "Osaka instead", "six places" — and the idea is revised |
-| `❌ דחה` | one message spent |
-
-The place list on the proposal is the deck's **plan**, not a promise. The build
-sources its own places from the site or the map and may not find every one; the
-approval card after the build is the real list.
-
-Only the size that will be posted is rendered. Choosing Instagram does not pay
-for the TikTok crop of itself.
+TikTok is connected once with `npm run tiktok-token`.
 
 ## Why TikTok posts are drafts
 
 TikTok's photo API has no field for a sound. `auto_add_music` is a boolean — on,
 and TikTok picks a track you never see; off, and the post is silent, which costs
-reach. There is no `music_id`, and no endpoint exposes an account's saved
-sounds, so "use one of my sounds" cannot be built at either end.
+reach. There is no `music_id` and no endpoint exposes an account's saved sounds,
+so "use one of my sounds" cannot be built at either end. Sound is also the one
+thing that cannot be changed after publishing.
 
-The same API has a second mode. `post_mode: MEDIA_UPLOAD` delivers the slides to
-the account's TikTok **inbox** — not the Drafts folder on the profile, which is
-the first place anyone looks and the one place it will not be — and the creator
-finishes it in the app: sound, cover, caption, then post.
+So `post_mode: MEDIA_UPLOAD` delivers the slides to the account's TikTok
+**inbox** — not the Drafts folder on the profile, which is the first place
+anyone looks and the one place it will not be — and you finish it in the app:
+sound, cover, caption, then post.
 
-Three of TikTok's rules stop applying in that mode, and none of them by choice:
+Three of TikTok's rules stop applying in that mode, none of them by choice: no
+privacy level to resolve, no unaudited-client restriction, and no daily cap,
+because all three govern posts the *client* makes and here it makes none.
 
-- **No privacy level.** The post is not made by the client, so there is nothing
-  to resolve and `creator_info` is not even asked.
-- **No audit restriction.** `unaudited_client_can_only_post_to_private_accounts`
-  governs what an unaudited *client* may publish, and here it publishes nothing.
-  A draft can become a public post while the app is still in review.
-- **No daily cap.** The five-per-24h limit counts posts made through the API.
-
-The cost is that it is not unattended: a deck waits in your inbox until you open
-TikTok, and nothing in this process can tell whether you ever did. So the
-notification says what happened per destination — `📤 פורסם לאינסטגרם` and
-`📥 טיקטוק: נשלח לטיוטות — עוד לא באוויר` — because "posted" is the one wrong
-thing to say about a post that still needs you.
+The cost is that it is not unattended. A deck waits in your inbox until you open
+TikTok, and nothing here can tell whether you ever did — so the notification
+says `📥 טיקטוק: נשלח לטיוטות — עוד לא באוויר`, because "posted" is the one
+wrong thing to say about a post that still needs you.
 
 **Scopes are per mode, not per media type.** `video.publish` is direct posting;
 `video.upload` is the inbox. Asking for the wrong one fails at `init` with
-`scope_not_authorized`, and a token cannot gain a scope by refreshing — only a
-new authorization grants more. `/tiktok` prints what the connection actually
-holds.
+`scope_not_authorized`, and a token cannot gain a scope by refreshing.
 
-### Commands in the bot
+## Commands
 
-`/run` gather now · `/run 7` gather more than the daily target, overriding the
-quotas and reporting each one it stepped over · `/redo` forget what was seen and
-re-run, for testing a change · `/status` · `/health` every destination
-separately, with its last error · `/usage` tokens and cost · `/igquota` ·
-`/tiktok` connection, tokens, granted scopes and available privacy levels ·
-`/tiktok_connect` which scopes a working connection needs and how to get one ·
-`/sources` every feed with its last success and error, `/sources off <id>` to
-stand one down · `/mix` topic balance · `/why` last run's rejections ·
-`/deck` build one now, `/deck Kyoto temple` name it · `/pending` ·
-`/queue` what is waiting, numbered, with destinations · `/next` publish the
-next · `/post 3` publish that one, out of turn · `/held` `/retry` `/clear_held`
+`/deck` build one now · `/deck harry-potter`, `/deck 100`, `/deck בונסאי` name
+it · `/status` · `/health` every destination separately, with its last error ·
+`/usage` tokens and cost · `/igquota` · `/tiktok` connection, tokens, granted
+scopes · `/tiktok_connect` · `/pending` · `/queue` what is waiting, numbered ·
+`/next` publish the next · `/post 3` publish that one out of turn · `/held`
+`/retry` `/clear_held` `/resend`
 
 **The bot talks like a CLI.** A command prints what you asked for; the daemon
-does not chatter. Messages that arrive unasked are one line — a gather is
-`📥 איסוף: 253 → 12 נבדקו → 1 לאישור`, not twenty-one source bullets — and the
-detail lives behind `/status`, `/health` and `/sources`, where you go looking
-for it. Failures and things waiting on you are the exception, because they
-change what you would do next.
+does not chatter. Messages that arrive unasked are one line, and the detail
+lives behind `/status` and `/health` where you go looking for it. Failures and
+things waiting on you are the exception, because they change what you would do
+next.
 
-**The owner is not rate-limited by any of this.** Every guard here — the topic
-quotas, the dedupe window, the daily target, the drip interval — protects the
-feed from the pipeline, not from the person who owns it, who can already publish
-anything by hand. So an owner-triggered post steps over all of them. What it
-does not do is step over them quietly: each bypass is recorded with the
-measurement that would have blocked it, shown on the approval card before you
-tap, and sent again before the post goes out. Two Dolomites decks back to back
-is a decision the bot will carry out and name.
-
-Platform limits are a different category and are never bypassed. TikTok allows
-an unaudited client five posts a day; the sixth is held, not failed, and the
-message says when the slot frees.
+**The owner is not rate-limited by any of this.** Every guard here protects the
+feed from the pipeline, not from the person who owns it, who can already post
+anything by hand. So an owner-triggered deck steps over them — and names each
+one it stepped over, on the card, before you tap.
 
 ## Layout of the code
 
 | Path | What it does |
 |---|---|
-| `bot.js` | Telegraf bot: owner lock, staging, approve/reject, timers |
-| `src/pipeline.js` | the daily loop, with a ceiling on drafting calls |
-| `src/draft.js` | the Claude call and the whole editorial brief |
-| `src/verify.js` | **the gate** — allowlist, quotes, fares, rounding, repeats |
-| `src/score.js` | ranking before anything expensive happens |
-| `src/render/` | templates, theme, Chromium |
-| `src/render/photo.js` | measures each photograph: where the words go, what colour they are |
-| `src/render/deckTemplates.js` | the two TikTok slide styles, minimal and info |
-| `src/render/deckInstagram.js` | the same deck drawn as cards, for the grid |
-| `src/oauthServer.js` | the localhost endpoint that finishes a TikTok connect from the browser |
-| `src/deck/facts.js` | structured measurements off Wikidata properties |
-| `src/deck/hebrew.js` | every place name in Hebrew, and the check that it is |
-| `src/deck/request.js` | turns anything typed after `/deck` into something buildable |
-| `src/deck/flags.js` | countries in Hebrew, with their flag |
-| `src/sources/` | feed adapters and the climate dataset |
+| `bot.js` | Telegraf bot: owner lock, proposals, staging, approve/reject, queue, drip |
+| `brick-config.json` | the editorial dials: price labels, caption pool, cover hooks, hashtags, type |
+| `src/brick/feed.js` | the deal feed, and **what is allowed out of it onto a slide** |
+| `src/brick/rrp.js` | the comparison price, off Brickset, and every reason not to make one |
+| `src/brick/fx.js` | one exchange rate per deck, with the date it was published on |
+| `src/brick/copy.js` | **the guards** — the trademark, the em dash, the URL, the bidi on a price |
+| `src/brick/recipes.js` | which five deals, and in which order |
+| `src/brick/build.js` | the two halves: the free proposal, and the expensive build |
+| `src/brick/proposal.js` | the first card — what this post would be, before paying for it |
+| `src/brick/candidate.js` | a built deck wrapped for the approval queue |
+| `src/brick/caption.js` | the caption and the five hashtags, drawn once for both platforms |
+| `src/brick/emoji.js` | the one emoji beside a set's name — a fixed map, not a free choice |
+| `src/brick/themes.js` | theme detection, ported verbatim from the bot and the website |
+| `src/images/homeShot.js` | the generated photograph, and the check that it is the right set |
+| `src/render/brickSlide.js` | the slide: the frame, the block, the outline, the watermark |
+| `src/render/brickDeck.js` | a deck to JPEGs, at both sizes |
 | `src/publish/` | Instagram Graph API, TikTok Content Posting API, publish targets |
-| `src/pillars.js` | the quotas: tag, pillar, source and **place** |
-| `src/deck/region.js` | which country a deck is in, and the check that it says so |
-| `src/images.js` | image provenance policy |
-| `src/usage.js` | token accounting, exposed as `/usage` |
-| `post-config.json` | the editorial dials: caption pool, hashtags, slide type, destination weights |
-| `src/postConfig.js` | reads and checks the above; the only module that knows the path |
-| `src/hashtags.js` | the five tags under a slideshow, one of them the deck's own country |
-| `scripts/` | selftest, source probe, card-hosting check, one-off runs |
-
-### What a slideshow says, and what it does not
-
-Four things about a published deck are decisions rather than code, and they all
-live in `post-config.json`:
-
-- **The caption is one short line, drawn at random from a pool of twenty, and it
-  carries no URL, no call to action and no brand name.** It used to be
-  `למתכנן טיולים חכם בביו שלנו` over `www.tiyulplus.com` on every post. An
-  external domain in a TikTok description is a demotion, and the string was
-  never tappable on either platform anyway — the bio link is reachable from the
-  post regardless of what the description says. `format.js` enforces this rather
-  than trusting it: `assertNoUrl` runs before a deck can become a candidate, and
-  a caption containing `http`, `www.`, `.com` or `.co.il` throws in the build
-  instead of becoming something you can approve by tapping.
-- **Five hashtags, two broad and three niche.** There were none. The deck's own
-  country — `#פורטוגל` — spends one of the niche slots rather than adding a
-  sixth, so the count is the same whether or not the country resolved.
-- **The type on a slide is small, light, and pinned to the upper-left or
-  lower-left third.** Roughly 3% of the frame's short edge, ~32px on 1080x1920,
-  regular weight, 90% opacity, one soft shadow, two lines maximum, no box and no
-  brand mark. The measurement in `render/photo.js` still runs and still decides
-  *which* of the two bands this photograph can carry and what colour the words
-  have to be — it just no longer gets to answer "the middle", which on a
-  landscape is where the subject is.
-- **Destinations are weighted** toward where this audience actually flies —
-  Greece, Cyprus, Georgia, Italy, Thailand, Japan, Portugal, Spain, Vietnam,
-  Czechia. An unlisted country is not banned, only unpromoted. Because the
-  climate rotation caps a destination at one post a year, what the weighting
-  really buys is order: the favoured places get posted early in the year and the
-  cold and long-haul ones get whatever is left.
-
-The news **card** path is deliberately untouched. A card never publishes to
-TikTok, and its caption is read somewhere a URL is worth printing.
+| `src/store.js` | one JSON file: dedupe, proposals, staging, queue, publish log |
 
 ## Honest caveats
 
-**The evidence check proves sourcing, not truth.** It proves a claim appears in
-a page fetched from an allowlisted authority. If FCDO is wrong, this will
-faithfully repeat FCDO being wrong. "Verified" here means *traceable*.
+**Brickset's coverage of clone set numbers is unmeasured.** A `setId` scraped
+from a seller title is often wrong — `brickdeal-automation/src/polish.js`
+documents this — so some share of slides will carry no comparison. How large a
+share decides how often the format's main hook is available at all, and it is
+worth measuring against the real feed early. The proposal card prints the count
+for exactly this reason.
 
-**The quote check is strict and will produce false rejections.** A model that
-summarises two sentences into one loses the whole draft. Better to re-run than
-to loosen it: a fuzzy quote match is indistinguishable from no check at all.
+**A converted list price is not an Israeli shelf price.** It is the original
+brand's recommended retail price in Germany, converted at an ECB rate. The slide
+calls it `מחיר מחירון`, which is what it is, and the rate and its date travel
+with the deck so the claim can be checked. It is not the number the reference
+account uses — theirs is looked up by hand, per set, and there is no API for it.
 
-**Twenty-one of fifty-four declared sources work.** The rest are off with the
-probe result recorded. A further eleven were probed on 2026-09-20 — Smartraveller,
-USGS, the NHC, WHO, the Met Office, Canada, NPS, TfL, Go Tokyo, Visit Malta and
-Turismo Roma — and not one cleared the bar: two 404s, three empty shells, one
-feed abandoned in 2019, one stale since February, one timeout, and USGS, whose
-109 fresh items all link to a JavaScript application that serves 155 characters
-of "supported browsers" to a fetcher. `npm run find-feeds <site>` was written
-during that pass and reads a site's declared `<link rel="alternate">` instead of
-guessing paths; it is the reason the Malta and Roma feeds were found at all,
-both of which then turned out to be empty. The two most wanted are `gov.il` and the Israel Airports
-Authority, both behind Imperva. There is now a real browser fetch
-(`src/browserFetch.js`), written to get past UNESCO's 403 — whether it is enough
-for Imperva, which is a considerably more determined wall, is untested. Most
-official tourism boards (Spain, Portugal, Greece, Dubai, Georgia, the Nordics)
-publish no feed at all; those would need a page scraper, not a URL.
+**The generated photographs are the least predictable step.** The product-shot
+skill carries a list of failure fixes that a person applies after looking at the
+output, and that is not something this can do: the second attempt is the same
+prompt against a stochastic model, so there is no third. The vision check plus a
+cached, regenerable shot per product is the mitigation, and the fallback chain
+degrades to the catalogue photo and says so.
 
-**The DMO sources are promotional by nature.** A city guide's feed is its events
-calendar and its own campaigns. The scorer nudges performers and trade items
-down and the drafting step declines what is not a trip, but the drafting step
-costs money and the nudges are tuned on one week of items — `/usage` reports
-how much drafting was thrown away, and that number is the one to watch.
+**The freshness rule is only as good as the refresh job.** Everything on a slide
+is as true as `deals.json` was when it was read. If
+`brickdeal-automation`'s nightly price re-check dies, this stops producing decks
+after fourteen days — which is the intended behaviour and is also the only
+signal it gives.
 
-**Counting feed items is not the same question as "does this source work".**
-UNESCO served ten items a run and showed a green tick in `check-sources` for a
-month while every article page behind those items returned 403 — the source was
-contributing nothing and the probe said it was fine. `check-sources` now takes a
-sample of items all the way through `verifySource()`, which is the actual gate.
-The general lesson is that a health check measuring the cheap half of a pipeline
-reports on the half that was never going to break.
-
-**TikTok publishes privately until the app passes review.** An unaudited
-Content Posting API client is offered `SELF_ONLY` and nothing else, so posts go
-out visible to the account itself. That is not a bug to work around — it is what
-the approval card shows you, what `/tiktok` reports, and what the review
-recording is supposed to demonstrate. The privacy button grows more options the
-moment TikTok grants them.
-
-**The TikTok card is one image, not a carousel.** Photo posts accept up to 35,
-the pipeline renders one, and one is what is sent. Nothing in the publisher
-would object to more — but there is no second slide to send, so the post is a
-single-image photo post.
-
-**Some content thresholds are tuned on small samples.** The thin-source floors
-were measured against one day of items. They are env-overridable and every
-rejection reports the count it measured against the floor it used, so if they
-start eating good sources the digest says so in numbers.
-
-**Four quotas, and the fourth is geographic.** No single tag, pillar, source or
-**place** may take more than its share of a rolling window of what actually
-published. The place cap exists because the other three measure what a post is
-*filed as* — and a feed can satisfy every one of them while being entirely about
-one city, which is what happened: slideshows file as pillar `day` with no
-source, so only the pillar cap could bite a run of Kyoto, and it did not.
-
-**A deck must be where it says it is.** The cover's country comes from each
-slide's own Wikidata claim; `where` comes from the string the map was searched
-with. They are compared on ISO codes, and a mismatch refuses the build rather
-than correcting itself — a deck headed "United States" carrying six Swiss peaks
-looks right to a reader and files Switzerland under America in the quota that
-exists to stop exactly that.
-
-**Topic quotas only bind once there is a sample.** Below `QUOTA_MIN_SAMPLE`
-published posts the shares are noise and nothing is capped.
-
-**The publish retry rule is about double-posting, not importance.** If nothing
-published, the item goes back on the queue, up to three attempts, then it is
-dropped loudly. If *something* published, it is not retried, because retrying
-would duplicate whichever destination succeeded.
-
-## Three things that were only findable by running it
-
-**`document.fonts.check()` does not check what it sounds like it checks.** The
-guard against Hebrew rendering as tofu boxes was `document.fonts.check('900
-100px Heebo')`, which reads exactly like "is Heebo available". It returns true
-whenever the text can be rendered by *anything*, fallback included — on a page
-with no `@font-face` rule at all it still returns `true`. The guard written to
-catch a silent failure was itself silently passing. It now checks that a
-`FontFace` for Heebo exists with `status === 'loaded'` **and** that Hebrew set in
-Heebo measures differently from Hebrew set in a family that cannot exist.
-
-**Cookie banners are an evidence-integrity problem, not a tidiness one.** A
-gov.uk page's extracted text opened with ~500 characters of consent boilerplate.
-The obvious cost is wasted prompt. The real cost is that a quote lifted from a
-cookie notice would have passed verification and published.
-
-**A word count silently disabled a quarter of the source registry.** The
-evidence check required four words, splitting on spaces. Japanese does not put
-spaces between words, so every Japanese quote counted as one word and was
-rejected as "too short to be evidence" — meaning JNTO could never produce a
-candidate, and the rejection blamed the drafting step for something it had done
-correctly. No fixture would have caught it, because the fixture would have been
-in English.
+**The trademark rule costs discovery, deliberately.** `#לגו` is what this
+audience searches and the reference spends a slot on it. See `copy.allowTrademark`.
 
 ## Security
 
 - Every credential lives in `.env`, which is gitignored along with every
   `.env.*` variant. Nothing else reads one.
-- `data/` is gitignored, so cloning this does not leak what has been posted.
+- `data/` is gitignored, so cloning this does not leak what has been posted or
+  what has been generated.
 - The bot checks `ctx.from.id` against `OWNER_ID` in middleware registered
   before every other handler, and refuses to start without it. A missing config
   value fails closed rather than opening the bot to whoever finds the username.
-- The bot also refuses to start with no publish destination configured — an
-  approval queue with nowhere to publish silently eats what you approve.
-- Fetched page content is only ever regex-matched and shown to the model. It is
-  never evaluated in this process and never shelled out to. The one place HTML
-  *is* rendered is our own templates, where every interpolated value goes
-  through `escapeHtml()`.
-- **The one exception, stated plainly:** a source that answers a plain fetch
-  with 403 is retried through headless Chromium (`src/browserFetch.js`), and
-  there the page really is rendered and its scripts really do run. They run in
-  Chromium's sandbox, in a throwaway context with no storage and no
-  credentials, with images, media and fonts blocked; what comes back out is
-  HTML that goes through the same `htmlToText()` path as every other page. Only
-  403 is retried — a 404 is a dead link and a 429 is a rate limit, and neither
-  is fixed by asking again.
-- Telegram messages are sent without `parse_mode`. A scraped title containing a
-  stray `*` would otherwise break Markdown parsing and drop the message — which,
-  for an approval card, means silently not asking.
+- It also refuses to start with no publish destination configured — an approval
+  queue with nowhere to publish silently eats what you approve.
+- The feed is parsed as JSON and never evaluated. The one place HTML is rendered
+  is our own slide templates, where every interpolated value goes through
+  `escapeHtml()`.
+- Telegram messages are sent without `parse_mode`. A set name containing a stray
+  `*` would otherwise break Markdown parsing and drop the message — which, for
+  an approval card, means silently not asking.
 
 ## Licence
 
-Not currently licensed for reuse. The bundled Heebo font is under the SIL Open
-Font License; photographs come from Pexels under its own licence.
+Not currently licensed for reuse. The bundled Rubik font is under the SIL Open
+Font License; the emoji artwork is Noto, under the same.

@@ -276,7 +276,7 @@ async function api(path, { body = null, token, step } = {}) {
 /* -------------------------------------------------------------------------- */
 
 /** The URL you open once, in a browser, to connect the account. */
-export function authorizeUrl({ state = 'tiyulplus' } = {}) {
+export function authorizeUrl({ state = 'brickdeal' } = {}) {
   const params = new URLSearchParams({
     client_key: process.env.TIKTOK_CLIENT_KEY || '',
     scope: SCOPES.join(','),
@@ -599,7 +599,7 @@ export async function resolvePrivacy(cand, { allowRefetch = true } = {}) {
   // The stored options are a photograph of the account taken when the card was
   // built, and this pipeline holds approved posts for hours and held ones for
   // days. They go stale in the one direction that matters: a card staged while
-  // @tiyulplus was PUBLIC carries options:['PUBLIC_TO_EVERYONE', ...], and
+  // @BrickDealIL was PUBLIC carries options:['PUBLIC_TO_EVERYONE', ...], and
   // believing that list would publish it publicly today — from an unaudited
   // client, against an account that is now private, which TikTok refuses
   // anyway. Trusting the snapshot is how a post goes out at a privacy level

@@ -1,0 +1,208 @@
+{
+  "_comment": [
+    "How a BrickDeal slideshow is dressed: the words on a slide, the words under",
+    "the post, and the type that carries them.",
+    "",
+    "Everything here is editorial rather than structural - the set of decisions",
+    "that get re-litigated after looking at a week of numbers - so it lives in",
+    "one file you can edit without reading any code. src/brick/config.js reads",
+    "it, validates it, and is the only module that knows this path.",
+    "",
+    "Read once per process and cached. A malformed file throws at first use",
+    "rather than quietly reverting to a default: a post that silently lost its",
+    "hashtags looks identical to a post that never had any.",
+    "",
+    "The shape of all of this is copied from @lego_from_ali, the account this",
+    "channel is modelled on, with one deliberate departure - see `copy` below."
+  ],
+
+  "copy": {
+    "_comment": [
+      "The trademark rule.",
+      "",
+      "The reference account writes the original brand's name on every slide",
+      "('בחנות של לגו: 269₪') and spends one of its five hashtags on it. That tag",
+      "is what this audience actually searches, so keeping the rule costs real",
+      "discovery, and it was kept anyway: the same rule governs brickdeal-website",
+      "and its generated pages, and one vocabulary across the site, the channel",
+      "and TikTok is worth more than one tag.",
+      "",
+      "Set allowTrademark to true and the guard in src/brick/copy.js stands down.",
+      "Nothing else has to change - the labels below are what a slide actually",
+      "prints, so the reference's exact wording is one edit away if the numbers",
+      "ever argue for it."
+    ],
+    "allowTrademark": false
+  },
+
+  "labels": {
+    "_comment": [
+      "The three price lines, in this order, on every slide of every deck.",
+      "",
+      "The order and the labels never vary within a deck. A slide whose fields",
+      "differ from its neighbour's reads as improvised, and the consistency is",
+      "what makes a swipe scan as one post.",
+      "",
+      "`list` is NOT a claim about any Israeli shelf. It is the original brand's",
+      "recommended retail price, read off Brickset and converted - so it is",
+      "called a list price, which is what it is. See src/brick/rrp.js."
+    ],
+    "ours": "בקהילה",
+    "list": "מחיר מחירון",
+    "saving": "חיסכון"
+  },
+
+  "watermark": {
+    "_comment": [
+      "Small, semi-transparent, bottom centre, clear of TikTok's own furniture.",
+      "",
+      "The reference carries one and it is part of why the format works: it is",
+      "the only branding on an otherwise completely unbranded frame, and a slide",
+      "that gets screenshotted or re-shared still says where it came from."
+    ],
+    "text": "BrickDeal - סטים תואמים מאלי אקספרס",
+    "sizePct": 0.021,
+    "opacity": 0.62,
+    "bottomPct": 0.085
+  },
+
+  "overlay": {
+    "_comment": [
+      "The type on a slide. White, centred, with a fine dark outline and a soft",
+      "shadow under it.",
+      "",
+      "THIS IS THE TRAVEL CHANNEL'S TREATMENT, not the reference account's, and",
+      "the swap was a deliberate call after looking at both rendered. The",
+      "reference sets its type hard against the right edge in a thick black",
+      "outline, which is TikTok's own editor style and reads as somebody typing",
+      "on a photo in the app. Rendered over our own frames it came out heavier",
+      "than the posts this channel already publishes, and the owner picked the",
+      "lighter one.",
+      "",
+      "What carries legibility here is therefore NOT the outline - at ~2px it is",
+      "an edge rather than a border - it is the scrim and the shadow. That",
+      "matters, because a home shot of a white wall in daylight is the one",
+      "background where a fine outline struggles and the reference's heavy one",
+      "would not. Watch the white-wall column in `npm run brick-lab`; raise",
+      "strokePct if it stops holding.",
+      "",
+      "Sizes are fractions of the frame's WIDTH. Three percent of 1080 is 32px;",
+      "the same fraction of a 1920-tall frame would be 58px, which is an",
+      "eightfold difference in how loud a slide is, so the basis is stated",
+      "rather than assumed.",
+      "",
+      "`strokePct` is the outline you can SEE, not the CSS stroke width. The CSS",
+      "property is centred on the glyph and half of it is painted over by the",
+      "fill, so brickSlide.js doubles this before it writes the rule."
+    ],
+    "sizeBasis": "width",
+    "align": "center",
+    "namePct": 0.041,
+    "linePct": 0.031,
+    "coverPct": 0.035,
+    "weight": 700,
+    "strokePct": 0.0018,
+    "shadow": "0 2px 10px rgba(0,0,0,0.42)",
+    "opacity": 0.96,
+    "lineHeight": 1.16,
+    "maxNameLines": 2,
+    "topPct": 0.145,
+    "coverTopPct": 0.3,
+    "widthPct": 0.84,
+    "emphasis": "#F7E3A1"
+  },
+
+  "covers": {
+    "_comment": [
+      "The hook on the first slide, which is the only thing most viewers read.",
+      "",
+      "First person, conversational, slightly confrontational, hobbyist to",
+      "hobbyist. Questions and challenges - never 'SALE', never a percentage.",
+      "These are the reference's own covers with the trademark taken out, and",
+      "they are handed to the model as the standard a generated hook is measured",
+      "against, the same way the travel pipeline carried one real published post.",
+      "",
+      "Also the fallback: a hook the model could not produce, or produced and",
+      "failed the copy guard, falls back to one of these rather than to nothing.",
+      "",
+      "*STARS MARK THE EMPHASIS* - the one phrase set in cream instead of white.",
+      "Hebrew has no capitals, so the shout a cover needs has to be carried by",
+      "colour. It is one phrase and not the whole line on purpose: if every word",
+      "is cream then no word is shouted. The stars never reach a slide; config.js",
+      "strips them and hands the renderer the phrase separately."
+    ],
+    "lines": [
+      "אתם קונים סטים *במחיר מלא*?",
+      "מה הזמנתי *VS* מה קיבלתי",
+      "הפסקתי לשלם *ביוקר* על התחביב שלי",
+      "איך אנשים עדיין משלמים *מחיר מלא*?",
+      "דרכים נוספות *לחסוך* על סטים",
+      "כמה *באמת* צריך לשלם על סט כזה?",
+      "עשיתי את החישוב *ונדהמתי*",
+      "זה אותו דגם. *זה לא אותו מחיר.*"
+    ]
+  },
+
+  "caption": {
+    "_comment": [
+      "One or two sentences, then the call to the community, then a separator,",
+      "then the tags. The reference's exact shape.",
+      "",
+      "`cta` carries NO URL and that is enforced, not trusted: format.js refuses",
+      "a caption containing one. An external domain in a TikTok description is a",
+      "demotion and the string was never tappable on either platform anyway - the",
+      "community is reachable from the bio, which is where the link lives."
+    ],
+    "lines": [
+      "חושבים שהתחביב הזה חייב להיות יקר? 🧐 בואו תראו כמה אפשר לחסוך על אותם דגמים",
+      "אותם דגמים, שליש מהמחיר 💵 בדקתי בשבילכם",
+      "עשיתי את החישוב על הסטים האלה והמספרים די מטורפים 😮",
+      "כל אחד מהסטים האלה עולה פחות ממה שנראה לכם",
+      "אם אתם בונים, שווה לכם לראות את המחירים האלה 👀",
+      "הרכבתי את כולם. שילמתי הרבה פחות ממה שחשבתם 💵",
+      "המחירים האלה לא הגיוניים, ובכל זאת הם אמיתיים 🧐",
+      "סטים שכולם רוצים, במחירים שאף אחד לא מצפה להם"
+    ],
+    "cta": "כל הקישורים בקהילה בטלגרם 📍",
+    "separator": "- - - -"
+  },
+
+  "hashtags": {
+    "_comment": [
+      "Exactly broadCount + nicheCount tags under every post - five, by default.",
+      "",
+      "Broad tags buy the first impressions and niche tags decide who the post is",
+      "then shown to, so the split matters more than the total. The reference",
+      "mixes English reach tags with Hebrew niche ones and that is copied here.",
+      "",
+      "`useTheme` spends ONE of the niche slots on a tag generated from the",
+      "deck's own theme - #הארי_פוטר on a Harry Potter deck - rather than adding",
+      "a sixth. The count stays five either way; a deck whose theme did not",
+      "resolve falls back to the niche pool.",
+      "",
+      "Note what is NOT here. #לגו is the tag this audience searches and the",
+      "reference spends a slot on it. See `copy` above."
+    ],
+    "broad": ["#fyp", "#foryou", "#tiktokisrael", "#פוריו", "#ויראלי"],
+    "niche": ["#אבניבנייה", "#סטיםתואמים", "#אליאקספרס", "#בונים", "#חוסכים", "#תחביב"],
+    "broadCount": 2,
+    "nicheCount": 3,
+    "useTheme": true
+  },
+
+  "deck": {
+    "_comment": [
+      "How many sets go in one post, and how cheap a set has to be to anchor a",
+      "price roundup.",
+      "",
+      "Five is the reference's count and it is not arbitrary: five slides is five",
+      "chances to hook a viewer in one post, and each swipe is a watch-time",
+      "signal. Below three the post reads as thin; above seven the last slides",
+      "are seen by almost nobody."
+    ],
+    "slides": 5,
+    "minSlides": 3,
+    "maxSlides": 7,
+    "priceCeilings": [50, 100, 150, 200]
+  }
+}

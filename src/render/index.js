@@ -1,7 +1,11 @@
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
-import { renderHtml, CARD_W, CARD_H } from './templates.js';
+// The 4:5 frame the Instagram crop uses, and the default for anything that does
+// not say otherwise. It lived in templates.js with the news-card markup; the
+// markup went with the travel pipeline and the number did not.
+const CARD_W = 1080;
+const CARD_H = 1350;
 import { primaryCardBaseUrl } from '../publish/imageHosts.js';
 
 // Card rendering: HTML -> JPEG, via headless Chromium.
@@ -102,42 +106,6 @@ export function cardPublicUrl(filename) {
 }
 
 /**
- * Render a draft to a JPEG on disk.
- *
- * Returns { file, filename, url, bytes }. `url` is null until
- * CARD_PUBLIC_BASE_URL is set — Telegram publishing works without it.
- */
-export async function renderCard(draft, { id, data = null, image = null, outDir = cardOutputDir() } = {}) {
-  // Measured before the card is built, because the scrim is part of the
-  // stylesheet rather than something that can be adjusted afterwards.
-  //
-  // Only for the photo layouts: the text-led cards are a flat dark ground by
-  // design and have no photograph to measure. Failure is silent and falls back
-  // to the old constants — a scrim sized for the worst photograph is what the
-  // card had before this existed, and it is not worth losing a card over.
-  //
-  // Imported here rather than at the top of the file because ./photo.js imports
-  // getBrowser from this module: a static import back would close the cycle,
-  // and the measuring module is the one that should depend on the renderer
-  // rather than the other way round. The module is cached after the first card.
-  let shot = image;
-  if (image?.src) {
-    const scrim = await import('./photo.js')
-      .then((m) => m.measureCardScrims([image.src]))
-      .then(([s]) => s)
-      .catch(() => null);
-    if (scrim?.bottom != null) shot = { ...image, scrim };
-  }
-
-  return renderToJpeg(renderHtml(draft, { data, image: shot }), {
-    stem: id,
-    width: CARD_W,
-    height: CARD_H,
-    outDir,
-  });
-}
-
-/**
  * Any HTML, at any size, to a JPEG on disk.
  *
  * Extracted from renderCard when slideshows arrived at 1080x1920 and the same
@@ -147,7 +115,27 @@ export async function renderCard(draft, { id, data = null, image = null, outDir 
  * second renderer without it would fail silently in exactly the way the first
  * one used to.
  */
-export async function renderToJpeg(html, { stem, width = CARD_W, height = CARD_H, outDir = cardOutputDir() } = {}) {
+export async function renderToJpeg(
+  html,
+  {
+    stem,
+    width = CARD_W,
+    height = CARD_H,
+    outDir = cardOutputDir(),
+    // Which family the guard proves actually loaded.
+    //
+    // It was hardcoded to Heebo, from when Heebo carried all the Hebrew on
+    // every surface. It no longer does: a BrickDeal slide sets its Hebrew in
+    // Rubik and declares nothing else, so the hardcoded check refused to render
+    // a page that was perfectly correct — the guard against a silent failure
+    // failing loudly on the wrong thing.
+    //
+    // Naming the face rather than guessing it keeps the check exactly as strict
+    // as it was. What it must never become is "some font loaded", which is the
+    // `document.fonts.check()` mistake documented below in a different costume.
+    face = 'Heebo',
+  } = {}
+) {
   const browser = await getBrowser();
   const context = await browser.newContext({
     viewport: { width, height },
@@ -174,14 +162,14 @@ export async function renderToJpeg(html, { stem, width = CARD_W, height = CARD_H
     // replacing it. The two checks below test the thing we actually care about:
     // that our own @font-face rule loaded, and that it is what's being drawn.
     await page.evaluate(() => document.fonts.ready);
-    const font = await page.evaluate(async () => {
-      const face = [...document.fonts].find((f) => f.family.replace(/['"]/g, '') === 'Heebo');
+    const font = await page.evaluate(async (want) => {
+      const face = [...document.fonts].find((f) => f.family.replace(/['"]/g, '') === want);
 
       // Width comparison against a family that cannot exist. If Heebo failed,
       // both spans fall back to the same face and measure identically.
       const measure = (family) => {
         const el = document.createElement('span');
-        el.textContent = 'מסלול טיול בחו״ל';
+        el.textContent = 'אבני בנייה תואמות';
         el.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:900 100px ${family}`;
         document.body.appendChild(el);
         const w = el.getBoundingClientRect().width;
@@ -191,7 +179,7 @@ export async function renderToJpeg(html, { stem, width = CARD_W, height = CARD_H
 
       return {
         status: face?.status ?? 'missing',
-        distinct: Math.abs(measure("'Heebo'") - measure("'__no_such_font__'")) > 0.5,
+        distinct: Math.abs(measure(`'${want}'`) - measure("'__no_such_font__'")) > 0.5,
         // Every OTHER face the page declared, forced to resolve.
         //
         // The check above was written when Heebo carried all the Hebrew and it
@@ -209,7 +197,7 @@ export async function renderToJpeg(html, { stem, width = CARD_W, height = CARD_H
         // after which "error" means the bytes are not a font.
         others: await Promise.all(
           [...document.fonts]
-            .filter((f) => f.family.replace(/['"]/g, '') !== 'Heebo')
+            .filter((f) => f.family.replace(/['"]/g, '') !== want)
             .map(async (f) => {
               try {
                 await f.load();
@@ -220,11 +208,11 @@ export async function renderToJpeg(html, { stem, width = CARD_W, height = CARD_H
             })
         ),
       };
-    });
+    }, face);
 
     if (font.status !== 'loaded' || !font.distinct) {
       throw new Error(
-        `Heebo did not load (@font-face status: ${font.status}, distinct from fallback: ${font.distinct}) — ` +
+        `${face} did not load (@font-face status: ${font.status}, distinct from fallback: ${font.distinct}) — ` +
           'refusing to render, because the Hebrew would come out as tofu boxes'
       );
     }

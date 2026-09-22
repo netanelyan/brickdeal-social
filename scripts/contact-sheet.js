@@ -59,7 +59,7 @@ if (!slides.length) {
     })
     .sort((a, b) => a.note.localeCompare(b.note));
 
-  const sheet = writeContactSheet(decks, dir, { title: `tiyul+ · ${decks.length} decks` });
+  const sheet = writeContactSheet(decks, dir, { title: `brickdeal · ${decks.length} decks` });
   console.log(`${slides.length} slides in ${decks.length} decks`);
   console.log(`Contact sheet: ${sheet}`);
 }

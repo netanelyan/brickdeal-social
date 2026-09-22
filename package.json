@@ -1,7 +1,7 @@
 {
-  "name": "tiyul-social",
+  "name": "brickdeal-social",
   "version": "0.1.0",
-  "description": "Travel content pipeline for tiyul+ — gather, verify, draft, render, approve, publish.",
+  "description": "BrickDeal social pipeline — deal feed to Hebrew TikTok slideshow, with a human tap in the middle.",
   "type": "module",
   "private": true,
   "engines": {
@@ -9,23 +9,12 @@
   },
   "scripts": {
     "start": "node bot.js",
-    "test": "node scripts/selftest.js",
-    "run-once": "node scripts/run-once.js",
-    "dry-run": "node scripts/dry-run.js",
-    "preview": "node scripts/preview.js",
-    "check-sources": "node scripts/check-sources.js",
-    "eval-feed": "node scripts/eval-feed.js",
-    "find-feeds": "node scripts/find-feeds.js",
-    "check-cards": "node scripts/check-cards.js",
+    "test": "node scripts/brick-selftest.js",
+    "brick-lab": "node scripts/brick-lab.js",
+    "brick-once": "node scripts/brick-once.js",
+    "fetch-emoji": "node scripts/fetch-emoji.js",
     "ig-token": "node scripts/ig-token.js",
     "tiktok-token": "node scripts/tiktok-token.js",
-    "backfill-ig": "node scripts/backfill-instagram.js",
-    "render-samples": "node scripts/render-samples.js",
-    "test-url": "node test.js",
-    "fetch-emoji": "node scripts/fetch-emoji.js",
-    "deck-lab": "node scripts/deck-lab.js",
-    "deck-once": "node scripts/deck-once.js",
-    "font-lab": "node scripts/font-lab.js",
     "contact-sheet": "node scripts/contact-sheet.js"
   },
   "dependencies": {

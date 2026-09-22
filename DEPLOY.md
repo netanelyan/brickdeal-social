@@ -11,14 +11,14 @@ Everything else about this deployment follows from that one fact: there is a
 web server, it serves a directory, and the renderer writes straight into it.
 
 The target here is Debian/Ubuntu with Caddy, because that is what
-`cards.tiyulplus.com` already runs on alongside BrickDeal.
+`slides.brickdeal.co.il` already runs on alongside BrickDeal.
 
 ---
 
 ## What is actually being deployed
 
 One long-running Node process. It is **not** a cron job — `bot.js` schedules
-itself with `setInterval`, gathers through the day from `RUN_HOUR`, and drips
+itself with `setInterval`, offers a deck through the day from `RUN_HOUR`, and drips
 posts every `POST_INTERVAL_MINUTES`. Killing and restarting it on a timer would
 lose the day's state. It wants systemd with `Restart=always`.
 
@@ -31,7 +31,8 @@ Three things live outside the repository and none of them are in git:
 |---|---|---|
 | Secrets | `.env` | `.gitignore` covers `.env` and `.env.*` — a `.env.bak` is the same secrets with a different extension |
 | State | `data/store.json` | dedupe history, the publish queue, the published log the pillar quotas are computed from, and the TikTok token pair |
-| Rendered cards | `CARD_OUTPUT_DIR` | regenerable from the candidate at any time |
+| Rendered slides | `CARD_OUTPUT_DIR` | regenerable from the deck at any time |
+| Generated photographs | `SHOT_CACHE_DIR` | **not** regenerable for free — each one cost a model call |
 
 `data/` is the one that matters. Lose it and the bot forgets what it has
 already posted, which means it will happily post it again.
@@ -54,10 +55,10 @@ node -v
 Don't run it as root. It executes a browser.
 
 ```bash
-sudo adduser --system --group --home /srv/tiyul tiyul
-sudo -u tiyul git clone https://github.com/netanelyan/tiyul-social /srv/tiyul/app
-cd /srv/tiyul/app
-sudo -u tiyul npm ci
+sudo adduser --system --group --home /srv/brickdeal brickdeal
+sudo -u brickdeal git clone https://github.com/netanelyan/brickdeal-social /srv/brickdeal/app
+cd /srv/brickdeal/app
+sudo -u brickdeal npm ci
 ```
 
 ## 3. Chromium, with its system libraries
@@ -69,7 +70,7 @@ that mentions Playwright.
 
 ```bash
 sudo npx playwright install-deps chromium
-sudo -u tiyul npx playwright install chromium
+sudo -u brickdeal npx playwright install chromium
 ```
 
 Two commands rather than `--with-deps` because the libraries need root and the
@@ -86,15 +87,15 @@ the font guard in `src/render/index.js`.
 ## 4. The web root Caddy already serves
 
 ```bash
-sudo mkdir -p /var/www/tiyul/cards
-sudo chown tiyul:tiyul /var/www/tiyul/cards
+sudo mkdir -p /var/www/brickdeal/cards
+sudo chown brickdeal:brickdeal /var/www/brickdeal/cards
 ```
 
 In the Caddyfile:
 
 ```
-cards.tiyulplus.com {
-    root * /var/www/tiyul
+slides.brickdeal.co.il {
+    root * /var/www/brickdeal
     file_server
 }
 ```
@@ -105,14 +106,14 @@ sudo systemctl reload caddy
 ```
 
 Caddy gets the certificate itself on first request, provided the DNS A record
-for `cards.tiyulplus.com` already points at this box.
+for `slides.brickdeal.co.il` already points at this box.
 
 **Verify it from off the machine before going further.** This is the single
 assumption everything downstream rests on, and it is cheap to check:
 
 ```bash
-sudo -u tiyul touch /var/www/tiyul/cards/probe.jpg
-curl -sI https://cards.tiyulplus.com/cards/probe.jpg | head -1   # expect 200
+sudo -u brickdeal touch /var/www/brickdeal/cards/probe.jpg
+curl -sI https://slides.brickdeal.co.il/cards/probe.jpg | head -1   # expect 200
 ```
 
 If that is not a 200 from another network, Instagram will not be able to fetch a
@@ -124,8 +125,8 @@ Copy `.env.example` and fill it in — it documents every variable. Two entries
 differ from a laptop:
 
 ```ini
-CARD_OUTPUT_DIR=/var/www/tiyul/cards
-CARD_PUBLIC_BASE_URL=https://cards.tiyulplus.com/cards
+CARD_OUTPUT_DIR=/var/www/brickdeal/cards
+CARD_PUBLIC_BASE_URL=https://slides.brickdeal.co.il/cards
 ```
 
 `CARD_PUBLIC_BASE_URL` must resolve to the same file `CARD_OUTPUT_DIR` writes.
@@ -133,8 +134,8 @@ Getting this pair subtly wrong is the most common cause of a card that renders
 perfectly and then fails to publish.
 
 ```bash
-sudo -u tiyul cp .env.example .env
-sudo -u tiyul nano .env
+sudo -u brickdeal cp .env.example .env
+sudo -u brickdeal nano .env
 sudo chmod 600 .env
 ```
 
@@ -144,10 +145,10 @@ Set `TZ=Asia/Jerusalem` here as well as in the unit file — `RUN_HOUR=8` means
 ## 6. Prove it works before it runs unattended
 
 ```bash
-sudo -u tiyul npm test                 # offline, no credentials needed
-sudo -u tiyul npm run check-sources    # probes every feed
-sudo -u tiyul npm run run-once         # a full pass, publishes nothing
-sudo -u tiyul npm run deck-once -- "Dolomites mountain"
+sudo -u brickdeal npm test                 # offline, no credentials needed
+sudo -u brickdeal npm run brick-once -- --no-images   # the whole path, publishes nothing
+sudo -u brickdeal npm run run-once         # a full pass, publishes nothing
+sudo -u brickdeal npm run deck-once -- "Dolomites mountain"
 ```
 
 `deck-once` is the one that exercises Chromium, the bundled fonts, the photo
@@ -157,8 +158,8 @@ the hard part of this deployment is done.
 ## 7. Keeping it running
 
 > **What the live box actually does, as of 2026-09-20.** The production host
-> runs this under **pm2 as root from `/opt/tiyul-social`**, not under systemd
-> from `/srv/tiyul/app`. The unit file below describes the intended shape and is
+> runs this under **pm2 as root from `/opt/brickdeal-social`**, not under systemd
+> from `/srv/brickdeal/app`. The unit file below describes the intended shape and is
 > still the better one — it drops privileges, caps memory and isolates the
 > filesystem, none of which pm2 is doing here — but it is not what is running,
 > and a deploy that follows this file to the letter will end up with two copies
@@ -168,30 +169,30 @@ the hard part of this deployment is done.
 > The commands for what is actually there:
 >
 > ```bash
-> pm2 list                 # tiyul should be `online`
-> pm2 restart tiyul
-> pm2 logs tiyul --lines 50
+> pm2 list                 # brickdeal should be `online`
+> pm2 restart brickdeal
+> pm2 logs brickdeal --lines 50
 > pm2 save                 # persist the process list across reboots
 > ```
 >
 > Note also that pm2 does not read `.env` for you the way `EnvironmentFile`
 > does — `src/env.js` loads it from the working directory, which is why
-> `exec cwd` must stay `/opt/tiyul-social`.
+> `exec cwd` must stay `/opt/brickdeal-social`.
 
-`/etc/systemd/system/tiyul.service`:
+`/etc/systemd/system/brickdeal-social.service`:
 
 ```ini
 [Unit]
-Description=tiyul+ content pipeline
+Description=brickdeal+ content pipeline
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=tiyul
-Group=tiyul
-WorkingDirectory=/srv/tiyul/app
-EnvironmentFile=/srv/tiyul/app/.env
+User=brickdeal
+Group=brickdeal
+WorkingDirectory=/srv/brickdeal/app
+EnvironmentFile=/srv/brickdeal/app/.env
 Environment=NODE_ENV=production
 Environment=TZ=Asia/Jerusalem
 ExecStart=/usr/bin/node bot.js
@@ -206,7 +207,7 @@ MemoryMax=1200M
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ReadWritePaths=/srv/tiyul/app/data /var/www/tiyul/cards
+ReadWritePaths=/srv/brickdeal/app/data /var/www/brickdeal/cards
 
 [Install]
 WantedBy=multi-user.target
@@ -217,9 +218,9 @@ wrapped in `"` arrives *with* the quote characters. Leave them off.
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now tiyul
-sudo systemctl status tiyul
-journalctl -u tiyul -f
+sudo systemctl enable --now brickdeal
+sudo systemctl status brickdeal
+journalctl -u brickdeal -f
 ```
 
 Then **DM the bot `/start` once** from your own Telegram account. Until you do,
@@ -231,7 +232,7 @@ it cannot message you at all, and it ignores everyone whose id is not
 Only after the domain is live, because two of its requirements are about the
 domain:
 
-- `cards.tiyulplus.com` must be verified under **URL properties** in the
+- `slides.brickdeal.co.il` must be verified under **URL properties** in the
   developer portal, or every post fails with `url_ownership_unverified`.
 - `TIKTOK_REDIRECT_URI` must match what is registered there character for
   character, trailing slash included.
@@ -262,25 +263,25 @@ a day and a value in `.env` would be stale by morning.
 **Back up `data/`.** It is the only thing here that cannot be rebuilt.
 
 ```bash
-sudo -u tiyul cp /srv/tiyul/app/data/store.json \
-  /srv/tiyul/backup/store-$(date +%F).json
+sudo -u brickdeal cp /srv/brickdeal/app/data/store.json \
+  /srv/brickdeal/backup/store-$(date +%F).json
 ```
 
 **Updating:**
 
 ```bash
-cd /srv/tiyul/app
-sudo -u tiyul git pull
-sudo -u tiyul npm ci
-sudo -u tiyul npm test
-sudo systemctl restart tiyul
+cd /srv/brickdeal/app
+sudo -u brickdeal git pull
+sudo -u brickdeal npm ci
+sudo -u brickdeal npm test
+sudo systemctl restart brickdeal
 ```
 
 **Cards accumulate.** They are regenerable, so old ones can go — but not
 recent ones, which Instagram and TikTok may still be fetching:
 
 ```bash
-find /var/www/tiyul/cards -name '*.jpg' -mtime +30 -delete
+find /var/www/brickdeal/cards -name '*.jpg' -mtime +30 -delete
 ```
 
 ## When something breaks

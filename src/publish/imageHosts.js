@@ -96,8 +96,8 @@ export function tiktokVerifiedDomains(env = process.env) {
  * Is this URL on a verified domain?
  *
  * Matched on a domain-label boundary, the same rule the source allowlist uses:
- * verifying `tiyulplus.com` covers `cards.tiyulplus.com`, and must not be
- * satisfied by `tiyulplus.com.attacker.example` or `eviltiyulplus.com`.
+ * verifying `brickdeal.co.il` covers `slides.brickdeal.co.il`, and must not be
+ * satisfied by `brickdeal.co.il.attacker.example` or `evilbrickdeal.co.il`.
  */
 export function isVerifiedForTikTok(url, domains = tiktokVerifiedDomains()) {
   const host = hostOf(url);

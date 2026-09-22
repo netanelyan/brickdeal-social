@@ -7,8 +7,8 @@ import { exchangeCode, creatorInfo, describeError, missingScopes } from './publi
 //
 // The flow, end to end, and where this file sits in it:
 //
-//   1. www.tiyulplus.com/tiktok/connect  sends the owner to TikTok with a state.
-//   2. TikTok redirects back to          www.tiyulplus.com/tiktok/callback?code=…
+//   1. www.brickdeal.co.il/tiktok/connect  sends the owner to TikTok with a state.
+//   2. TikTok redirects back to          www.brickdeal.co.il/tiktok/callback?code=…
 //   3. That page validates its own state and POSTs the code here.
 //   4. This exchanges the code for a token pair, stores it, and answers with
 //      the account it just connected.
@@ -20,7 +20,7 @@ import { exchangeCode, creatorInfo, describeError, missingScopes } from './publi
 // process is writing to a file a long-running process holds in memory.
 //
 // WHY THIS LISTENS ON LOCALHOST ONLY
-// Caddy on the VPS terminates TLS and proxies cards.tiyulplus.com/tiktok/* to
+// Caddy on the VPS terminates TLS and proxies slides.brickdeal.co.il/tiktok/* to
 // 127.0.0.1:8787. Binding 0.0.0.0 would publish an endpoint that takes a shared
 // secret straight to the open internet on a plain HTTP port, bypassing the
 // thing holding the certificate. The bind address is not a preference.
