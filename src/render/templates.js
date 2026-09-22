@@ -133,6 +133,29 @@ const photoCss = (scrim = null) => {
     background: linear-gradient(to bottom, rgba(${SCRIM_INK},${t.toFixed(3)}), rgba(${SCRIM_INK},0));
   }
   .layer { position: relative; z-index: 2; display: flex; flex-direction: column; height: 100%; }
+
+  /* The header, where it sits on the photograph rather than on a ground.
+
+     The scrim above it is sized so that WHITE type clears a contrast threshold,
+     and the kicker is not white — it is the accent. Sage sits at luminance
+     0.345, and a bright cloud under a correctly-measured top scrim lands at
+     about 0.35, so the place name and the thing behind it end up at the same
+     lightness and the word disappears into the picture. Making the scrim
+     heavier does not fix it either: drive the background down far enough for a
+     mid-luminance accent and the top fifth of every photograph goes black.
+
+     A shadow does not care what is behind it. The tight one draws the glyph's
+     own edge and is what makes the letterform legible; the wide one lifts the
+     whole word off the picture so it reads as type on a photograph rather than
+     as part of it. Same two-shadow idiom the TikTok slides use.
+
+     photoFrame's header is deliberately not included: it sits above the
+     picture, on the card's own ground, where a shadow would be noise. Nor is
+     photoBand's, which is on a solid pill and never touches the photograph. */
+  .layer .head .kicker,
+  .layer .head .brand {
+    text-shadow: 0 1px 2px rgba(0,0,0,0.55), 0 2px 10px rgba(0,0,0,0.40);
+  }
 `;
 };
 

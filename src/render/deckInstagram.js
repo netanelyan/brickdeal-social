@@ -195,6 +195,17 @@ ${scrimCss(slide.image?.scrim)}
 }
 .head { border-bottom: 2px solid var(--accent); }
 
+/* Same header, same photograph, same problem the cards have — see the note in
+   templates.js. The counter and the kicker are small, accent-coloured type over
+   whatever the top of the picture happens to be, and the scrim above them is
+   measured for white. A slide is more exposed than a card, not less: there are
+   six of them and the viewer is swiping. */
+.head .count,
+.head .kick,
+.head .brand {
+  text-shadow: 0 1px 2px rgba(0,0,0,0.55), 0 2px 10px rgba(0,0,0,0.40);
+}
+
 /* The counter. Latin digits inside an RTL header, so it is isolated like every
    other latin run — without this the slash lands on the wrong side. */
 .count {
