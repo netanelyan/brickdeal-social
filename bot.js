@@ -1669,8 +1669,8 @@ function tick() {
   // stopped being refreshed the moment the card path came out.
   if (day !== lastRunDay) {
     lastRunDay = day;
-    maybeRefreshIgToken().catch(() => {});
-    maybeRefreshTikTokToken().catch(() => {});
+    refreshToken().catch(() => {});
+    refreshTikTokToken().catch(() => {});
   }
 
   // Deck proposals through the day, in waking hours. Only the PROPOSAL - the
@@ -1732,8 +1732,16 @@ async function main() {
     `   proposals ${DECKS_PER_DAY}/day between ${RUN_HOUR}:00 and ${GATHER_UNTIL_HOUR}:00 · drip every ${POST_INTERVAL_MINUTES} min`
   );
 
-  await maybeRefreshIgToken();
-  await maybeRefreshTikTokToken();
+  // Both refreshes are "maybe" by nature — each returns early unless the token
+  // is close enough to lapsing to be worth a call — so there is nothing to
+  // decide here beyond letting them fail quietly.
+  //
+  // And they must fail quietly. main() rejecting exits the process, pm2 starts
+  // it again, and a refresh is a network call: one unreachable API at boot
+  // would otherwise become a restart loop on a bot that had nothing wrong with
+  // it. Whatever does not refresh now is retried at the next day change.
+  await refreshToken().catch((e) => console.error('instagram token refresh at boot:', e.message));
+  await refreshTikTokToken().catch((e) => console.error('tiktok token refresh at boot:', e.message));
   await probeInstagram();
 
   setInterval(() => {
