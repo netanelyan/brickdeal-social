@@ -31,7 +31,7 @@ const getClient = () => (client ??= new Anthropic());
 const HOOK_SCHEMA = {
   type: 'object',
   properties: {
-    hook: { type: 'string', description: 'The cover line, in Hebrew. Under nine words.' },
+    hook: { type: 'string', description: 'The cover line, in Hebrew. Seven words or fewer.' },
     emphasis: {
       type: 'string',
       description:
@@ -60,13 +60,16 @@ const HOOK_SCHEMA = {
 /**
  * The ceiling on a cover line, in words.
  *
- * Six, because that is what the reference's own covers run to and because a
- * cover is read off a moving screen in about a second. It lives here as a
- * constant rather than in the prompt alone so the prompt and the check cannot
- * drift — which they had: the prompt asked for "under nine", nothing counted,
+ * Seven. Six was tried first and was half a word too tight: the model reaches
+ * for the varied shapes the prompt asks for — an admission, a contrast, a
+ * before-and-after — and those land at seven, so five covers in six were being
+ * thrown back to the pool and the same eight lines went out forever.
+ *
+ * It lives here as a constant rather than in the prompt alone so the prompt and
+ * the check cannot drift — which they had: the prompt asked for "under nine", nothing counted,
  * and what shipped was ten words wide across a full frame.
  */
-export const MAX_HOOK_WORDS = 6;
+export const MAX_HOOK_WORDS = 7;
 
 const hookSystem = () => `You write the first slide of a Hebrew TikTok slideshow for a channel that finds cheap compatible building-brick sets on AliExpress.
 
@@ -74,15 +77,25 @@ The cover line is the only thing most viewers will read. It has to stop a scroll
 
 VOICE: first person, conversational, slightly confrontational, hobbyist talking to hobbyist. A question or a challenge. Never a sale, never a percentage, never an exclamation of how amazing something is.
 
-These are real covers from the account this channel is modelled on. Match them:
+These are real covers from the account this channel is modelled on. Match their voice and their shapes — but DO NOT REPRODUCE ONE. They are the standard, not a menu, and they are already in rotation as the fallback: handing one back means this post and the next go out under the same cover. Write a new line that would belong in this list.
 
 ${brickConfig().covers.lines.map((l) => `  ${l}`).join('\n')}
 
 HARD RULES:
 - Hebrew only.
-- SIX WORDS OR FEWER. Count them. Every example above is four to six, and the limit is checked in code: a longer line is thrown away and one of the examples is used instead. A cover is read at a glance on a moving screen, and eight words is a sentence rather than a hook.
+- SEVEN WORDS OR FEWER. Count them. Every example above is four to seven, and the limit is checked in code: a longer line is thrown away and one of the examples is used instead. A cover is read at a glance on a moving screen, and ten words is a paragraph rather than a hook.
 - NEVER name the original brand. Not in Hebrew, not in English, not as part of a longer word. Say "סטים תואמים", "אבני בנייה", "התחביב" or just "סט".
-- Call the product a "סט". Do NOT invent a compound noun for it. "מכונית אבנים" and the like are not words anybody uses, and a viewer who has to work out what the thing IS has already scrolled past. The photograph shows what it is; the line says why it matters.
+- DO NOT SAY WHAT THE THING IS. The photograph is already showing it. Naming the category — "סט מכוניות", "סט טכניק", "דגם רכב" — spends half a seven-word line describing the picture underneath it, and leaves no room for the only thing the line is for. Say "סט" or "זה" and move on. Never invent a compound noun for it either: "מכונית אבנים" is not a phrase anybody uses.
+- EVERY LINE MUST CARRY THE CONTRAST. The post is one argument: the same model costs a fraction of what the original does. If your line does not contain the too-much — a price, "מחיר מלא", "פי שבע", "ביוקר", "כמה באמת" — then it is not a hook, it is the first half of one.
+
+  These are NOT hooks, and each fails the same way:
+    "למה אתם משלמים על סט מכוניות"  - paying WHAT? Three words spent naming the picture, nothing left for the point.
+    "הסטים האלה ממש שווים"           - says nothing anybody disagrees with.
+    "תראו את הסט הזה"                 - an instruction, not an argument.
+
+  The test: could somebody read your line and answer "so what?" If yes, rewrite it.
+
+- VARY THE SHAPE. Not every cover is a question, and "למה אתם משלמים...?" is not the template — it is one of eight. Look at the range above: a challenge ("אתם קונים סטים במחיר מלא?"), a first-person admission ("הפסקתי לשלם ביוקר על התחביב שלי"), a flat contrast ("זה אותו דגם. זה לא אותו מחיר."), a before-and-after ("מה הזמנתי VS מה קיבלתי"), a confession ("עשיתי את החישוב ונדהמתי"). These posts go out one after another to the same people; five covers in a row opening with "למה" is a template, and a template is the thing this whole account is trying not to look like.
 - No URLs, no calls to action, no hashtags, no emoji.
 - Plain hyphens, never an em dash.
 - Do not state a specific price or a percentage. The slides carry the numbers; the cover carries the question.
@@ -150,13 +163,23 @@ export async function draftHook(recipe, { rand = Math.random } = {}) {
       return { ...fallback(), from: `pool (model wrote ${words} words)` };
     }
     // The emphasis has to be a substring of the hook or the renderer cannot
-    // find it. A model that paraphrased it is not an error worth failing a deck
-    // over — the cover simply sets in one colour, which is what a cover with
-    // nothing to shout does anyway.
+    // find it — and a hook whose shout cannot be found is the failure this
+    // whole block is guarding against, not a cosmetic slip.
+    //
+    // This used to render the cover in one colour and carry on, on the
+    // reasoning that "a cover with nothing to shout" sets that way anyway. That
+    // reasoning had it backwards. A line with no phrase worth colouring is a
+    // line with no argument in it — "למה אתם משלמים על סט מכוניות" is six words
+    // that ask nothing — and the pool exists precisely so the cover never has
+    // to be the weakest thing in the post. Falling back costs one model call
+    // and nothing else: the five slides are already built and untouched.
     const said = assertCopy(String(parsed.emphasis || '').trim(), 'the cover emphasis');
+    if (!said || !hook.includes(said)) {
+      return { ...fallback(), from: said ? 'pool (emphasis not in the hook)' : 'pool (no emphasis)' };
+    }
     return {
       hook,
-      emphasis: said && hook.includes(said) ? said : null,
+      emphasis: said,
       title: assertCopy(String(parsed.title || recipe.subject).trim(), 'the deck title'),
       from: 'model',
     };
