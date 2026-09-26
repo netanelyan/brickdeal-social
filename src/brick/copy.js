@@ -138,6 +138,28 @@ export function assertNoUrl(caption, where = 'caption') {
  * 40px white type reads as a spreadsheet, and the second digit after the point
  * has never once changed whether somebody taps.
  */
+/**
+ * A geresh the feed lost, put back.
+ *
+ * `ג'יפ` arrives from brickdeal-automation as `ג יפ` on some rows — the
+ * apostrophe dropped somewhere upstream, leaving a lone letter, a space, and
+ * the rest of the word. On a slide that reads as a typo rather than as a name,
+ * and a typo in 54px type is the whole frame.
+ *
+ * THE REAL FIX IS UPSTREAM and this does not replace it. It is here because
+ * this repository does not own the feed, cannot correct it, and must not put a
+ * broken word on a published post while somebody else's bug is outstanding.
+ *
+ * Deliberately narrow. Only ג, ז and צ, which are the three letters Hebrew
+ * gives a geresh to when transcribing a foreign sound — j, zh, ch — and only
+ * when one stands completely alone before another Hebrew word. A single
+ * free-standing letter is not a Hebrew word: the letters that genuinely appear
+ * alone are prefixes (ב, ל, ה, ו, מ, ש, כ) and they attach to what follows
+ * rather than standing off it, so they cannot match this.
+ */
+export const repairGeresh = (text) =>
+  String(text ?? '').replace(/(^|[\s|])([גזצ]) (?=[א-ת])/g, "$1$2'");
+
 export const shekels = (n) => `${Math.round(Number(n) || 0).toLocaleString('en-US')}₪`;
 
 /**

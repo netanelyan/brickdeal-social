@@ -14,6 +14,7 @@ import {
   priceLine,
   priceLineHtml,
   slideLines,
+  repairGeresh,
   CopyError,
 } from '../src/brick/copy.js';
 import { setNumber, pickPrice, longestSideCm, compare } from '../src/brick/rrp.js';
@@ -419,6 +420,14 @@ group('the slide');
 
   eq('a long name steps down a size', nameClass('מסדרונות הטירה והספרייה הגדולה של בית הספר'), ' long');
   eq('a short one does not', nameClass('סחלב'), '');
+
+  // The feed ships some names with the geresh dropped — "ג יפ" for "ג'יפ".
+  // Repaired on the way in, narrowly: a prefix letter standing before a word is
+  // ordinary Hebrew and must survive untouched.
+  eq('a dropped geresh is put back', repairGeresh('מכוניות | ג יפ שטח עם ציוד'), "מכוניות | ג'יפ שטח עם ציוד");
+  eq('and at the start of a name', repairGeresh('ג יפ כחול'), "ג'יפ כחול");
+  eq('a clean name is left alone', repairGeresh('מכונית ספורט שחורה'), 'מכונית ספורט שחורה');
+  eq('and a prefix letter is not a lost geresh', repairGeresh('ה מכונית'), 'ה מכונית');
 
   eq('a long hook is broken over two lines', coverClass('למה אתה עדיין משלם אלף שקל על מכונית מאבנים?'), ' long');
   eq('a short one is left on one', coverClass('שליש מהמחיר'), '');

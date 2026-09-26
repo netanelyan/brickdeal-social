@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { splitName, detectTheme, THEME_HE } from './themes.js';
+import { repairGeresh } from './copy.js';
 
 // The deal feed, and what is allowed out of it onto a slide.
 //
@@ -101,11 +102,15 @@ export function unusable(deal, { now = Date.now() } = {}) {
  * computes them so a deal is filed the same way in all three places.
  */
 export function normalise(deal) {
-  const { series, product } = splitName(deal.name);
-  const theme = deal.theme || detectTheme(deal.name) || null;
+  // Repaired once, here, before anything reads it — so the slide, the deck
+  // title, the caption and the theme detector all see the same corrected name
+  // rather than each patching it differently or not at all.
+  const rawName = repairGeresh(deal.name);
+  const { series, product } = splitName(rawName);
+  const theme = deal.theme || detectTheme(rawName) || null;
   return {
     productId: String(deal.productId),
-    name: String(deal.name).replace(/\s+/g, ' ').trim(),
+    name: String(rawName).replace(/\s+/g, ' ').trim(),
     series: series || null,
     product,
     setId: deal.setId ? String(deal.setId).trim() : null,
