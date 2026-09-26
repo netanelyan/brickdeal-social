@@ -92,7 +92,38 @@ const empty = {
   // completely different clocks — 60 days against 24 hours — and the refresh
   // token here is the one that needs a browser to replace.
   tiktokToken: null,
+  // --- the three collections the website added ------------------------------
+  //
+  // All three live here, in the one file, for the reason src/oauthServer.js
+  // spells out at length: store.js holds the whole document in memory and saves
+  // it whole, so a SECOND process writing its own copy would not corrupt the
+  // file but would silently roll back every change made since it loaded. The
+  // website runs inside the bot's process and writes through this module, so
+  // there is one copy of this document and one event loop touching it.
+  //
+  // Dials that were environment variables and are now editable from either
+  // surface. Only the keys someone has actually changed are present, so .env
+  // stays the default and this is the override — which is why every read goes
+  // through settings() rather than reading process.env at module load.
+  settings: {},
+  // Who may sign in to the website. Keyed by lowercased username; the value
+  // carries a scrypt hash and never a password.
+  admins: {},
+  // Who did what, from which surface. Bounded — see AUDIT_MAX.
+  audit: [],
+  // The key session cookies are signed with. Generated on first use and
+  // persisted, so a restart does not sign everybody out; rotating it is exactly
+  // how you sign everybody out.
+  webSecret: null,
 };
+
+// How much of the audit trail is kept.
+//
+// Bounded because this file is rewritten in full on every save, and an
+// unbounded log would make every unrelated write a little more expensive
+// forever. Long enough to cover "who approved that, and when" for weeks of
+// ordinary use, which is the question it exists to answer.
+const AUDIT_MAX = Math.max(50, Number(process.env.AUDIT_MAX ?? '500'));
 
 // How long a published id is remembered. Long, because the cost of forgetting
 // is posting the same thing twice to real followers, and the cost of
@@ -177,6 +208,13 @@ function load() {
   if (!s.sourceHealth || typeof s.sourceHealth !== 'object') s.sourceHealth = {};
   if (!s.sourceOff || typeof s.sourceOff !== 'object') s.sourceOff = {};
   if (!s.proposedIds || typeof s.proposedIds !== 'object') s.proposedIds = {};
+  // The website's three. Same posture as the rest: a store written before they
+  // existed opens cleanly with them empty, because "no admins yet" is the state
+  // a fresh install is supposed to be in — scripts/admin.js is what leaves it.
+  if (!s.settings || typeof s.settings !== 'object') s.settings = {};
+  if (!s.admins || typeof s.admins !== 'object') s.admins = {};
+  if (!Array.isArray(s.audit)) s.audit = [];
+  if (s.audit.length > AUDIT_MAX) s.audit = s.audit.slice(-AUDIT_MAX);
 
   // Migration for stores written before publishedIds existed. Backfill from the
   // quota window — it is the only record of what went out, and recovering the
@@ -425,6 +463,16 @@ export function clearProposal(key) {
 }
 export const proposalSize = () => Object.keys(state.proposals).length;
 
+/**
+ * Every proposal, with its key — the same shape stagingItems() has.
+ *
+ * Telegram never needed this: a button carries the one key it acts on, so
+ * getProposal() was enough. A page that LISTS what is waiting needs all of them,
+ * and the alternative was reaching into the collection from outside the store.
+ */
+export const proposalItems = () =>
+  Object.entries(state.proposals).map(([key, held]) => ({ key, held: { ...held } }));
+
 // --- pending edits ----------------------------------------------------------
 // Keyed by the staging key, never by chat: BrickDeal learned the hard way that
 // a single "currently editing" value per chat lets the second of two in-flight
@@ -481,6 +529,8 @@ export function dequeue() {
   return item;
 }
 export const queueSize = () => state.queue.length;
+/** Which kind went out last — what the drip's alternation is measured against. */
+export const lastPublishedKindOf = () => state.lastPublishedKind || null;
 
 /**
  * Empty the publish queue.
@@ -1060,5 +1110,161 @@ export function clearTikTokToken() {
   state.tiktokToken = null;
   save();
 }
+
+// --- runtime settings ---------------------------------------------------------
+//
+// The dials that used to be read once from process.env at startup.
+//
+// bot.js destructured POST_INTERVAL_MINUTES, RUN_HOUR, DECKS_PER_DAY and the
+// rest at module load, which made them unchangeable without a deploy — fine
+// while the only way in was a terminal on the VPS, and wrong the moment two
+// people are meant to manage the schedule. So the value is read on every use and
+// the precedence is: what somebody set here, else .env, else the built-in.
+//
+// Deliberately a small closed list rather than "any env var". These four are
+// numbers with obvious meanings and obvious bounds; a settings page that could
+// rewrite TG_BOT_TOKEN or CARD_OUTPUT_DIR would be a settings page that can
+// break the install from a browser.
+export const SETTABLE = {
+  POST_INTERVAL_MINUTES: { min: 5, max: 1440, fallback: 240 },
+  DECKS_PER_DAY: { min: 0, max: 12, fallback: 2 },
+  DECK_BACKLOG_MAX: { min: 1, max: 20, fallback: 3 },
+  RUN_HOUR: { min: 0, max: 23, fallback: 8 },
+  GATHER_UNTIL_HOUR: { min: 1, max: 24, fallback: 22 },
+  GATHER_EVERY_HOURS: { min: 0.25, max: 24, fallback: 2 },
+  QUIET_ALERT_HOURS: { min: 1, max: 240, fallback: 30 },
+};
+
+/**
+ * One dial, as a number, from the first place that has an answer.
+ *
+ * Clamped rather than rejected on read. A value that got into the file out of
+ * range — by hand, or from an older build with different bounds — should behave
+ * sanely rather than take the drip timer to NaN.
+ */
+export function setting(key) {
+  const spec = SETTABLE[key];
+  if (!spec) throw new Error(`setting(${key}) is not a settable dial`);
+  const raw = state.settings?.[key] ?? process.env[key];
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return spec.fallback;
+  return Math.min(spec.max, Math.max(spec.min, n));
+}
+
+/** Every dial, with where its current value came from. For the settings page. */
+export function settingsReport() {
+  return Object.entries(SETTABLE).map(([key, spec]) => ({
+    key,
+    value: setting(key),
+    ...spec,
+    source: state.settings?.[key] != null ? 'stored' : process.env[key] != null ? 'env' : 'default',
+    envValue: process.env[key] ?? null,
+  }));
+}
+
+/**
+ * Change one dial, or clear it back to whatever .env says.
+ *
+ * Returns the value actually stored, so a caller can report the clamp rather
+ * than claiming it saved what it was handed.
+ */
+export function setSetting(key, value) {
+  const spec = SETTABLE[key];
+  if (!spec) throw new Error(`${key} is not a settable dial`);
+  if (value === null || value === '') {
+    delete state.settings[key];
+    save();
+    return setting(key);
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n)) throw new Error(`${key} must be a number`);
+  if (n < spec.min || n > spec.max) {
+    throw new Error(`${key} must be between ${spec.min} and ${spec.max}`);
+  }
+  state.settings[key] = n;
+  save();
+  return n;
+}
+
+// --- admin accounts -----------------------------------------------------------
+//
+// Who may sign in to the website. The bot's own lock is unchanged and still
+// absolute: OWNER_ID is the only Telegram id it answers, and nothing here
+// widens that. These accounts reach the same actions through the browser.
+//
+// The stored record never contains a password. `hash` is scrypt output and
+// `salt` is what it was derived with; src/web/auth.js owns both.
+
+/** Every account, without the hash. Safe to send to a browser. */
+export const adminList = () =>
+  Object.values(state.admins)
+    .map(({ hash, salt, ...rest }) => ({ ...rest }))
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+
+export const adminCount = () => Object.keys(state.admins).length;
+
+/** The full record, hash included. Only auth.js should want this. */
+export const adminByUsername = (username) => state.admins[String(username || '').toLowerCase().trim()] || null;
+export const adminById = (id) => Object.values(state.admins).find((a) => a.id === id) || null;
+
+export function putAdmin(admin) {
+  const key = String(admin.username || '').toLowerCase().trim();
+  if (!key) throw new Error('an account needs a username');
+  state.admins[key] = { ...state.admins[key], ...admin, username: key };
+  save();
+  return { ...state.admins[key] };
+}
+
+export function removeAdmin(username) {
+  const key = String(username || '').toLowerCase().trim();
+  if (!state.admins[key]) return false;
+  delete state.admins[key];
+  save();
+  return true;
+}
+
+/**
+ * The key session cookies are signed with, minted on first use.
+ *
+ * WEB_SESSION_SECRET wins when it is set, so an install that would rather keep
+ * this in .env with the other secrets can. Otherwise it is generated once and
+ * persisted — the alternative, a fresh random key per process, signs everybody
+ * out on every restart, and pm2 restarts this bot routinely.
+ */
+export function webSecret(mint) {
+  if (process.env.WEB_SESSION_SECRET) return process.env.WEB_SESSION_SECRET;
+  if (!state.webSecret) {
+    state.webSecret = mint();
+    save();
+  }
+  return state.webSecret;
+}
+
+/** Sign every open session out, by throwing away the key they were signed with. */
+export function rotateWebSecret(mint) {
+  state.webSecret = mint();
+  save();
+  return state.webSecret;
+}
+
+// --- audit trail --------------------------------------------------------------
+//
+// One line per action that changed something, with WHO and from WHERE.
+//
+// This exists because the website added a second way in. With one owner and one
+// Telegram chat, "who approved this" had exactly one answer and the chat history
+// was the log; with three admins and a browser, an approval that arrives with no
+// name on it is an approval nobody can account for afterwards.
+//
+// Reads are never recorded. A log that grows when somebody looks at a page is a
+// log nobody reads.
+export function note(entry) {
+  state.audit.push({ ts: Date.now(), ...entry });
+  if (state.audit.length > AUDIT_MAX) state.audit = state.audit.slice(-AUDIT_MAX);
+  save();
+}
+
+/** Newest first, which is the only order anybody reads a log in. */
+export const auditTrail = ({ limit = 100 } = {}) => [...state.audit].reverse().slice(0, limit);
 
 export { existsSync };

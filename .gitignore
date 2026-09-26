@@ -25,6 +25,13 @@ backups/
 # matched assets/samples/, which is checked in on purpose for the README.
 /samples/
 
+# The copy of brick-config.json taken before a save from the admin panel, so a
+# wording change can be undone. It is a backup of a tracked file: committing it
+# would put yesterday's captions in the history next to today's, under a name
+# that looks like a second config the code might read.
+brick-config.json.bak
+brick-config.json.tmp
+
 # Reference only. BrickDeal is a separate project, read while building this one
 # and never imported from at runtime. It was committed here by accident; it
 # stays on disk as a local reference and out of this repository.

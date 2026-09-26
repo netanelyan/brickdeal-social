@@ -95,10 +95,55 @@ In the Caddyfile:
 
 ```
 slides.brickdeal.co.il {
-    root * /var/www/brickdeal
-    file_server
+    # The admin panel and TikTok's browser connect, both inside the bot process
+    # on one port. Everything under these two prefixes is proxied; everything
+    # else is still a static file, which is what Instagram and TikTok fetch.
+    #
+    # The order matters. `handle` blocks are evaluated in order and the first
+    # match wins, so the static file_server has to be last or it would answer
+    # /api/ with a 404 from disk.
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8787
+    }
+    handle /tiktok/* {
+        reverse_proxy 127.0.0.1:8787
+    }
+    # The page itself: /, /app.js, /app.css. Listed explicitly rather than
+    # proxying everything, so a mistyped path cannot reach the panel.
+    handle /app.js {
+        reverse_proxy 127.0.0.1:8787
+    }
+    handle /app.css {
+        reverse_proxy 127.0.0.1:8787
+    }
+    handle / {
+        reverse_proxy 127.0.0.1:8787
+    }
+
+    handle {
+        root * /var/www/brickdeal
+        file_server
+    }
 }
 ```
+
+**The panel must not be reached over plain HTTP.** It binds `127.0.0.1` for that
+reason and the bot warns at boot if `WEB_BIND` says otherwise: this endpoint can
+publish to Instagram and TikTok, and binding `0.0.0.0` would put it on the open
+internet on port 8787, past the thing holding the certificate.
+
+If you would rather the panel had its own hostname — worth it, because the
+slides host is public by necessity and the panel is not — give it one and leave
+`slides.brickdeal.co.il` serving only files:
+
+```
+panel.brickdeal.co.il {
+    reverse_proxy 127.0.0.1:8787
+}
+```
+
+and keep only the `/tiktok/*` block on the slides host, since TikTok's redirect
+URI is registered against that domain.
 
 ```bash
 sudo caddy validate --config /etc/caddy/Caddyfile
@@ -142,6 +187,24 @@ sudo chmod 600 .env
 Set `TZ=Asia/Jerusalem` here as well as in the unit file — `RUN_HOUR=8` means
 8am where the audience is, not 8am UTC.
 
+The panel's own entries are all optional and the defaults are the right ones:
+
+```ini
+WEB_BIND=127.0.0.1            # do not change this without reading §4
+WEB_PORT=8787
+WEB_PUBLIC_URL=https://panel.brickdeal.co.il   # only so /site can print it
+```
+
+Leave `WEB_SESSION_SECRET` empty unless you want it here with the other secrets;
+a key is generated on first use and kept in the store, so restarts do not sign
+everybody out.
+
+One more thing worth knowing about this file: the pacing values in it
+(`POST_INTERVAL_MINUTES`, `DECKS_PER_DAY`, `RUN_HOUR`, and the rest) are now the
+**defaults**, not the last word. Anything changed on the panel's settings page
+is stored in `data/store.json` and wins. The page says which of the two each
+value is currently coming from, and offers to clear it back to `.env`.
+
 ## 6. Prove it works before it runs unattended
 
 ```bash
@@ -154,6 +217,16 @@ sudo -u brickdeal npm run deck-once -- "Dolomites mountain"
 `deck-once` is the one that exercises Chromium, the bundled fonts, the photo
 measurement and the renderer together. If it writes slides into `out/decks/`,
 the hard part of this deployment is done.
+
+Once the bot is running, check the panel from the box and then from off it:
+
+```bash
+curl -s localhost:8787/api/session          # {"user":null,"accounts":0,...}
+curl -sI https://panel.brickdeal.co.il/ | head -1     # expect 200 through Caddy
+```
+
+A `"user":null` is the right answer — that is the login page's normal state. If
+`accounts` is `0`, §8 is the step you still owe it.
 
 ## 7. Keeping it running
 
@@ -227,7 +300,48 @@ Then **DM the bot `/start` once** from your own Telegram account. Until you do,
 it cannot message you at all, and it ignores everyone whose id is not
 `OWNER_ID`. Send `/status` to confirm it is alive.
 
-## 8. TikTok, if you want it
+## 8. The first account on the panel
+
+The panel starts with the bot and refuses everybody until an account exists. The
+first one cannot be made from the panel — there is nobody to authorise it — so
+it is made here, which is the right credential for "create the first
+administrator": shell access to the server.
+
+```bash
+sudo -u brickdeal npm run admin -- add netanel --name="נתנאל"
+```
+
+It asks for a password twice, without echoing it. `--generate` invents a strong
+one and prints it once instead.
+
+**Stop the bot first, or pass `--force` knowing why.** `src/store.js` holds the
+whole of `data/store.json` in memory and saves it whole, so an account written
+by this short-lived process while the bot is running would be rolled back by the
+bot's next save. The tool checks for a recently-touched store and refuses rather
+than doing that silently. This only applies to the bootstrap: every account
+after the first is made from the panel, inside the bot's own process, with
+nothing to stop.
+
+```bash
+pm2 stop brickdeal-social
+sudo -u brickdeal npm run admin -- add netanel
+pm2 start brickdeal-social
+```
+
+Then open the panel and sign in. `/site` in Telegram reports where it is
+listening and how many accounts exist; `npm run admin -- list` does the same
+from the terminal.
+
+Other things this tool does, all of which also need the bot stopped:
+
+```bash
+npm run admin -- password <username>        # the way back in from a forgotten one
+npm run admin -- role <username> viewer     # owner | admin | viewer
+npm run admin -- remove <username>
+npm run admin -- signout-all                # replaces the session signing key
+```
+
+## 9. TikTok, if you want it
 
 Only after the domain is live, because two of its requirements are about the
 domain:
@@ -283,6 +397,17 @@ recent ones, which Instagram and TikTok may still be fetching:
 ```bash
 find /var/www/brickdeal/cards -name '*.jpg' -mtime +30 -delete
 ```
+
+### If the panel is the thing that is broken
+
+| What you see | What it is |
+|---|---|
+| `panel: 127.0.0.1:8787 is already in use` at boot | a stale process still holds the port. The bot carries on without the panel deliberately — publishing does not need it. `pm2 restart` after killing the old one. |
+| Caddy answers 502 | the bot is not running, or is running without the panel (see the line above in `pm2 logs`). |
+| The page loads but every button fails with "הבקשה לא אומתה" | the browser has a session the server no longer recognises — somebody ran `signout-all`, or `WEB_SESSION_SECRET` changed. Reload the page. |
+| Signing in says "too many attempts" | six wrong passwords locks that username for five minutes. It is per username, so it clears itself. |
+| Everybody is locked out | `npm run admin -- password <username>`, with the bot stopped. |
+| An account added from the terminal vanished | it was added while the bot was running and the bot's next save rolled it back. That is what the `--force` warning was about. |
 
 ## When something breaks
 

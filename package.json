@@ -10,6 +10,8 @@
   "scripts": {
     "start": "node bot.js",
     "test": "node scripts/brick-selftest.js",
+    "admin": "node scripts/admin.js",
+    "panel": "node scripts/panel.js",
     "brick-lab": "node scripts/brick-lab.js",
     "brick-once": "node scripts/brick-once.js",
     "fetch-emoji": "node scripts/fetch-emoji.js",

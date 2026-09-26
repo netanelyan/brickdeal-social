@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { rmSync } from 'node:fs';
+import { rmSync, copyFileSync } from 'node:fs';
 
 // Launcher. The tests are in brick-selftest.run.js.
 //
@@ -21,8 +21,19 @@ process.env.STORE_PATH ||= fileURLToPath(new URL('../data/.brick-selftest-store.
 process.env.FX_CACHE_PATH ||= fileURLToPath(new URL('../data/.brick-selftest-fx.json', import.meta.url));
 process.env.RRP_CACHE_PATH ||= fileURLToPath(new URL('../data/.brick-selftest-rrp.json', import.meta.url));
 
+// And brick-config.json, which is new to this list because the panel can now
+// WRITE it. The suite proves that a save which fails validation is rolled back,
+// and proving that means deliberately breaking a copy — never the file the
+// account's captions and hashtags actually come from.
+const REAL_CONFIG = fileURLToPath(new URL('../brick-config.json', import.meta.url));
+process.env.BRICK_CONFIG_PATH ||= fileURLToPath(new URL('../data/.brick-selftest-config.json', import.meta.url));
+
 for (const p of [process.env.STORE_PATH, process.env.FX_CACHE_PATH, process.env.RRP_CACHE_PATH]) {
   rmSync(p, { force: true });
 }
+rmSync(`${process.env.BRICK_CONFIG_PATH}.bak`, { force: true });
+// Copied rather than written, so the config tests are checking the real rules
+// this account publishes under rather than a fixture that can drift from them.
+copyFileSync(REAL_CONFIG, process.env.BRICK_CONFIG_PATH);
 
 await import('./brick-selftest.run.js');

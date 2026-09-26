@@ -226,15 +226,33 @@ function send(res, status, payload) {
   res.end(body);
 }
 
-async function route(req, res) {
+/**
+ * Is there a secret to check against?
+ *
+ * A missing TIKTOK_BOT_SECRET must not fall through to an empty-string
+ * comparison: that is an open endpoint that writes the publishing token. So the
+ * route refuses to exist rather than refusing every caller — reported at boot,
+ * because "connect is off" is a thing to know before you need it.
+ */
+export const exchangeConfigured = () => Boolean(process.env.TIKTOK_BOT_SECRET);
+
+/**
+ * The exchange, as one handler.
+ *
+ * Exported so src/web/server.js can serve it on the port the admin panel already
+ * holds. That matters for the deployment rather than for this code: the Caddyfile
+ * proxies /tiktok/* to 127.0.0.1:8787, and two Node servers cannot both have it.
+ * The flow is TikTok's and the authentication is a shared secret rather than a
+ * session, so it stays here rather than moving into the panel's router.
+ */
+export async function handleTikTokExchange(req, res) {
   // Pathname only, never the whole URL. A code that arrives in a query string —
   // from a mistyped GET, say — must not reach the log, and req.url carries it.
   const path = new URL(req.url || '/', 'http://localhost').pathname;
   let status = 500;
   try {
-    if (req.method !== 'POST' || path !== '/tiktok/exchange') {
-      throw new HttpError(404, 'not found');
-    }
+    if (req.method !== 'POST') throw new HttpError(404, 'not found');
+    if (!exchangeConfigured()) throw new HttpError(503, 'tiktok connect is not configured on this bot');
     await authorize(req);
     const body = await readBody(req);
     const result = await serialize(() => exchange(body));
@@ -251,12 +269,28 @@ async function route(req, res) {
   }
 }
 
+async function route(req, res) {
+  const path = new URL(req.url || '/', 'http://localhost').pathname;
+  if (req.method !== 'POST' || path !== '/tiktok/exchange') {
+    send(res, 404, { ok: false, error: 'not found' });
+    console.log(`tiktok oauth: ${req.method} ${path} -> 404`);
+    return;
+  }
+  return handleTikTokExchange(req, res);
+}
+
 /**
- * Start the connect endpoint, or explain why it is not starting.
+ * Start the connect endpoint on its own, or explain why it is not starting.
  *
- * Returns the server, or null when there is no secret to check against. A
- * missing TIKTOK_BOT_SECRET must not fall through to an empty-string
- * comparison: that is an open endpoint that writes the publishing token.
+ * NOT what bot.js calls any more. The admin panel (src/web/server.js) holds this
+ * port and serves /tiktok/exchange through handleTikTokExchange above, because
+ * the Caddyfile proxies /tiktok/* to 127.0.0.1:8787 and two servers cannot both
+ * have it.
+ *
+ * Kept because it is the smallest thing that can answer "is the exchange itself
+ * working?" without the panel, its accounts or its session cookies in the way —
+ * which is exactly the question worth asking when a browser connect has failed.
+ * Returns the server, or null when there is no secret to check against.
  */
 export function startOAuthServer() {
   if (server) return server;

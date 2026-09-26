@@ -230,14 +230,75 @@ wrong thing to say about a post that still needs you.
 `video.upload` is the inbox. Asking for the wrong one fails at `init` with
 `scope_not_authorized`, and a token cannot gain a scope by refreshing.
 
+## Two ways in, one set of actions
+
+Telegram is where this started and it is unchanged. There is now also a website,
+for the things a chat is bad at and for the fact that one person's phone is not
+a team.
+
+**Both drive the same functions.** Every action — propose, build, approve,
+reject, a new cover, a new photograph, publish, retry — is one function in
+`src/ops/marketing.js`, and `bot.js` and `src/web/server.js` are two callers of
+it. That is the whole design, and it is not tidiness: approving a deck decides
+whether TikTok gets a draft now or a queue slot later, refunds the day's quota
+on a rejection, and settles the card so it cannot be tapped twice. A browser
+button that reimplemented three of those four would look like it worked for
+weeks.
+
+So the two surfaces cannot drift, and neither is ever showing something the
+other has already changed: approve in the browser and the Telegram card strikes
+itself through and loses its buttons; approve in Telegram and the open browser
+tab updates. Taps that race are safe rather than merely unlikely — `takeStaging`
+is atomic, so the second one is told the post was already handled.
+
+### What the website adds
+
+Not a second copy of the chat. The things it can do that a chat cannot:
+
+- **The whole deck at once.** Every slide side by side, at both crops, next to
+  the price each one states and the region, currency, rate and date that price
+  came from. In Telegram that is an album you swipe and a message you scroll.
+- **A new photograph for a named slide**, from a button on the row showing that
+  slide's price — rather than `/photo 3` counted off a card.
+- **The copy rules.** `brick-config.json` — captions, hashtags, cover lines,
+  price labels, the closing frame — edited and saved. A save that would not
+  parse, or that would fail `src/brick/config.js`'s own validation, is refused
+  and the previous file is put back; you get the validator's sentence, not a
+  broken bot. The version before the last save is kept to go back to.
+- **The schedule**, live. `POST_INTERVAL_MINUTES` and the rest used to be read
+  once at boot, so changing one meant a deploy. They are read on every use now.
+- **More than one person**, with roles: `owner` manages accounts, `admin` does
+  the marketing, `viewer` sees everything and changes nothing.
+- **A record of who did what**, from which surface — which did not need to exist
+  when there was one owner and one chat, and does now.
+
+### Getting in
+
+The panel runs inside the bot process (see *Layout of the code* for why it has
+to) and listens on `127.0.0.1:8787` behind the same Caddy that serves the
+slides. The first account is made from the server, because there is nobody to
+authorise it yet:
+
+```bash
+npm run admin -- add netanel --name="נתנאל"
+```
+
+Every account after that is made from the panel. `npm run admin` also resets a
+forgotten password, which is the only way back into an install with one owner —
+there is no mail on this box to send a reset link through, and adding some would
+be another credential to protect for a page three people use.
+
+`/site` in Telegram reports where the panel is listening and how many accounts
+exist.
+
 ## Commands
 
 `/deck` build one now · `/deck harry-potter`, `/deck 100`, `/deck בונסאי` name
-it · `/status` · `/health` every destination separately, with its last error ·
-`/usage` tokens and cost · `/igquota` · `/tiktok` connection, tokens, granted
-scopes · `/tiktok_connect` · `/pending` · `/queue` what is waiting, numbered ·
-`/next` publish the next · `/post 3` publish that one out of turn · `/held`
-`/retry` `/clear_held` `/resend`
+it · `/site` where the panel is · `/status` · `/health` every destination
+separately, with its last error · `/usage` tokens and cost · `/igquota` ·
+`/tiktok` connection, tokens, granted scopes · `/tiktok_connect` · `/pending` ·
+`/queue` what is waiting, numbered · `/next` publish the next · `/post 3`
+publish that one out of turn · `/held` `/retry` `/clear_held` `/resend`
 
 **The bot talks like a CLI.** A command prints what you asked for; the daemon
 does not chatter. Messages that arrive unasked are one line, and the detail
@@ -254,7 +315,17 @@ one it stepped over, on the card, before you tap.
 
 | Path | What it does |
 |---|---|
-| `bot.js` | Telegraf bot: owner lock, proposals, staging, approve/reject, queue, drip |
+| `bot.js` | the Telegram surface: owner lock, buttons, commands, the timers |
+| `src/ops/marketing.js` | **every action, once** — what approving, building and publishing actually mean |
+| `src/ops/publish.js` | one approved post to every destination it still owes, and the four kinds of failure |
+| `src/ops/views.js` | the same facts as data, so a chat and a page cannot disagree about the queue |
+| `src/ops/surface.js` | Telegram handed to the actions, rather than imported by them — see the file |
+| `src/ops/jobs.js` | work that takes minutes, watchable from either surface |
+| `src/ops/bus.js` | what just happened, so the other surface stops showing something untrue |
+| `src/ops/settings.js` | the schedule, and editing the copy rules without being able to break them |
+| `src/web/server.js` | the panel's HTTP surface, and TikTok's browser connect on the same port |
+| `src/web/auth.js` | accounts, scrypt passwords, signed sessions, roles |
+| `src/web/ui/` | the page itself: no framework, no build step, no outside origin |
 | `brick-config.json` | the editorial dials: price labels, caption pool, cover hooks, hashtags, type |
 | `src/brick/feed.js` | the deal feed, and **what is allowed out of it onto a slide** |
 | `src/brick/rrp.js` | the comparison price, off Brickset, and every reason not to make one |
@@ -271,7 +342,16 @@ one it stepped over, on the card, before you tap.
 | `src/render/brickSlide.js` | the slide: the frame, the block, the outline, the watermark |
 | `src/render/brickDeck.js` | a deck to JPEGs, at both sizes |
 | `src/publish/` | Instagram Graph API, TikTok Content Posting API, publish targets |
-| `src/store.js` | one JSON file: dedupe, proposals, staging, queue, publish log |
+| `src/store.js` | one JSON file: dedupe, proposals, staging, queue, publish log, accounts, audit |
+
+**Why the website is in the same process.** `src/store.js` holds the whole of
+`data/store.json` in memory and saves it whole. A second process serving the
+panel would not corrupt that file — the save is tmp-plus-rename — but it would
+silently roll back every change the bot had made since it loaded. Approve a deck
+in the browser and the next thing the bot writes puts it back in the queue.
+There is therefore one process, one copy of that document, and one event loop
+touching it. `src/oauthServer.js` already had to reason this through for the
+TikTok token and says so at length.
 
 ## Honest caveats
 
@@ -321,6 +401,36 @@ audience searches and the reference spends a slot on it. See `copy.allowTrademar
 - Telegram messages are sent without `parse_mode`. A set name containing a stray
   `*` would otherwise break Markdown parsing and drop the message — which, for
   an approval card, means silently not asking.
+
+The website adds a second door, so it gets its own list:
+
+- **It binds `127.0.0.1`.** Caddy terminates TLS and proxies to it. Binding
+  anything else publishes an endpoint that can post to Instagram on a plain HTTP
+  port, bypassing the thing holding the certificate — the bot warns loudly at
+  boot if `WEB_BIND` says otherwise.
+- Passwords are scrypt with a per-account salt, compared in constant time. A
+  username that does not exist is checked against a decoy hash, so "no such
+  user" and "wrong password" cost the same and the endpoint is not a list of who
+  has an account. Six wrong answers lock that username out for five minutes.
+- Sessions are HMAC-signed values rather than a table, because pm2 restarts this
+  process routinely and a table in memory would sign everybody out each time.
+  The signing key is persisted; replacing it is the deliberate "sign everybody
+  out". Changing a password invalidates that account's existing sessions.
+- Cookies are `HttpOnly; SameSite=Strict`, and `Secure` whenever the request
+  arrived over TLS. Every mutating request must also carry a CSRF header whose
+  value the page only knows because `/api/session` told it — a form submitted
+  from another origin cannot set a header.
+- Roles are checked by capability name at each route, not by "is not a viewer",
+  so adding a capability means naming who gets it.
+- The page is served under a CSP of `default-src 'none'` with no outside origin
+  of any kind, and it builds **no** HTML from strings: every value goes through
+  `textContent`, because the things being rendered are product names off a
+  third-party feed.
+- Slides are served by filename out of the render directory and never by path. A
+  route that took a path would be a file-read primitive with a session in front
+  of it.
+- Nothing logs a header, a body or a query string. A login POST has a password
+  in it, and that line is what ends up in the journal.
 
 ## Licence
 
