@@ -86,7 +86,9 @@ HARD RULES:
 - SEVEN WORDS OR FEWER. Count them. Every example above is four to seven, and the limit is checked in code: a longer line is thrown away and one of the examples is used instead. A cover is read at a glance on a moving screen, and ten words is a paragraph rather than a hook.
 - NEVER name the original brand. Not in Hebrew, not in English, not as part of a longer word. Say "סטים תואמים", "אבני בנייה", "התחביב" or just "סט".
 - DO NOT SAY WHAT THE THING IS. The photograph is already showing it. Naming the category — "סט מכוניות", "סט טכניק", "דגם רכב" — spends half a seven-word line describing the picture underneath it, and leaves no room for the only thing the line is for. Say "סט" or "זה" and move on. Never invent a compound noun for it either: "מכונית אבנים" is not a phrase anybody uses.
-- EVERY LINE MUST CARRY THE CONTRAST. The post is one argument: the same model costs a fraction of what the original does. If your line does not contain the too-much — a price, "מחיר מלא", "פי שבע", "ביוקר", "כמה באמת" — then it is not a hook, it is the first half of one.
+- THE STRONGEST SHAPE ASKS THE VIEWER TO NAME A PRICE. "כמה הייתם משלמים על סט כזה?", "נחשו כמה שילמתי על הסט הזה", "תנחשו את המחיר. לא תאמינו." Prefer it when nothing else is obviously better, and here is why it beats a statement: this is a SLIDESHOW. Somebody who has silently guessed a number has to swipe to find out whether they were right, and the second slide is the answer. A line that merely tells them the price is good sets up nothing — they can agree with it and keep scrolling.
+
+- EVERY LINE MUST CARRY THE CONTRAST. The post is one argument: the same model costs a fraction of what the original does. If your line does not contain the too-much — a price, "מחיר מלא", "פי שבע", "ביוקר", "כמה באמת" — then it is not a hook, it is the first half of one. Asking the viewer to guess the price counts: the gap between what they guess and what the next slide says IS the contrast, which is why that shape works.
 
   These are NOT hooks, and each fails the same way:
     "למה אתם משלמים על סט מכוניות"  - paying WHAT? Three words spent naming the picture, nothing left for the point.
@@ -95,7 +97,9 @@ HARD RULES:
 
   The test: could somebody read your line and answer "so what?" If yes, rewrite it.
 
-- VARY THE SHAPE. Not every cover is a question, and "למה אתם משלמים...?" is not the template — it is one of eight. Look at the range above: a challenge ("אתם קונים סטים במחיר מלא?"), a first-person admission ("הפסקתי לשלם ביוקר על התחביב שלי"), a flat contrast ("זה אותו דגם. זה לא אותו מחיר."), a before-and-after ("מה הזמנתי VS מה קיבלתי"), a confession ("עשיתי את החישוב ונדהמתי"). These posts go out one after another to the same people; five covers in a row opening with "למה" is a template, and a template is the thing this whole account is trying not to look like.
+- VARY THE WORDING INSIDE THAT SHAPE. Asking for a guess is the mechanic; "נחשו כמה שילמתי" is not the only sentence that does it, and four posts in a row opening on the same verb is a template whatever the mechanic underneath. Ask it differently every time: "כמה הייתם משלמים על סט כזה?", "תנחשו את המחיר. לא תאמינו.", "מה המחיר שלו לדעתכם?", "תנו מספר. עכשיו תראו את האמיתי.", "כמה זה נראה לכם?" Name the thing in the picture when it helps — "נחשו כמה עלתה הטירה הזאת" is better than the same line about "סט", because it could only be this post.
+
+- VARY THE SHAPE. Not every cover is a question, and no single pattern is the template — each is one of eleven. Look at the range above: a challenge ("אתם קונים סטים במחיר מלא?"), a first-person admission ("הפסקתי לשלם ביוקר על התחביב שלי"), a flat contrast ("זה אותו דגם. זה לא אותו מחיר."), a before-and-after ("מה הזמנתי VS מה קיבלתי"), a confession ("עשיתי את החישוב ונדהמתי"). These posts go out one after another to the same people; five covers in a row opening with "למה" is a template, and a template is the thing this whole account is trying not to look like.
 - No URLs, no calls to action, no hashtags, no emoji.
 - Plain hyphens, never an em dash.
 - Do not state a specific price or a percentage. The slides carry the numbers; the cover carries the question.
