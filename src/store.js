@@ -435,6 +435,27 @@ export function dequeue() {
   return item;
 }
 export const queueSize = () => state.queue.length;
+
+/**
+ * Empty the publish queue.
+ *
+ * There was no way to do this. clearStaging() handles everything awaiting a tap
+ * and clearHeld() handles everything stuck behind a dead destination, but an
+ * APPROVED post waiting on the drip could not be taken back by any command —
+ * so a deck approved to a destination that is no longer configured sat there
+ * permanently, unpublishable and unremovable.
+ *
+ * Deliberately separate from clearStaging rather than folded into it. Those
+ * are things you have not answered yet; this is something you already said yes
+ * to, and a command that threw both away on one word would be the wrong shape
+ * for the more expensive of the two mistakes.
+ */
+export function clearQueue() {
+  const n = state.queue.length;
+  state.queue = [];
+  save();
+  return n;
+}
 export const peekQueue = () => state.queue.slice(0, 10);
 
 /**

@@ -1201,6 +1201,21 @@ bot.command('clear_pending', (ctx) => {
   ctx.reply(`🧹 נוקו ${n} פריטים ממתינים`);
 });
 
+// The queue, which /clear_pending does not touch and should not.
+//
+// What is in staging you have not answered; what is in the queue you already
+// approved. Throwing both away on one word would put the more expensive
+// mistake behind the cheaper one's command.
+//
+// It is needed because approval is not reversible otherwise: a deck approved
+// to a destination that has since been turned off can never publish and could
+// never be removed, so it sat in /queue forever being counted and reported.
+bot.command('clear_queue', (ctx) => {
+  const n = store.clearQueue();
+  if (!n) return ctx.reply('📦 התור כבר ריק');
+  ctx.reply(`🧹 רוקנתי את התור — ${n} פוסטים שאושרו לא יפורסמו`);
+});
+
 bot.command('usage', (ctx) => ctx.reply(usageReport(), { parse_mode: 'Markdown' }));
 
 bot.command('status', async (ctx) => {
@@ -1571,7 +1586,8 @@ bot.command('help', (ctx) =>
       '/held — מצגות מאושרות שממתינות ליעד שנפל',
       '/retry — אחרי שתיקנת: מחזיר אותן לתור',
       '/clear_held — מוותר על המוחזקות ומסמן את היעדים כתקינים',
-      '/clear_pending',
+      '/clear_pending — מנקה הצעות ומצגות שממתינות לאישור',
+      '/clear_queue — מרוקן את התור (פוסטים שכבר אושרו)',
       '',
       '/igquota — מכסת אינסטגרם',
       '/tiktok — חיבור טיקטוק, טוקנים ורמות פרטיות',
