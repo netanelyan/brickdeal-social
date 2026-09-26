@@ -229,6 +229,19 @@ body { position:relative; }
 .block.at-top { top:${Math.round(ov.topPct * h)}px; }
 .block.at-mid { top:${Math.round(ov.coverTopPct * h)}px; transform:translateY(-50%); }
 
+/* Dead centre, and only the end card uses it.
+
+   Every other position on these slides is chosen to dodge the photograph — a
+   name goes near the top because the middle of a product shot is where the
+   product is. The end card has no such problem: its picture is washed flat to
+   a texture, so there is nothing to dodge, and anything off-centre over an
+   evenly dimmed frame reads as misplaced rather than composed.
+
+   Optically centred rather than mathematically: a block of type sitting at
+   exactly 50% looks low, because the eye takes the centre of a frame to be a
+   little above its middle. */
+.block.at-center { top:${Math.round(0.465 * h)}px; transform:translateY(-50%); }
+
 .name {
   font-size:${scale.name}px;
   /* Two lines and no more. A set name that needs three is a set name the
@@ -278,23 +291,31 @@ body { position:relative; }
    the address. The middle line carries the cream, same as the cover, so the
    post closes on the colour it opened with. */
 .end {
-  max-width:${Math.round(0.74 * w)}px;
+  max-width:${Math.round(0.80 * w)}px;
   margin-inline:auto;
   text-wrap:balance;
 }
-.end .ask { font-size:${Math.round(scale.cover * 0.92)}px; }
+/* The voice first, then the ask, then the address — and the ask is the biggest
+   thing on the frame, because it is the only thing on it that asks for
+   anything. On a product slide the photograph is the subject and the type is a
+   caption; here that is reversed, so the type is sized like a subject. */
+.end .ask {
+  font-size:${Math.round(scale.cover * 1.02)}px;
+  opacity:0.93;
+}
 .end .where {
-  font-size:${Math.round(scale.cover * 1.12)}px;
+  font-size:${Math.round(scale.cover * 1.32)}px;
   color:${ov.emphasis};
-  margin-top:${Math.round(scale.line * 0.5)}px;
+  margin-top:${Math.round(scale.line * 0.62)}px;
+  line-height:1.2;
 }
 /* The address is deliberately the quietest thing on the frame. It is there to
    be read by somebody who has already decided, not to do the persuading — and
    type-set at the size of the line above it, a domain reads as a banner ad. */
 .end .site {
-  font-size:${Math.round(scale.line * 0.82)}px;
-  margin-top:${Math.round(scale.line * 0.9)}px;
-  opacity:0.88;
+  font-size:${Math.round(scale.line * 0.95)}px;
+  margin-top:${Math.round(scale.line * 1.05)}px;
+  opacity:0.9;
   letter-spacing:0.01em;
   direction:ltr;
 }
@@ -422,6 +443,6 @@ export function renderBrickSlideHtml(slide, { size = 'tiktok', cover = false, en
   )}</style></head><body>
 ${photoTag(slide.image)}
 <div class="scrim${end ? ' end-scrim' : ''}"></div>
-<div class="block ${cover || end ? 'at-mid' : 'at-top'}">${body}</div>
+<div class="block ${end ? 'at-center' : cover ? 'at-mid' : 'at-top'}">${body}</div>
 </body></html>`;
 }

@@ -400,10 +400,16 @@ group('the slide');
   ok('the name is the largest thing on its slide', s.name > s.line);
   ok('the price lines are a step down, not a whisper', s.line / s.name > 0.7 && s.line / s.name < 0.85, `${s.line}/${s.name}`);
 
-  // The cover sets SMALLER than a set name, which reads backwards and is what
-  // the published posts actually do: a hook is a sentence and a name is a
-  // label, so the sentence gives up size to fit on two lines.
-  ok('the cover is a sentence, so it sets below the name', s.cover < s.name && s.cover > s.line, `${s.cover}`);
+  // The cover now sets LARGER than a set name, which reverses what this test
+  // asserted for most of the file's life.
+  //
+  // The old rule was sound while it was true that "a hook is a sentence and a
+  // name is a label, so the sentence gives up size to fit on two lines". It is
+  // not true any more: draftHook enforces MAX_HOOK_WORDS, so a hook is now six
+  // words at most, which fits two comfortable lines without giving up anything.
+  // With the length problem solved by the length rule, there is no argument
+  // left for the most important type in the post being the smallest.
+  ok('the cover is the loudest type in the post', s.cover > s.name && s.name > s.line, `${s.cover}/${s.name}/${s.line}`);
 
   // An edge, not a border. The heavy ~7px version was built first, off the
   // reference account, and the lighter travel-channel treatment was chosen

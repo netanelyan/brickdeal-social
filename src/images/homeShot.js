@@ -61,29 +61,50 @@ export class ShotError extends Error {
  * which is the opposite of the post's argument.
  */
 export function holdFor({ sizeCm, theme }) {
+  // A HAND IS ONLY ALLOWED TO BE HOLDING SOMETHING.
+  //
+  // Each band now carries its own `contact` sentence. That sentence used to be
+  // one hardcoded line appended to all three — "the palm and fingers make full
+  // flat contact with the underside, which sits solidly and heavily on the
+  // hand" — which contradicted the band it mattered most for: a large set was
+  // asked to rest on a DESK and to sit flat on a PALM in the same breath. The
+  // model split the difference and produced what shipped, a 45cm car balanced
+  // across an open palm, which reads as neither held nor put down.
+  //
+  // An open hand lying next to a model is worse than no hand at all. It is a
+  // hand doing nothing, and the eye reads it as a mistake.
   if (theme === 'flowers') {
     return {
-      hold: 'The fingers are wrapped around the stems, with the blooms held above the hand.',
+      hold: 'The fingers are wrapped around the stems, gripping them, with the blooms held above the hand.',
+      contact: 'The fingers close right around the stems and take their weight.',
       fraction: 'a third',
       landmark: 'the base of the blooms',
     };
   }
   if (!sizeCm || sizeCm < 15) {
     return {
-      hold: "An adult man's hand holds the model in the fingers, close to the camera.",
+      hold: "An adult man's hand holds the model, gripped between the fingers and thumb.",
+      contact: 'The fingers are closed on it and clearly carrying it. It is held, not balanced.',
       fraction: 'most',
       landmark: 'the far edge of the model',
     };
   }
   if (sizeCm <= 40) {
     return {
-      hold: "An adult man's hand, palm up, holds the model from underneath.",
+      hold: "An adult man's hand, palm up, carries the model from underneath, fingers curled up around its near edge.",
+      contact:
+        'The palm makes full contact with the underside and the fingertips curl over the edge, so it is visibly being carried rather than resting on an open flat hand.',
       fraction: 'one third',
       landmark: 'a third of the way across it',
     };
   }
+  // Too big for one hand to hold convincingly, so nothing holds it. NO HAND IN
+  // THE FRAME AT ALL: scale comes from the ordinary objects around it, which is
+  // how a person photographs something they cannot pick up one-handed anyway.
   return {
-    hold: 'The model rests on a desk with one open hand beside it for scale.',
+    hold: 'The model sits on a desk. NO HAND and no part of a person is anywhere in the frame.',
+    contact:
+      'It rests on the desk surface on its own wheels or base, with an everyday object near it — a keyboard, a mug, a phone — giving the scale instead.',
     fraction: 'a quarter',
     landmark: 'a quarter of the way across it',
   };
@@ -103,14 +124,23 @@ export function holdFor({ sizeCm, theme }) {
  * one thing src/brick/copy.js exists to prevent and cannot see.
  */
 export function stillPrompt({ nameHe, sizeCm, theme, colours = 'the colours and distinctive parts visible in the attached photo' }) {
-  const { hold, fraction, landmark } = holdFor({ sizeCm, theme });
+  const { hold, contact, fraction, landmark } = holdFor({ sizeCm, theme });
   const length = sizeCm ? `${Math.round(sizeCm)} cm` : 'about 25 cm';
+  const handed = !hold.includes('NO HAND');
 
   return `Using the brick-built model in the attached photo, generate a photorealistic vertical 9:16 photo, shot casually on an iPhone in a bedroom at night.
 
-${hold} Only the hand and a small part of the wrist are visible, entering the frame from the bottom edge. No forearm, no elbow, no arm filling the frame. The palm and fingers make full flat contact with the underside, which sits solidly and heavily on the hand.
+${hold}${
+    handed
+      ? ' Only the hand and a small part of the wrist are visible, entering the frame from the bottom edge. No forearm, no elbow, no arm filling the frame.'
+      : ''
+  } ${contact}
 
-Scale: the model is ${length} long and the hand spans only about ${fraction} of its length, fingertips reaching no further than ${landmark}, so it looks big and heavy. The hand and the model are the same distance from the camera, so perspective does not enlarge the hand.
+Scale: the model is ${length} long${
+    handed
+      ? ` and the hand spans only about ${fraction} of its length, fingertips reaching no further than ${landmark}, so it looks big and heavy. The hand and the model are the same distance from the camera, so perspective does not enlarge the hand.`
+      : ', and the objects around it are their real everyday size, so it reads as big.'
+  }
 
 The model matches the attached photo exactly: ${colours}, matte plastic with sharp crisp edges on every brick, clearly visible seams between panels, defined stud edges with small shadows in the gaps.
 
@@ -124,7 +154,11 @@ Focus: the model and hand are perfectly sharp. The background is clearly out of 
 
 Slightly uneven exposure, faint sensor noise in the shadows, no color grading, no studio lighting. Looks like a real photo someone took at home, calm and quiet, not a product advertisement.
 
-Avoid: smoothed or melted brick surfaces, rounded soft edges, 3D render look, CGI look, high camera angle, looking down at the model, visible roof or top, oversized hand, hand close to the camera, small toy scale, symmetrical composition, centered background object, staged scene, empty grey wall, studio look, bright background, lamp in frame, glowing wall, backlight, forearm, arm, elbow, messy clutter, sharp background, portrait mode cutout, floating model, cropped model, deformed hand, extra fingers, two hands, text, watermark, brand names, logos, lettering on the model.`;
+Avoid: smoothed or melted brick surfaces, rounded soft edges, 3D render look, CGI look, high camera angle, looking down at the model, visible roof or top, small toy scale, symmetrical composition, centered background object, staged scene, empty grey wall, studio look, bright background, lamp in frame, glowing wall, backlight, messy clutter, sharp background, portrait mode cutout, floating model, cropped model, text, watermark, brand names, logos, lettering on the model${
+    handed
+      ? ', oversized hand, hand close to the camera, forearm, arm, elbow, deformed hand, extra fingers, two hands, open flat hand with the model merely resting on it, hand lying beside the model instead of holding it'
+      : ', hand, hands, fingers, thumb, wrist, arm, any part of a person, anybody holding the model'
+  }.`;
 }
 
 /**

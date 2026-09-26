@@ -57,6 +57,17 @@ const HOOK_SCHEMA = {
  * precisely the instruction a model drops when the examples it was given are
  * about a brand it is not allowed to name.
  */
+/**
+ * The ceiling on a cover line, in words.
+ *
+ * Six, because that is what the reference's own covers run to and because a
+ * cover is read off a moving screen in about a second. It lives here as a
+ * constant rather than in the prompt alone so the prompt and the check cannot
+ * drift — which they had: the prompt asked for "under nine", nothing counted,
+ * and what shipped was ten words wide across a full frame.
+ */
+export const MAX_HOOK_WORDS = 6;
+
 const hookSystem = () => `You write the first slide of a Hebrew TikTok slideshow for a channel that finds cheap compatible building-brick sets on AliExpress.
 
 The cover line is the only thing most viewers will read. It has to stop a scroll.
@@ -69,8 +80,9 @@ ${brickConfig().covers.lines.map((l) => `  ${l}`).join('\n')}
 
 HARD RULES:
 - Hebrew only.
-- Under nine words.
+- SIX WORDS OR FEWER. Count them. Every example above is four to six, and the limit is checked in code: a longer line is thrown away and one of the examples is used instead. A cover is read at a glance on a moving screen, and eight words is a sentence rather than a hook.
 - NEVER name the original brand. Not in Hebrew, not in English, not as part of a longer word. Say "סטים תואמים", "אבני בנייה", "התחביב" or just "סט".
+- Call the product a "סט". Do NOT invent a compound noun for it. "מכונית אבנים" and the like are not words anybody uses, and a viewer who has to work out what the thing IS has already scrolled past. The photograph shows what it is; the line says why it matters.
 - No URLs, no calls to action, no hashtags, no emoji.
 - Plain hyphens, never an em dash.
 - Do not state a specific price or a percentage. The slides carry the numbers; the cover carries the question.
@@ -128,6 +140,15 @@ export async function draftHook(recipe, { rand = Math.random } = {}) {
     // thrown away rather than repaired: repairing it would leave the prompt
     // broken and every future cover quietly patched.
     const hook = assertCopy(String(parsed.hook || '').trim(), 'the cover line');
+    // Stated in the prompt AND enforced here, same as the trademark, and for
+    // the same reason: the length rule is the one a model drops first when it
+    // has something clever to fit in. Thrown back to the pool rather than
+    // trimmed — a hook cut off at six words is not a shorter hook, it is a
+    // broken sentence, and the pool lines are the standard anyway.
+    const words = hook.split(/\s+/).filter(Boolean).length;
+    if (words > MAX_HOOK_WORDS) {
+      return { ...fallback(), from: `pool (model wrote ${words} words)` };
+    }
     // The emphasis has to be a substring of the hook or the renderer cannot
     // find it. A model that paraphrased it is not an error worth failing a deck
     // over — the cover simply sets in one colour, which is what a cover with

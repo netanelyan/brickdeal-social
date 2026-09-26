@@ -92,9 +92,9 @@
     ],
     "sizeBasis": "width",
     "align": "center",
-    "namePct": 0.041,
-    "linePct": 0.031,
-    "coverPct": 0.035,
+    "namePct": 0.05,
+    "linePct": 0.038,
+    "coverPct": 0.052,
     "weight": 600,
     "strokePct": 0.0018,
     "shadow": "0 2px 10px rgba(0,0,0,0.42)",
@@ -178,8 +178,8 @@
       "",
       "Three lines and no more. The ask, where to go, and the address."
     ],
-    "askHe": "כל הקישורים לסטים האלה",
-    "whereHe": "בקהילה שלנו בטלגרם",
+    "askHe": "אני מוצא. אתם בונים.",
+    "whereHe": "כל הקישורים בקהילה בטלגרם",
     "siteHe": "brickdealil.com"
   },
 
