@@ -437,6 +437,16 @@ group('the slide');
   const plainSlide = renderBrickSlideHtml({ nameHe: 'סחלב', emoji: '🌸', lines: [], image: null }, { size: 'tiktok' });
   ok('the cover asks for the swipe', coverHtmlOut.includes(brickConfig().covers.swipeHe));
   ok('and a product slide does not', !plainSlide.includes(brickConfig().covers.swipeHe));
+
+  // The swipe line is the second and last hand-written place the brand is
+  // named, and it is named the same way the price label names it — as what the
+  // comparison is against. The HOOK must never carry it: that one is written
+  // by a model, and the guard cannot tell a comparison from a claim of origin.
+  ok('the swipe line names what the price is compared against', TRADEMARK.test(brickConfig().covers.swipeHe));
+  ok(
+    'but the cover hook itself never does',
+    !TRADEMARK.test(brickConfig().covers.lines.map((l) => l.text).join(' '))
+  );
   ok('the swipe line is quieter than the price lines', /\.swipe\s*\{[^}]*font-size:(\d+)px/.test(coverHtmlOut) &&
     Number(coverHtmlOut.match(/\.swipe\s*\{[^}]*font-size:(\d+)px/)[1]) < s.line);
 

@@ -128,7 +128,7 @@
     "lineHeight": 1.16,
     "maxNameLines": 2,
     "topPct": 0.145,
-    "coverTopPct": 0.3,
+    "coverTopPct": 0.22,
     "widthPct": 0.84,
     "emphasis": "#F7E3A1"
   },
@@ -175,9 +175,22 @@
       "",
       "The arrow points LEFT because these slides are Hebrew: in a right to",
       "left post the next thing is to the left. Set it to an empty string to",
-      "turn the line off entirely."
+      "turn the line off entirely.",
+      "",
+      "IT NAMES THE BRAND, and this is the second and last place that happens -",
+      "the other is `labels.list`. Both are the same kind of use and neither is",
+      "an exception to the rule in `copy`: the word says what the price is being",
+      "measured AGAINST, never what is being sold.",
+      "",
+      "It is here rather than in the hook for a reason that is about machinery",
+      "rather than taste. The hook is written by a model and the guard is",
+      "binary, so allowing the word there would also allow 'לגו בשליש מהמחיר',",
+      "which reads as though we sell it. This line is written by hand, once,",
+      "and cannot drift. It also does the comprehension work the hook could not",
+      "do in six words: a viewer who has never heard of 'סטים תואמים' now knows",
+      "in one glance what is being compared, and has a reason to swipe."
     ],
-    "swipeHe": "החליקו לכל המחירים ←"
+    "swipeHe": "תראו כמה זה עולה בלגו ←"
   },
 
   "caption": {
