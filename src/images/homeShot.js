@@ -36,6 +36,9 @@ import { fileURLToPath } from 'node:url';
 //      person looking at it.
 
 const MODEL = process.env.IMAGE_GEN_MODEL || 'gemini-2.5-flash-image';
+// The frame the slides are cut to. Overridable only because the day this
+// pipeline renders something that is not 9:16, the photograph has to follow.
+const ASPECT_RATIO = process.env.IMAGE_GEN_ASPECT || '9:16';
 const VERIFY_MODEL = process.env.IMAGE_VERIFY_MODEL || 'claude-haiku-4-5-20251001';
 const ENDPOINT = process.env.IMAGE_GEN_ENDPOINT || 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -191,6 +194,23 @@ async function generate(prompt, photo) {
           parts: [{ inline_data: { mime_type: photo.mime, data: photo.base64 } }, { text: prompt }],
         },
       ],
+      // THE SHAPE OF THE FRAME IS A PARAMETER, NOT A REQUEST.
+      //
+      // The prompt opens by asking for a "vertical 9:16 photo" and the model
+      // ignored it every time: every shot came back 1024x1024. The renderer
+      // then object-fit: covers that square into a 1080x1920 slide, which
+      // scales it to 1920 tall and throws away 420px from EACH side — 41% of
+      // the picture, off the left and right, which is where a car's front and
+      // back are. That is the set getting cut off.
+      //
+      // Asked for properly here it returns 768x1344, which is 9:16 exactly.
+      //
+      // 9:16 rather than anything else because that is the TikTok frame and
+      // TikTok is what these decks are for. The Instagram 4:5 render crops the
+      // same photo vertically instead, trimming above and below the model
+      // rather than through it — the right way round, since the model sits in
+      // the lower middle and the type sits over empty space above it.
+      generationConfig: { imageConfig: { aspectRatio: ASPECT_RATIO } },
     }),
     signal: AbortSignal.timeout(120000),
   });
@@ -286,7 +306,13 @@ export async function verifySameModel(sourceUrl, generatedBase64, mime = 'image/
   }
 }
 
-const cacheStem = (productId, n = 1) => join(CACHE_DIR, `${String(productId).replace(/[^\w.-]/g, '-')}-${n}`);
+// The aspect ratio is part of the cache key, so changing it invalidates the
+// cache instead of silently serving pictures cut to the old shape. Every shot
+// on disk when this was written was 1024x1024, and without this they would have
+// outlived the fix — a cached square is indistinguishable from a fresh one to
+// everything downstream.
+const cacheStem = (productId, n = 1) =>
+  join(CACHE_DIR, `${String(productId).replace(/[^\w.-]/g, '-')}-${n}-${ASPECT_RATIO.replace(':', 'x')}`);
 
 /**
  * The type the bytes really are, read from the bytes.
