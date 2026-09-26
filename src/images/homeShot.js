@@ -426,4 +426,24 @@ export async function shotOrProduct(deal, opts = {}) {
   }
 }
 
+/**
+ * A shot that has ALREADY been paid for, or null. Never generates.
+ *
+ * For re-rendering a slide after the deck was staged. By then the photographs
+ * have been stripped out of the candidate — they are megabytes of base64 each
+ * and the store is rewritten whole on every save — so the picture has to come
+ * back from somewhere, and the only honest somewhere is the cache it was
+ * written to when it was made.
+ *
+ * Null rather than a fresh generation on a miss, and that is the whole point of
+ * having it separate from homeShot(). Re-drawing a cover is meant to cost
+ * nothing; silently spending a model call because a cache file was pruned is
+ * exactly the kind of invisible bill a retry button should never run up.
+ */
+export function cachedShotFor(productId, n = 1) {
+  const hit = cachedShot(cacheStem(productId, n));
+  if (!hit) return null;
+  return { src: `data:${hit.mime};base64,${hit.buf.toString('base64')}`, provenance: 'generated', note: 'cached' };
+}
+
 export const __test = { cacheStem, cachedShot, sniffMime, extFor, CACHE_DIR };

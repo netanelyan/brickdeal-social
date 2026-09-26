@@ -89,6 +89,45 @@ export async function renderBrickDeckSize(deck, { size = 'tiktok', outDir = card
  * public URL rather than receiving them, so a deck that only exists on local
  * disk cannot be published.
  */
+/**
+ * Re-draw slide one, and nothing else.
+ *
+ * The hook lives on the cover alone, so a new hook is one JPEG rather than a
+ * rebuild. The staging buttons used to argue the opposite — that changing it
+ * "would mean re-rendering every slide at both sizes" — in a sentence that
+ * also said the hook lives on the cover alone. Only one of those can be true.
+ *
+ * WRITTEN OVER THE EXISTING FILE, deliberately. slideStem() is a pure function
+ * of (deckId, size, index), so the new cover lands on the same path and keeps
+ * the same public URL — which means the deck's stored slide list, the approval
+ * card and anything already pointing at it stay correct without surgery. Safe
+ * because a staged deck has not been published: nothing outside this box has
+ * fetched that URL yet.
+ */
+export async function renderBrickCover(deck, { size = 'tiktok', outDir = cardOutputDir(), image = null } = {}) {
+  if (!SIZES[size]) throw new Error(`unknown deck size: ${size}`);
+  const { w, h } = SIZES[size];
+  const html = renderBrickSlideHtml(
+    { hookHe: deck.hookHe, emphasisHe: deck.emphasisHe, image },
+    { size, cover: true }
+  );
+  const rendered = await renderToJpeg(html, {
+    stem: slideStem(deck.id, size, 1),
+    width: w,
+    height: h,
+    outDir,
+    face: 'Arimo',
+  });
+  return {
+    ...rendered,
+    index: 1,
+    cover: true,
+    end: false,
+    nameHe: deck.hookHe,
+    url: cardPublicUrl(rendered.filename),
+  };
+}
+
 export async function renderBrickDeck(deck, { outDir = cardOutputDir(), sizes = ['tiktok', 'instagram'] } = {}) {
   const rendered = {};
   for (const size of sizes) {

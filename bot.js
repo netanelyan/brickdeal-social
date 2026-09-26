@@ -11,7 +11,7 @@ import { publishTelegram, publishTelegramDeck, sendForApproval } from './src/pub
 // is a file, Brickset is cached, the rate is one call a day - and `buildProposed`
 // is what costs a model call and a generated photograph per slide. The two taps
 // in the approval flow sit exactly between them.
-import { proposeDeck as planDeck, buildProposed } from './src/brick/build.js';
+import { proposeDeck as planDeck, buildProposed, draftHook } from './src/brick/build.js';
 import { toBrickCandidate, brickApprovalMessage, decidedMessage } from './src/brick/candidate.js';
 import { proposalMessage, proposalWarning } from './src/brick/proposal.js';
 import { brickConfig } from './src/brick/config.js';
@@ -52,7 +52,8 @@ import {
   TARGET_HE,
   allowedForKind,
 } from './src/publish/targets.js';
-import { configured as imagesEnabled } from './src/images/homeShot.js';
+import { configured as imagesEnabled, cachedShotFor } from './src/images/homeShot.js';
+import { renderBrickCover } from './src/render/brickDeck.js';
 import { runOverridden, noteOverride, overrideNotes } from './src/override.js';
 import { startOAuthServer, stopOAuthServer } from './src/oauthServer.js';
 
@@ -186,12 +187,20 @@ function stagingButtons(key, cand) {
   const rows = [
     [Markup.button.callback('✅ אשר ופרסם', `ok:${key}`), Markup.button.callback('❌ דחה', `no:${key}`)],
   ];
-  // Two buttons, and there used to be four.
+  // A new cover, for a deck, without rebuilding one.
   //
-  // "Edit the headline" re-rendered one card. On a deck it would mean
-  // re-rendering every slide at both sizes, and the hook lives on the cover
-  // alone — so a deck is approved or rejected as a whole, and a wrong hook is a
-  // re-run, which now costs nothing but the photographs it already paid for.
+  // The note below used to argue this was not worth having, in a sentence that
+  // disproved itself: changing the hook "would mean re-rendering every slide at
+  // both sizes, AND THE HOOK LIVES ON THE COVER ALONE". Only one of those can
+  // be true, and it is the second — so this re-draws slide one and leaves the
+  // other five untouched.
+  //
+  // It costs nothing. The photographs are already paid for and sit in the shot
+  // cache, the re-render reuses them, and the only spend is one short model
+  // call for the line itself — the same call the build already makes.
+  if (cand?.kind === 'deck') {
+    rows.push([Markup.button.callback('🔁 שער חדש', `dh:${key}`)]);
+  }
   //
   // "Quotes" showed the sourced sentences behind a claim. A slideshow's claims
   // are prices, and every one of them is already on the message above with the
@@ -419,6 +428,83 @@ bot.action(/^dx:(.+)$/, async (ctx) => {
   await ctx.editMessageText(`❌ נדחה
 
 ${ctx.callbackQuery.message.text || ''}`).catch(() => {});
+  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+});
+
+/**
+ * A new cover line, and slide one re-drawn to carry it.
+ *
+ * The rest of the deck is untouched — same five slides, same photographs, same
+ * URLs. Only the hook changes, which is the thing that is actually wrong when a
+ * cover is wrong.
+ *
+ * The recipe is rebuilt from the staged deck rather than kept around, because
+ * draftHook wants what the post is ABOUT and the deck already knows: its
+ * subject, its theme, and the name and price of every set in it. Reconstructing
+ * it here means a cover can be re-drawn hours later, after a restart, with no
+ * proposal still in the store.
+ */
+bot.action(/^dh:(.+)$/, async (ctx) => {
+  const key = ctx.match[1];
+  const cand = store.getStaging(key);
+  if (!cand || cand.kind !== 'deck') return ctx.answerCbQuery('כבר טופל');
+
+  await ctx.answerCbQuery('🔁 כותב שער חדש...');
+
+  detach('שער חדש', async () => {
+    const deck = cand.deck;
+
+    // The photograph the cover is drawn over, from the cache it was written to
+    // during the build. Checked BEFORE the model call: if the shot is gone
+    // there is nothing to draw on, and finding that out after paying for a line
+    // would be the wrong order.
+    const first = deck.slides?.[0];
+    const image = first?.productId ? cachedShotFor(first.productId, 1) : null;
+    if (!image) {
+      return notify.send(
+        bot.telegram,
+        ctx.chat.id,
+        '⚠️ התמונה של השקופית הראשונה כבר לא במטמון — /deck לבנות מחדש'
+      );
+    }
+
+    const drawn = await draftHook({
+      kind: deck.recipe,
+      subject: deck.subject,
+      theme: deck.theme || null,
+      ceiling: deck.ceiling || null,
+      deals: (deck.slides || []).map((s) => ({
+        product: s.nameHe,
+        price: s.deal?.price,
+        comparison: s.deal?.comparison,
+      })),
+    });
+
+    if (drawn.hook === deck.hookHe) {
+      return notify.send(bot.telegram, ctx.chat.id, `🔁 יצא אותו שער — נסה שוב\n\n"${drawn.hook}"`);
+    }
+
+    deck.hookHe = drawn.hook;
+    deck.emphasisHe = drawn.emphasis;
+    deck.hookFrom = drawn.from;
+
+    // Every size the deck was rendered for, so the two stay in step. A cover
+    // re-drawn for TikTok alone would leave Instagram publishing the old line.
+    for (const size of ['tiktok', 'instagram']) {
+      if (!Array.isArray(deck[size]) || !deck[size].length) continue;
+      deck[size][0] = await renderBrickCover(deck, { size, image });
+    }
+    if (Array.isArray(deck.preview) && deck.preview.length) deck.preview[0] = deck[deck.instagram ? 'instagram' : 'tiktok'][0];
+
+    store.updateStaging(key, { deck, card: deck.preview?.[0] || cand.card });
+
+    const fresh = store.getStaging(key);
+    console.log(`deck: new cover · ${drawn.from} · "${drawn.hook}"`);
+    await sendForApproval(bot.telegram, ctx.chat.id, fresh, brickApprovalMessage(fresh), stagingButtons(key, fresh));
+  }, ctx.chat.id);
+
+  // The old card cannot stay tappable: approving it would publish the deck the
+  // new one replaced, and both carry the same key.
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
 });
 
