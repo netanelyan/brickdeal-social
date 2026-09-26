@@ -1,6 +1,7 @@
 import { renderToJpeg, cardOutputDir, cardPublicUrl } from './index.js';
 import { renderBrickSlideHtml } from './brickSlide.js';
 import { SIZES } from './sizes.js';
+import { brickConfig } from '../brick/config.js';
 
 // A built deck to JPEGs on disk.
 //
@@ -32,12 +33,29 @@ export async function renderBrickDeckSize(deck, { size = 'tiktok', outDir = card
   if (!SIZES[size]) throw new Error(`unknown deck size: ${size}`);
   const { w, h } = SIZES[size];
 
-  const items = [{ hookHe: deck.hookHe, emphasisHe: deck.emphasisHe, image: deck.slides[0]?.image, cover: true }, ...deck.slides];
+  // Cover, the deals, then the ask.
+  //
+  // Both bookends are RENDER-TIME slides rather than entries in deck.slides,
+  // and that distinction is load-bearing: deck.slides is the list of things
+  // this post is selling, and everything downstream counts it — the quota, the
+  // dedupe keys, the approval card. An end card that lived in there would be a
+  // sixth deal with no price, no link and no set behind it.
+  //
+  // It reuses the cover's photograph, so the post opens and closes on the same
+  // frame. That costs no extra generated image, and the repetition reads as a
+  // bookend rather than an error precisely because the treatment is different:
+  // the end card washes the picture out and puts the type in front of it.
+  const endCard = brickConfig().endCard;
+  const items = [
+    { hookHe: deck.hookHe, emphasisHe: deck.emphasisHe, image: deck.slides[0]?.image, cover: true },
+    ...deck.slides,
+    ...(endCard.askHe ? [{ image: deck.slides[0]?.image, end: true }] : []),
+  ];
 
   const out = [];
   for (const [i, slide] of items.entries()) {
     const index = i + 1;
-    const html = renderBrickSlideHtml(slide, { size, cover: i === 0 });
+    const html = renderBrickSlideHtml(slide, { size, cover: i === 0, end: Boolean(slide.end) });
     const rendered = await renderToJpeg(html, {
       stem: slideStem(deck.id, size, index),
       width: w,
@@ -54,7 +72,8 @@ export async function renderBrickDeckSize(deck, { size = 'tiktok', outDir = card
       ...rendered,
       index,
       cover: i === 0,
-      nameHe: i === 0 ? deck.hookHe : slide.nameHe,
+      end: Boolean(slide.end),
+      nameHe: i === 0 ? deck.hookHe : slide.end ? endCard.askHe : slide.nameHe,
       url: cardPublicUrl(rendered.filename),
     });
   }

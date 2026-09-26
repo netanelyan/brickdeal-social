@@ -45,7 +45,6 @@ export function brickConfig() {
   if (niche.length < nicheCount) throw new Error(`brick-config.json: hashtags.niche has ${niche.length} tags, needs ${nicheCount}`);
 
   const ov = raw.overlay || {};
-  const wm = raw.watermark || {};
   const deck = raw.deck || {};
 
   const slides = count(deck.slides, 5);
@@ -60,11 +59,13 @@ export function brickConfig() {
   cached = {
     copy: { allowTrademark: raw.copy?.allowTrademark === true },
     labels: { ours: labels.ours.trim(), list: labels.list.trim(), saving: labels.saving.trim() },
-    watermark: {
-      text: String(wm.text || '').trim(),
-      sizePct: num(wm.sizePct, 0.021),
-      opacity: num(wm.opacity, 0.62),
-      bottomPct: num(wm.bottomPct, 0.085),
+    // The closing frame. Empty strings are a supported setup rather than a
+    // misconfiguration: clear askHe and the deck simply ends on its last deal,
+    // which is what it did before there was an end card.
+    endCard: {
+      askHe: String(raw.endCard?.askHe || '').trim(),
+      whereHe: String(raw.endCard?.whereHe || '').trim(),
+      siteHe: String(raw.endCard?.siteHe || '').trim(),
     },
     overlay: {
       sizeBasis: ov.sizeBasis === 'height' ? 'height' : 'width',

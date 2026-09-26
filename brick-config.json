@@ -52,20 +52,6 @@
     "saving": "חיסכון"
   },
 
-  "watermark": {
-    "_comment": [
-      "Small, semi-transparent, bottom centre, clear of TikTok's own furniture.",
-      "",
-      "The reference carries one and it is part of why the format works: it is",
-      "the only branding on an otherwise completely unbranded frame, and a slide",
-      "that gets screenshotted or re-shared still says where it came from."
-    ],
-    "text": "BrickDeal - סטים תואמים מאלי אקספרס",
-    "sizePct": 0.021,
-    "opacity": 0.62,
-    "bottomPct": 0.085
-  },
-
   "overlay": {
     "_comment": [
       "The type on a slide. White, centred, with a fine dark outline and a soft",
@@ -174,6 +160,27 @@
     ],
     "cta": "כל הקישורים בקהילה בטלגרם 📍",
     "separator": "- - - -"
+  },
+
+  "endCard": {
+    "_comment": [
+      "The last slide, and the only branded frame in the post.",
+      "",
+      "It exists because the watermark does not. A line of type across the",
+      "bottom of every slide is the clearest tell that a post is an ad; one",
+      "closing frame asks once, at the moment somebody has already watched the",
+      "whole thing, which is the only moment the ask is worth anything.",
+      "",
+      "THE CAPTION MAY NOT CARRY A URL - assertNoUrl refuses one at build time,",
+      "because a link in a caption is what the platforms demote. A SLIDE is not",
+      "a caption and no such rule applies to it: the domain here is pixels in a",
+      "photograph, which nothing can parse, follow or rank.",
+      "",
+      "Three lines and no more. The ask, where to go, and the address."
+    ],
+    "askHe": "כל הקישורים לסטים האלה",
+    "whereHe": "בקהילה שלנו בטלגרם",
+    "siteHe": "brickdealil.com"
   },
 
   "hashtags": {

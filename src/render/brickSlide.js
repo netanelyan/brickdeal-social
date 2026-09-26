@@ -44,7 +44,14 @@ import { SIZES } from './sizes.js';
 //   - one phrase in cream rather than white, because Hebrew has no capitals and
 //     a shout has to be carried by colour. One phrase and not the line: if
 //     every word is cream then no word is shouted.
-//   - a small semi-transparent watermark, bottom centre, clear of TikTok's UI.
+//   - NO WATERMARK. There was one, bottom centre, on the reference's own
+//     reasoning: it is the only branding on an otherwise unbranded frame, and a
+//     slide that gets re-shared still says where it came from. Removed on the
+//     owner's call. It is worth recording what that costs — a screenshot of one
+//     of these now carries nothing that leads back — and what it buys, which is
+//     the thing the format is built on: a frame with no branding on it reads as
+//     somebody sharing a find rather than a store running an ad, and a line of
+//     type across the bottom is the single clearest tell that it is the latter.
 
 /**
  * The type scale for one frame, resolved from brick-config.json.
@@ -68,26 +75,7 @@ export function brickScale({ w, h }) {
     // across both - and at 2px the risk the travel file worried about (a stroke
     // sized for 68px letters closing the counters of 32px ones) does not arise.
     stroke: Math.max(1, Math.round(basis * ov.strokePct)),
-    watermark: Math.max(9, Math.round(basis * brickConfig().watermark.sizePct)),
   };
-}
-
-/**
- * How far off the bottom the watermark sits.
- *
- * Taken from the frame's own bottom safe area rather than from the configured
- * fraction alone, and the max() is the point. TikTok draws the caption, the
- * handle and the sound over the bottom of the frame; the configured 8.5% of a
- * 1920 frame is 163px, which is comfortably INSIDE that band, so a watermark
- * placed there is a watermark nobody ever sees. The reference puts theirs above
- * the UI, which on a 9:16 means clearing roughly the bottom fifth.
- *
- * Computing it from `bottomSafe` also means the Instagram crop, whose furniture
- * is much shallower, does not inherit a margin sized for TikTok.
- */
-export function watermarkBottom({ h, bottomSafe }) {
-  const configured = brickConfig().watermark.bottomPct * h;
-  return Math.round(Math.max(configured, bottomSafe + h * 0.02));
 }
 
 const photoTag = (image) =>
@@ -133,7 +121,6 @@ const STACK = `'TikTok Sans', 'Arimo', 'Assistant', 'Heebo', sans-serif`;
 function css(size, scale) {
   const { w, h } = size;
   const ov = scale.ov;
-  const wm = brickConfig().watermark;
   const side = Math.round(ov.sidePct * w);
 
   return `
@@ -204,6 +191,13 @@ body { position:relative; }
     rgba(4,10,12,${size.h === 1920 ? 0.42 : 0.16}) 100%);
 }
 
+/* The end card's own scrim, flat rather than graded: an even wash over the
+   whole frame, because here the photograph is a background and a background
+   should not have a bright half fighting the type sitting on it. */
+.scrim.end-scrim {
+  background:rgba(4,10,12,0.66);
+}
+
 /* Centred, and the travel file argued hard against exactly this.
    
    Its reasoning was that centred type over a photograph is what every brand
@@ -264,30 +258,84 @@ body { position:relative; }
   filter:drop-shadow(0 2px 5px rgba(0,0,0,0.4));
 }
 
-.mark {
-  position:absolute;
-  left:0; right:0;
-  bottom:${watermarkBottom(size)}px;
-  text-align:center;
-  direction:rtl;
-  font-family:${STACK};
-  font-weight:600;
-  font-size:${scale.watermark}px;
-  color:rgba(255,255,255,${wm.opacity});
-  text-shadow:0 1px 6px rgba(0,0,0,0.5);
-}
-
 .cover {
   font-size:${scale.cover}px;
   text-wrap:balance;
   display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;
   overflow:hidden;
 }
+
+/* The closing frame.
+
+   Darkened much harder than a product slide, and that is the whole design.
+   Every other frame in the post is a photograph with a caption on it, so the
+   picture wins and the type sits on top of it. This one inverts that: the
+   photograph drops back to a texture and the words are the subject, which is
+   what tells a viewer in half a second that the post has ended and this is the
+   ask rather than a sixth deal.
+
+   Three sizes, largest to smallest, reading down: what you get, where to go,
+   the address. The middle line carries the cream, same as the cover, so the
+   post closes on the colour it opened with. */
+.end {
+  max-width:${Math.round(0.74 * w)}px;
+  margin-inline:auto;
+  text-wrap:balance;
+}
+.end .ask { font-size:${Math.round(scale.cover * 0.92)}px; }
+.end .where {
+  font-size:${Math.round(scale.cover * 1.12)}px;
+  color:${ov.emphasis};
+  margin-top:${Math.round(scale.line * 0.5)}px;
+}
+/* The address is deliberately the quietest thing on the frame. It is there to
+   be read by somebody who has already decided, not to do the persuading — and
+   type-set at the size of the line above it, a domain reads as a banner ad. */
+.end .site {
+  font-size:${Math.round(scale.line * 0.82)}px;
+  margin-top:${Math.round(scale.line * 0.9)}px;
+  opacity:0.88;
+  letter-spacing:0.01em;
+  direction:ltr;
+}
+
+/* A long hook, broken deliberately rather than left to run.
+
+   The block is 84% of the frame, which a 44-character question fits on one
+   line — and one line that wide is the worst shape available to it: the type
+   has to be small to fit, so the loudest sentence on the whole post is also
+   its quietest, and the eye tracks a long way to read it.
+
+   Narrowing the MEASURE rather than growing the type is what fixes that. The
+   words wrap at about two thirds of the frame, text-wrap: balance splits
+   them into two lines of similar length rather than a long one and an orphan,
+   and the result is a block that reads as one object sitting in the empty
+   upper half of the picture.
+
+   The threshold is in coverClass(), against the text, because this is a
+   property of the sentence rather than of the frame. */
+.cover.long {
+  max-width:${Math.round(0.66 * w)}px;
+  margin-inline:auto;
+  -webkit-line-clamp:2;
+  line-height:1.22;
+}
 `;
 }
 
 /** A name long enough to want the smaller step. */
 export const nameClass = (text) => (String(text || '').length > 24 ? ' long' : '');
+
+/**
+ * A hook long enough to want two lines.
+ *
+ * Twenty-eight characters, which is roughly where a Hebrew question stops
+ * fitting comfortably across two thirds of the frame. Below it the line is
+ * short enough to hold the eye on its own and breaking it would leave a stub;
+ * above it the single line gets thin and quiet exactly where the post needs to
+ * be loudest.
+ */
+export const coverClass = (text) => (String(text || '').length > 28 ? ' long' : '');
 
 /**
  * A cover line with one phrase set in cream.
@@ -326,17 +374,27 @@ export function coverHtml(text, emphasis) {
  * photograph. Here it does not get to: the block sits in the same place on
  * every slide, and that sameness is what makes five swipes read as one post.
  */
-export function renderBrickSlideHtml(slide, { size = 'tiktok', cover = false } = {}) {
+export function renderBrickSlideHtml(slide, { size = 'tiktok', cover = false, end = false } = {}) {
   const s = SIZES[size] || SIZES.tiktok;
   const scale = brickScale(s);
-  const wm = brickConfig().watermark;
 
   let body;
-  if (cover) {
+  if (end) {
+    // Read off the config at render time rather than carried on the slide, so
+    // the wording of the ask is one edit in one file and never a property of a
+    // deck that was built before it changed.
+    const ec = brickConfig().endCard;
+    body =
+      `<div class="end">` +
+      `<div class="ask">${escapeHtml(ec.askHe)}</div>` +
+      (ec.whereHe ? `<div class="where">${escapeHtml(ec.whereHe)}</div>` : '') +
+      (ec.siteHe ? `<div class="site">${escapeHtml(ec.siteHe)}</div>` : '') +
+      `</div>`;
+  } else if (cover) {
     // The hook, and nothing else. No price block on a cover: the first slide's
     // whole job is to stop the scroll, and a number there answers the question
     // the next four slides are for.
-    body = `<div class="cover">${coverHtml(slide.hookHe, slide.emphasisHe)}</div>`;
+    body = `<div class="cover${coverClass(slide.hookHe)}">${coverHtml(slide.hookHe, slide.emphasisHe)}</div>`;
   } else {
     const name =
       escapeHtml(slide.nameHe) + (slide.emoji ? emojiHtml(slide.emoji, { size: '0.9em' }) : '');
@@ -363,8 +421,7 @@ export function renderBrickSlideHtml(slide, { size = 'tiktok', cover = false } =
     scale
   )}</style></head><body>
 ${photoTag(slide.image)}
-<div class="scrim"></div>
-<div class="block ${cover ? 'at-mid' : 'at-top'}">${body}</div>
-${wm.text ? `<div class="mark">${escapeHtml(wm.text)}</div>` : ''}
+<div class="scrim${end ? ' end-scrim' : ''}"></div>
+<div class="block ${cover || end ? 'at-mid' : 'at-top'}">${body}</div>
 </body></html>`;
 }

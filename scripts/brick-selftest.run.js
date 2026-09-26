@@ -24,7 +24,7 @@ import { brickConfig, coverLine } from '../src/brick/config.js';
 import { themeKeyFor, chooseRecipe } from '../src/brick/build.js';
 import { brickDeckId, sizesFor, photoSummary, brickRepeats } from '../src/brick/candidate.js';
 import { holdFor, sourceFor, stillPrompt } from '../src/images/homeShot.js';
-import { brickScale, watermarkBottom, nameClass, renderBrickSlideHtml } from '../src/render/brickSlide.js';
+import { brickScale, nameClass, coverClass, renderBrickSlideHtml } from '../src/render/brickSlide.js';
 import { SIZES } from '../src/render/sizes.js';
 import { emojiDataUri } from '../src/render/emojiArt.js';
 import { sampleDeals } from './fixtures/deals.js';
@@ -411,18 +411,11 @@ group('the slide');
   // strokePct back toward 0.006 is the one-line way to undo that.
   ok('the outline is an edge rather than a border', s.stroke >= 1 && s.stroke <= 4, `${s.stroke}px`);
 
-  eq(
-    'the watermark clears TikTok\'s own furniture rather than hiding behind it',
-    watermarkBottom({ h: 1920, bottomSafe: 400 }) >= 400,
-    true
-  );
-  ok(
-    'and Instagram does not inherit a margin sized for TikTok',
-    watermarkBottom({ h: 1350, bottomSafe: 175 }) < watermarkBottom({ h: 1920, bottomSafe: 400 })
-  );
-
   eq('a long name steps down a size', nameClass('מסדרונות הטירה והספרייה הגדולה של בית הספר'), ' long');
   eq('a short one does not', nameClass('סחלב'), '');
+
+  eq('a long hook is broken over two lines', coverClass('למה אתה עדיין משלם אלף שקל על מכונית מאבנים?'), ' long');
+  eq('a short one is left on one', coverClass('שליש מהמחיר'), '');
 
   const html = renderBrickSlideHtml(
     { nameHe: 'סחלב', emoji: '🌸', lines: slideLines({ ok: true, paid: 45, listIls: 269, saving: 224 }, { price: 45 }), image: null },
@@ -430,7 +423,17 @@ group('the slide');
   );
   ok('the page is right to left', html.includes('dir="rtl"'));
   ok('the outline is painted outside the letter, not over it', html.includes('paint-order:stroke fill'));
-  ok('the watermark is on the frame', html.includes(brickConfig().watermark.text));
+  ok('no watermark is on the frame', !html.includes('class="mark"'));
+
+  // The end card. The ask is the only branding left in the post now that the
+  // watermark is gone, so "it rendered at all" is worth asserting.
+  const endHtml = renderBrickSlideHtml({ image: null }, { size: 'tiktok', end: true });
+  const ec = brickConfig().endCard;
+  ok('the closing frame carries the ask', endHtml.includes(ec.askHe));
+  ok('and says where to go', endHtml.includes(ec.whereHe));
+  ok('and prints the address', endHtml.includes(ec.siteHe));
+  ok('the closing frame washes the photograph back', endHtml.includes('end-scrim'));
+  ok('it carries no price block', !endHtml.includes('class="line'));
   ok('the money bag rides the saving line', html.includes('💰') || /1f4b0/.test(html));
   ok('nothing on the slide carries the trademark', !TRADEMARK.test(html.replace(/<[^>]*>/g, '')));
   ok('the block is centred, as the published posts are', html.includes('text-align:center'));
@@ -504,7 +507,6 @@ group('the config refuses to be half-loaded');
   ok('there are enough tags to draw the configured number', cfg.hashtags.broad.length >= cfg.hashtags.broadCount);
   ok('and enough niche ones', cfg.hashtags.niche.length >= cfg.hashtags.nicheCount);
   ok('the deck size sits inside its own bounds', cfg.deck.minSlides <= cfg.deck.slides && cfg.deck.slides <= cfg.deck.maxSlides);
-  ok('the watermark has something to say', cfg.watermark.text.length > 0);
 }
 
 /* -------------------------------------------------------------------------- */
