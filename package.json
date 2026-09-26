@@ -15,6 +15,7 @@
     "fetch-emoji": "node scripts/fetch-emoji.js",
     "ig-token": "node scripts/ig-token.js",
     "tiktok-token": "node scripts/tiktok-token.js",
+    "tiktok-import": "node scripts/tiktok-import.js",
     "contact-sheet": "node scripts/contact-sheet.js"
   },
   "dependencies": {
