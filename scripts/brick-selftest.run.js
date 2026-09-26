@@ -461,7 +461,17 @@ group('the slide');
   ok('the closing frame washes the photograph back', endHtml.includes('end-scrim'));
   ok('it carries no price block', !endHtml.includes('class="line'));
   ok('the money bag rides the saving line', html.includes('💰') || /1f4b0/.test(html));
-  ok('nothing on the slide carries the trademark', !TRADEMARK.test(html.replace(/<[^>]*>/g, '')));
+  // The trademark may appear on a slide in ONE place: the configured list
+  // label, where it names the price being compared against. Everywhere else on
+  // the frame — the set name, the hook, the saving line — it is still banned,
+  // because there it would be describing what is being sold rather than what
+  // the price is measured against.
+  {
+    const text = html.replace(/<[^>]*>/g, '');
+    const withoutLabel = text.split(brickConfig().labels.list).join('');
+    ok('the list label names the brand it is comparing against', TRADEMARK.test(brickConfig().labels.list));
+    ok('and nothing else on the slide carries the trademark', !TRADEMARK.test(withoutLabel));
+  }
   ok('the block is centred, as the published posts are', html.includes('text-align:center'));
   ok('a set name sits near the top, clear of the product', html.includes('block at-top'));
   ok('and the scrim is there, because a 2px outline cannot carry a white wall alone', html.includes('class="scrim"'));
