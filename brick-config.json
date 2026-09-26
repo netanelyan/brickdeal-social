@@ -217,6 +217,37 @@
       "סטים שכולם רוצים, במחירים שאף אחד לא מצפה להם"
     ],
     "cta": "כל הקישורים בקהילה בטלגרם 📍",
+    "_engageComment": [
+      "The ask for a comment, drawn fresh per post and set on its own line",
+      "above the link.",
+      "",
+      "`cta` was the only call to action and it points OFF the post - to the",
+      "community, in another app. That is the conversion, and it is worth",
+      "having, but it does nothing for the post itself: a viewer who taps it",
+      "has left. A comment is the opposite. It costs the viewer a second, it",
+      "happens without leaving, and it is the signal these platforms actually",
+      "rank on.",
+      "",
+      "THE FIRST TWO CLOSE A LOOP THE COVER OPENS. The cover asks somebody to",
+      "guess what the set cost; the caption asks them to say the number out",
+      "loud. Somebody who has already guessed silently is most of the way to",
+      "typing it, and what they type is a comment about price - which is the",
+      "post's whole argument, coming from them rather than from us.",
+      "",
+      "Nothing here promises a reply, a DM or a link in exchange for a",
+      "comment. That is engagement bait, the platforms demote it, and we",
+      "could not honour it anyway - there is nothing on the other end."
+    ],
+    "engage": [
+      "כמה ניחשתם לפני שראיתם את המחיר? תגיבו 👇",
+      "תגיבו כמה חשבתם שזה עולה 💬",
+      "איזה מהם הכי שווה לדעתכם? תגיבו 👇",
+      "תגיבו איזה סט אתם רוצים לראות בפוסט הבא 💬",
+      "תייגו את מי שחייב לראות את המחירים האלה 🏷️",
+      "שמרו את הפוסט לפעם הבאה שאתם קונים 🔖",
+      "מי מכם שילם יותר על אותו דגם? תגיבו 😅",
+      "תגיבו איזה נושא לבדוק בשבוע הבא 💬"
+    ],
     "separator": "- - - -"
   },
 

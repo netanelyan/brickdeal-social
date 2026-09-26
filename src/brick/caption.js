@@ -96,8 +96,19 @@ export const captionHook = ({ rand = Math.random } = {}) => {
  */
 export const dressing = (deck, { rand = Math.random } = {}) => ({
   hook: captionHook({ rand }),
+  // Drawn here with the others for the reason the others are: a deck going to
+  // two places must carry the SAME caption to both. Drawing it inside
+  // captionFor would give Instagram one ask and TikTok another — one post
+  // wearing two faces.
+  engage: engageAsk({ rand }),
   tags: hashtagsFor(deck, { rand }),
 });
+
+/** The ask for a comment, or '' when the pool is empty. */
+export const engageAsk = ({ rand = Math.random } = {}) => {
+  const pool = brickConfig().caption.engage || [];
+  return pool.length ? pool[Math.floor(rand() * pool.length)] : '';
+};
 
 /**
  * The whole caption.
@@ -107,11 +118,22 @@ export const dressing = (deck, { rand = Math.random } = {}) => ({
  * and wrong for a deck going to two places, so every caller with two
  * destinations passes both.
  */
-export function captionFor(deck, { hook, tags, rand = Math.random } = {}) {
+export function captionFor(deck, { hook, tags, engage, rand = Math.random } = {}) {
   const cfg = brickConfig().caption;
-  const drawn = hook != null && tags != null ? { hook, tags } : dressing(deck, { rand });
-  const body = [hook ?? drawn.hook, cfg.cta].filter(Boolean).join(' ');
-  const text = [body, cfg.separator, (tags ?? drawn.tags).join(' ')].filter(Boolean).join('\n');
+  const drawn = hook != null && tags != null ? { hook, tags, engage } : dressing(deck, { rand });
+  // Three lines before the tags, in the order they are worth something.
+  //
+  // The hook says what this is. THE ENGAGEMENT ASK comes next, because it is
+  // the cheapest thing a viewer can do and the only one that happens without
+  // leaving the post. The link CTA goes last: it converts, but whoever taps it
+  // is gone, so it should not be the first thing offered.
+  //
+  // On its own line rather than run together with the hook. Two asks in one
+  // sentence read as neither.
+  const ask = engage !== undefined ? engage : drawn.engage;
+  const text = [hook ?? drawn.hook, ask, cfg.cta, cfg.separator, (tags ?? drawn.tags).join(' ')]
+    .filter(Boolean)
+    .join('\n');
   return assertCopy(assertNoUrl(text, 'the caption'), 'the caption');
 }
 

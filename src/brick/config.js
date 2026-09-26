@@ -34,6 +34,11 @@ export function brickConfig() {
   }
 
   const captionLines = lines(raw.caption?.lines, 'caption.lines');
+  // Optional, unlike the others: an empty pool means no engagement line, which
+  // is the shape every caption had before this existed and still a valid one.
+  const engageLines = Array.isArray(raw.caption?.engage)
+    ? raw.caption.engage.map((l) => String(l).trim()).filter(Boolean)
+    : [];
   const coverLines = lines(raw.covers?.lines, 'covers.lines').map(coverLine);
 
   const hashtags = raw.hashtags || {};
@@ -96,6 +101,7 @@ export function brickConfig() {
     covers: { lines: coverLines, swipeHe: String(raw.covers?.swipeHe || '').trim() },
     caption: {
       lines: captionLines,
+      engage: engageLines,
       cta: String(raw.caption?.cta || '').trim(),
       separator: String(raw.caption?.separator || '- - - -'),
     },

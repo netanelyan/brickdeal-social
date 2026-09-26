@@ -367,6 +367,16 @@ group('what goes under the post');
   const tiktok = captionFor(deck, dress);
   const insta = instagramCaptionFor(deck, dress);
   ok('the caption carries the call to the community', tiktok.includes(brickConfig().caption.cta));
+  ok('and an ask for a comment', Boolean(dress.engage) && tiktok.includes(dress.engage));
+  // Both destinations get the one drawn ask. Drawing it per caption would send
+  // the same post out wearing two different faces.
+  ok('the same ask reaches Instagram', instagramCaptionFor(deck, dress).includes(dress.engage));
+  // Order: what it is, then the free thing to do, then the link that takes you
+  // away. A CTA that leaves the post should not be offered first.
+  ok(
+    'the comment ask comes before the link',
+    tiktok.indexOf(dress.engage) < tiktok.indexOf(brickConfig().caption.cta)
+  );
   ok('and a separator before the tags', tiktok.includes(brickConfig().caption.separator));
   ok('no URL anywhere in it — the link lives in the bio', !/https?:\/\/|www\.|\.com|\.co\.il/i.test(tiktok));
   ok("Instagram opens with the title, because a carousel has no title field", insta.startsWith(deck.titleHe));
@@ -582,6 +592,14 @@ group('the config refuses to be half-loaded');
 {
   const cfg = brickConfig();
   ok('the caption pool is not empty', cfg.caption.lines.length > 0);
+  ok('and there is something to ask for a comment with', cfg.caption.engage.length > 0);
+  // Engagement bait is demoted by both platforms, and we could not honour it
+  // anyway — nothing here replies, DMs or sends a link back.
+  ok(
+    'no ask promises a reply or a DM in exchange',
+    cfg.caption.engage.every((l) => !/(אשלח|בפרטי|בדי'אם|ד''מ|תקבלו לינק)/.test(l)),
+    cfg.caption.engage.find((l) => /(אשלח|בפרטי|תקבלו לינק)/.test(l)) || 'clean'
+  );
   ok('the cover pool is not empty', cfg.covers.lines.length > 0);
   ok('there are enough tags to draw the configured number', cfg.hashtags.broad.length >= cfg.hashtags.broadCount);
   ok('and enough niche ones', cfg.hashtags.niche.length >= cfg.hashtags.nicheCount);
