@@ -468,6 +468,11 @@ bot.action(/^dh:(.+)$/, async (ctx) => {
       );
     }
 
+    // The line on screen, and any it already replaced, handed over as things
+    // not to write again. Without this the second call returns the first
+    // answer: same recipe in, same sentence out.
+    deck.pastHooks = [...new Set([...(deck.pastHooks || []), deck.hookHe].filter(Boolean))];
+
     const drawn = await draftHook({
       kind: deck.recipe,
       subject: deck.subject,
@@ -478,9 +483,9 @@ bot.action(/^dh:(.+)$/, async (ctx) => {
         price: s.deal?.price,
         comparison: s.deal?.comparison,
       })),
-    });
+    }, { avoid: deck.pastHooks });
 
-    if (drawn.hook === deck.hookHe) {
+    if (drawn.hook === deck.hookHe || deck.pastHooks.includes(drawn.hook)) {
       return notify.send(bot.telegram, ctx.chat.id, `🔁 יצא אותו שער — נסה שוב\n\n"${drawn.hook}"`);
     }
 

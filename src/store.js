@@ -48,6 +48,18 @@ const empty = {
   // guarding the case that actually happened: an item published to Instagram,
   // then staged again by the next /redo as though it were new.
   publishedIds: {},
+  // What has been OFFERED lately, which is a different question from what has
+  // been published and the one that was missing.
+  //
+  // Selection is deterministic by design: the best theme on the feed and its
+  // five best deals, scored. With nothing published, publishedIds is empty, so
+  // every /deck in a row returned the same five sets out of two hundred and the
+  // same cover line written about them — which reads as a broken bot rather
+  // than as a stable ranking.
+  //
+  // Short-lived on purpose. These are not spent, only shown: a set declined
+  // this afternoon is a perfectly good set tomorrow.
+  proposedIds: {},
   // { date: 'YYYY-MM-DD', count: n, rejected: n } — the daily cap, survives restart.
   stagedDay: null,
   // When a card last reached the approval chat, and when something last went
@@ -86,6 +98,11 @@ const empty = {
 // is posting the same thing twice to real followers, and the cost of
 // remembering is a few hundred bytes a year.
 const PUBLISHED_ID_TTL_MS = Math.max(1, Number(process.env.PUBLISHED_TTL_DAYS ?? '730')) * 86_400_000;
+
+// How long an offered set stays out of the running. Long enough that a run of
+// /deck in one sitting keeps turning up something new, short enough that the
+// feed's best deals are not locked away for a day.
+const PROPOSED_ID_TTL_MS = 6 * 3_600_000;
 let state = load();
 
 function pruneSeen(s) {
@@ -108,6 +125,31 @@ function prunePublished(s) {
   s.published = s.published.filter((p) => p.ts >= cutoff);
   return s.published.length !== before;
 }
+
+function pruneProposedIds(s) {
+  const cutoff = Date.now() - PROPOSED_ID_TTL_MS;
+  let changed = false;
+  for (const [id, ts] of Object.entries(s.proposedIds || {})) {
+    if (ts < cutoff) {
+      delete s.proposedIds[id];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/** Remember that these were offered, so the next /deck reaches past them. */
+export function noteProposed(ids = []) {
+  for (const id of ids) if (id) state.proposedIds[id] = Date.now();
+  save();
+}
+
+/** Was this offered recently enough to skip? */
+export const wasProposed = (id) => {
+  if (!id) return false;
+  const ts = state.proposedIds?.[id];
+  return Boolean(ts && ts > Date.now() - PROPOSED_ID_TTL_MS);
+};
 
 function prunePublishedIds(s) {
   const cutoff = Date.now() - PUBLISHED_ID_TTL_MS;
@@ -134,6 +176,7 @@ function load() {
   if (!s.targetHealth || typeof s.targetHealth !== 'object') s.targetHealth = {};
   if (!s.sourceHealth || typeof s.sourceHealth !== 'object') s.sourceHealth = {};
   if (!s.sourceOff || typeof s.sourceOff !== 'object') s.sourceOff = {};
+  if (!s.proposedIds || typeof s.proposedIds !== 'object') s.proposedIds = {};
 
   // Migration for stores written before publishedIds existed. Backfill from the
   // quota window — it is the only record of what went out, and recovering the
@@ -158,7 +201,10 @@ function load() {
     migrated = Boolean(s.lastPublishedAt) || migrated;
   }
 
-  const changed = pruneSeen(s) || prunePublished(s) || prunePublishedIds(s) || migrated;
+  // Every prune runs: `||` short-circuits, so chaining them meant the first
+  // one that found something to drop stopped the rest from looking.
+  const pruned = [pruneSeen(s), prunePublished(s), prunePublishedIds(s), pruneProposedIds(s)];
+  const changed = pruned.some(Boolean) || migrated;
   if (changed) save(s);
   return s;
 }

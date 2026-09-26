@@ -9,7 +9,7 @@ import { emojiFor } from './emoji.js';
 import { available, priceRoundup, themeRoundup, singleSet, oneListingPerSet } from './recipes.js';
 import { THEME_HE } from './themes.js';
 import { shotOrProduct } from '../images/homeShot.js';
-import { hasPublished } from '../store.js';
+import { hasPublished, wasProposed, noteProposed } from '../store.js';
 
 // Feed to deck.
 //
@@ -116,10 +116,14 @@ THE EMPHASIS is the one phrase in the line that gets shouted. Hebrew has no capi
  * lost its model call still has five perfectly good slides, and the pool
  * exists precisely so that the expensive half is optional.
  */
-export async function draftHook(recipe, { rand = Math.random } = {}) {
+export async function draftHook(recipe, { rand = Math.random, avoid = [] } = {}) {
   const pool = brickConfig().covers.lines;
+  // A fallback that cannot hand back a line we are trying to get away from.
+  // Without this, asking for a new cover could return the one on screen.
+  const usable = pool.filter((l) => !avoid.includes(l.text));
   const fallback = () => {
-    const picked = pool[Math.floor(rand() * pool.length)];
+    const from = usable.length ? usable : pool;
+    const picked = from[Math.floor(rand() * from.length)];
     return { hook: picked.text, emphasis: picked.emphasis, title: recipe.subject, from: 'pool' };
   };
 
@@ -136,6 +140,13 @@ export async function draftHook(recipe, { rand = Math.random } = {}) {
           role: 'user',
           content: [
             `THIS POST: ${recipe.subject}`,
+            // What NOT to write. The model is close to deterministic on
+            // identical input, so a second call about the same five sets
+            // returns the same sentence — which is what made the "new cover"
+            // button look like it did nothing.
+            ...(avoid.length
+              ? ['', 'ALREADY USED for this post - write something different, not a reword of these:', ...avoid.map((a) => `  ${a}`)]
+              : []),
             '',
             'The sets in it:',
             ...recipe.deals.map(
@@ -348,7 +359,19 @@ export async function proposeDeck(request = null, { onProgress = null } = {}) {
   const fresh = deals.filter(
     (d) => !hasPublished(`brick:${d.productId}`) && !(d.setId && hasPublished(`brickset:${d.setId}`))
   );
-  const enough = fresh.length >= brickConfig().deck.minSlides ? fresh : deals;
+  // And skip what was OFFERED in the last few hours, not just what was
+  // published. Selection is deterministic — the best theme on the feed and its
+  // five best deals — so with nothing published yet, every /deck returned the
+  // same five sets out of two hundred, and the cover written about them came
+  // back identical too. A stable ranking is correct; showing only its top five
+  // forever is not.
+  const unseen = fresh.filter((d) => !wasProposed(`brick:${d.productId}`));
+  const enough =
+    unseen.length >= brickConfig().deck.minSlides
+      ? unseen
+      : fresh.length >= brickConfig().deck.minSlides
+        ? fresh
+        : deals;
 
   // And never the same set twice in ONE deck, which is a different rule from
   // the one above and the one that was actually being broken on screen. Applied
@@ -374,6 +397,11 @@ export async function proposeDeck(request = null, { onProgress = null } = {}) {
   // deal, so it has to be rebuilt once the comparison exists — otherwise the
   // saving fact it wanted to show was decided before we knew there was one.
   const ready = withPrices.kind === 'set' ? singleSet(priced.deals[0]) || withPrices : withPrices;
+
+  // Recorded at the moment it is OFFERED, not when it is approved. A proposal
+  // you declined still used up its turn — showing it again on the next /deck is
+  // exactly the behaviour this exists to stop.
+  noteProposed(ready.deals.map((d) => `brick:${d.productId}`));
 
   return {
     request: request || null,
