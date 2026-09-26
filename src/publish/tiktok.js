@@ -1,5 +1,6 @@
 import * as store from '../store.js';
 import { cardHostConfigured, tiktokVerifiedDomains, unverifiedTikTokHosts } from './imageHosts.js';
+import { deckImageUrls, renderedSizes } from './deckImages.js';
 
 // TikTok publishing, through the official Content Posting API only.
 //
@@ -689,10 +690,12 @@ export function preflight(cand) {
   // that was never built for TikTok, and posting the wrong shape is worse than
   // not posting. The card fallback stays for a single card, which is the case
   // it was written for.
-  const deckImages = cand.deck?.urls?.tiktok || [];
+  const deckImages = deckImageUrls(cand, 'tiktok');
   if (cand.kind === 'deck' && !deckImages.length) {
+    const has = renderedSizes(cand);
     throw new TikTokError(
-      'this deck has no 1080x1920 renders — it was built for another destination. ' +
+      'this deck has no 1080x1920 renders — it was built for another destination' +
+        `${has.length ? ` (it has: ${has.join(', ')})` : ''}. ` +
         'Rebuild it with TikTok among its targets rather than posting the 4:5 crop.',
       { step: 'config' }
     );

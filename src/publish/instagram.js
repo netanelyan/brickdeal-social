@@ -1,5 +1,6 @@
 import * as store from '../store.js';
 import { cardHostConfigured } from './imageHosts.js';
+import { deckImageUrls } from './deckImages.js';
 
 // Instagram publishing, through the official Graph API only.
 //
@@ -411,7 +412,7 @@ export async function publishInstagram(cand) {
 
   // A deck arrives here with its Instagram-sized slides already rendered, and
   // takes the carousel path. Everything else is one image, as before.
-  const deckImages = cand.deck?.urls?.instagram || [];
+  const deckImages = deckImageUrls(cand, 'instagram');
   if (deckImages.length > 1) {
     if (deckImages.some((u) => !u?.startsWith('https://'))) {
       throw new InstagramError('every slide URL must be https', { step: 'config' });

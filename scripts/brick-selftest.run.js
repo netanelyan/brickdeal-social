@@ -18,6 +18,7 @@ import {
   CopyError,
 } from '../src/brick/copy.js';
 import { setNumber, pickPrice, longestSideCm, compare } from '../src/brick/rrp.js';
+import { deckImageUrls, renderedSizes } from '../src/publish/deckImages.js';
 import { emojiFor, THEME_EMOJI, DEFAULT_EMOJI, missingThemes, ALL_USED as BRICK_EMOJI } from '../src/brick/emoji.js';
 import { priceRoundup, themeRoundup, savingsRoundup, singleSet, orderSlides, slideScore } from '../src/brick/recipes.js';
 import { hashtagsFor, themeTag, captionFor, instagramCaptionFor, dressing } from '../src/brick/caption.js';
@@ -151,6 +152,38 @@ group('the feed loader, end to end against the fixture');
 }
 
 /* -------------------------------------------------------------------------- */
+group('a deck finds the slides it actually rendered');
+{
+  // The exact shape toBrickCandidate produces: renderBrickDeck returns its work
+  // keyed by SIZE and that is spread onto the deck. There is no `urls` key and
+  // there never was — both publishers used to read one, so every deck looked
+  // unrendered to them.
+  const cand = {
+    kind: 'deck',
+    card: { url: 'https://example.com/cards/cover-instagram-01.jpg' },
+    deck: {
+      tiktok: [
+        { index: 1, url: 'https://example.com/cards/d-tiktok-01.jpg' },
+        { index: 2, url: 'https://example.com/cards/d-tiktok-02.jpg' },
+      ],
+      instagram: [{ index: 1, url: 'https://example.com/cards/d-instagram-01.jpg' }],
+    },
+  };
+
+  eq('the 9:16 slides are found, in order', deckImageUrls(cand, 'tiktok').join(','),
+    'https://example.com/cards/d-tiktok-01.jpg,https://example.com/cards/d-tiktok-02.jpg');
+  eq('and the 4:5 ones separately', deckImageUrls(cand, 'instagram').length, 1);
+  eq('a size that was never rendered is empty, not undefined', deckImageUrls({ deck: {} }, 'tiktok').length, 0);
+  eq('and so is a deck with no renders at all', deckImageUrls({}, 'tiktok').length, 0);
+  eq('what it has is reported, for the error message', renderedSizes(cand).join(','), 'tiktok,instagram');
+
+  // The regression guard. A deck carrying ONLY the old, invented path must read
+  // as unrendered — otherwise the shape could quietly come back and the tests
+  // above would still pass.
+  const wrongShape = { kind: 'deck', deck: { urls: { tiktok: ['https://example.com/x.jpg'] } } };
+  eq('the invented urls key is not a source of slides', deckImageUrls(wrongShape, 'tiktok').length, 0);
+}
+
 group('the trademark rule — the one place this deliberately departs from the reference');
 
 for (const [s, want, why] of [
