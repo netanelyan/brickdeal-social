@@ -554,6 +554,13 @@ const MAX_PUBLISH_ATTEMPTS = 3;
  */
 const publishedFacts = (cand) => ({
   id: cand.id,
+  // Every set this post just spent, by listing AND by set number, so the
+  // freshness filter in build.js has something to match on. Without these the
+  // filter it runs is a no-op and the same five sets come back tomorrow under
+  // a different cover — which is exactly what they did.
+  alsoIds: (cand.deck?.slides || []).flatMap((s) =>
+    [s.productId ? `brick:${s.productId}` : null, s.deal?.setId ? `brickset:${s.deal.setId}` : null].filter(Boolean)
+  ),
   pillar: cand.pillar,
   tags: cand.tags,
   layout: cand.layout,

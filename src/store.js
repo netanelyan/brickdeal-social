@@ -494,6 +494,15 @@ export function takeQueuedAt(n) {
  */
 export function recordPublished({
   id,
+  // Everything ELSE this post used up, so it cannot be used again.
+  //
+  // One post is one id, which is the right key for "has this post gone out"
+  // and the wrong one for "has this SET gone out". A slideshow spends five
+  // sets, and with only the deck's own id recorded, build.js asked whether
+  // `brick:<productId>` had been published and the answer was always no,
+  // because nothing had ever written one. A freshness filter that cannot
+  // match anything does not fail loudly; it just quietly stops filtering.
+  alsoIds = [],
   pillar,
   tags = [],
   layout,
@@ -507,6 +516,7 @@ export function recordPublished({
   tiktokDraft = false,
 }) {
   if (id) state.publishedIds[id] = Date.now();
+  for (const extra of alsoIds) if (extra) state.publishedIds[extra] = Date.now();
   state.lastPublishedAt = Date.now();
 
   const existing = id ? state.published.find((p) => p.id === id) : null;

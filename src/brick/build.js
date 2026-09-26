@@ -6,7 +6,7 @@ import { rateToIls } from './fx.js';
 import { brickConfig } from './config.js';
 import { slideLines, assertCopy, CopyError } from './copy.js';
 import { emojiFor } from './emoji.js';
-import { available, priceRoundup, themeRoundup, singleSet } from './recipes.js';
+import { available, priceRoundup, themeRoundup, singleSet, oneListingPerSet } from './recipes.js';
 import { THEME_HE } from './themes.js';
 import { shotOrProduct } from '../images/homeShot.js';
 import { hasPublished } from '../store.js';
@@ -293,8 +293,21 @@ export async function proposeDeck(request = null, { onProgress = null } = {}) {
   // without this every roundup would be the same five sets under a different
   // cover. `hasPublished` is keyed on ids that survive the 30-day quota window
   // being pruned, which is why it is the right question to ask.
-  const fresh = deals.filter((d) => !hasPublished(`brick:${d.productId}`));
-  const pool = fresh.length >= brickConfig().deck.minSlides ? fresh : deals;
+  // Asked per SET as well as per listing. The listing key alone could not do
+  // the job it claimed: the same set reaches the feed from a dozen sellers under
+  // a dozen productIds, so a set posted on Monday was free to come back on
+  // Tuesday through a different seller.
+  const fresh = deals.filter(
+    (d) => !hasPublished(`brick:${d.productId}`) && !(d.setId && hasPublished(`brickset:${d.setId}`))
+  );
+  const enough = fresh.length >= brickConfig().deck.minSlides ? fresh : deals;
+
+  // And never the same set twice in ONE deck, which is a different rule from
+  // the one above and the one that was actually being broken on screen. Applied
+  // to the pool rather than inside each recipe so that every path — a theme, a
+  // price ceiling, a named set, the fallback — inherits it without having to
+  // remember to.
+  const pool = oneListingPerSet(enough);
 
   const recipe = chooseRecipe(pool, request);
   if (!recipe) {

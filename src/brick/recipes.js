@@ -19,6 +19,53 @@ import { THEME_HE } from './themes.js';
 const savingOf = (d) => (d.comparison?.ok ? d.comparison.saving : 0);
 
 /**
+ * What makes two rows THE SAME SET rather than the same listing.
+ *
+ * The feed is a list of listings, and a popular set is sold by a dozen sellers
+ * at a dozen prices. Every score in this file is computed from the set — its
+ * saving, its RRP, its piece count — so duplicate listings do not merely appear
+ * together, they score IDENTICALLY and cluster at the top. A deck of five then
+ * comes back as the same car four times, which is what shipped.
+ *
+ * `setId` is the real answer and is present whenever the scraper recognised a
+ * set number. The name is the fallback and a weak one — these names are written
+ * per listing, so the same car arrives as "black sports car with spoiler" and
+ * "V8 race car" — but a weak fallback still catches the reposts of one seller.
+ * With neither, the listing is its own set and nothing is collapsed.
+ */
+export const setKey = (d) =>
+  d.setId ? `set:${d.setId}` : d.product ? `name:${String(d.product).toLowerCase().replace(/\s+/g, ' ').trim()}` : `id:${d.productId}`;
+
+/**
+ * One listing per set — the cheapest one.
+ *
+ * Cheapest rather than best-scoring, and deliberately: at this point in the
+ * pipeline nothing has been priced yet, so every duplicate of a set scores the
+ * same and "best" is a coin toss. Price is known, it is the number the slide is
+ * an argument about, and picking anything other than the cheapest would mean
+ * showing a worse deal than the one we could have shown.
+ */
+export function oneListingPerSet(deals) {
+  const best = new Map();
+  for (const d of deals) {
+    const key = setKey(d);
+    const held = best.get(key);
+    if (!held) {
+      best.set(key, d);
+      continue;
+    }
+    // Cheapest wins; more pieces breaks a tie, because at equal price the
+    // bigger box is the better slide.
+    const better = d.price < held.price || (d.price === held.price && (d.pieces || 0) > (held.pieces || 0));
+    if (better) best.set(key, d);
+  }
+  // Feed order, not Map order, so nothing downstream inherits a reordering it
+  // did not ask for.
+  const keep = new Set([...best.values()]);
+  return deals.filter((d) => keep.has(d));
+}
+
+/**
  * How good a slide this deal makes, before anything is rendered.
  *
  * A sourced comparison is worth more than anything else on the list, and by a

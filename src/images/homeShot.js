@@ -175,7 +175,19 @@ async function generate(prompt, photo) {
     const said = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text).filter(Boolean).join(' ');
     throw new ShotError(`image generation returned no image${said ? `: ${said.slice(0, 200)}` : ''}`);
   }
-  return Buffer.from(inline.data, 'base64');
+
+  // The MIME TYPE TRAVELS WITH THE BYTES, and dropping it is what broke this
+  // pipeline end to end.
+  //
+  // This model returns PNG. Every caller downstream assumed JPEG — the verify
+  // call declared image/jpeg, the cache was written as .jpg, the data URI said
+  // image/jpeg — and the verify call is the one that cannot survive the guess:
+  // the API compares the declared type against the actual bytes and refuses the
+  // whole request with a 400. Which the verifier caught and reported as "did
+  // not show the same model", so a transport error wore the costume of a
+  // judgement and every generated photograph was discarded for months.
+  const mime = inline.mimeType || inline.mime_type || 'image/png';
+  return { bytes: Buffer.from(inline.data, 'base64'), mime };
 }
 
 const VERIFY_PROMPT = `Image 1 is a marketplace seller's photo of a brick-building set. Image 2 is a generated photo that is supposed to show the SAME built model, restaged in a room.
@@ -190,10 +202,20 @@ Return ONLY a JSON object, no markdown: {"match": true or false}`;
  * Any failure — no key, an API error, an unparseable answer — is a "no", never
  * a pass. The fallback costs us a nicer photograph; a false pass costs a post
  * that shows one product and sells another.
+ *
+ * BUT IT SAYS WHICH KIND OF NO IT IS, and that is not a nicety. This returned a
+ * bare boolean, so a 400 from a malformed request was indistinguishable from
+ * the model looking at two pictures and saying they differ — and the caller
+ * reported both as "did not show the same model". The request was malformed for
+ * every image ever generated here, and the lie in that sentence is the only
+ * reason it went unnoticed: the pipeline looked like it was working and making
+ * a judgement, when it was failing and inventing one.
+ *
+ * Fail closed, always. Explain accurately, always.
  */
-export async function verifySameModel(sourceUrl, generatedBase64) {
+export async function verifySameModel(sourceUrl, generatedBase64, mime = 'image/png') {
   const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return false;
+  if (!key) return { match: false, why: 'no ANTHROPIC_API_KEY, so nothing can check the photo' };
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -206,7 +228,9 @@ export async function verifySameModel(sourceUrl, generatedBase64) {
             role: 'user',
             content: [
               { type: 'image', source: { type: 'url', url: sourceUrl } },
-              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: generatedBase64 } },
+              // The type the bytes ACTUALLY are. The API compares the two and
+              // refuses the request outright when they disagree.
+              { type: 'image', source: { type: 'base64', media_type: mime, data: generatedBase64 } },
               { type: 'text', text: VERIFY_PROMPT },
             ],
           },
@@ -214,17 +238,50 @@ export async function verifySameModel(sourceUrl, generatedBase64) {
       }),
       signal: AbortSignal.timeout(60000),
     });
-    if (!res.ok) return false;
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      return { match: false, why: `the check could not run: HTTP ${res.status} ${body.slice(0, 160)}` };
+    }
     const data = await res.json();
     let text = (data.content || []).map((b) => b.text || '').join('').trim();
     text = text.replace(/^```json/i, '').replace(/```$/, '').trim();
-    return JSON.parse(text).match === true;
-  } catch {
-    return false;
+    const match = JSON.parse(text).match === true;
+    return { match, why: match ? null : 'the photo does not show the same model' };
+  } catch (e) {
+    return { match: false, why: `the check could not run: ${e.message}` };
   }
 }
 
-const cachePath = (productId, n = 1) => join(CACHE_DIR, `${String(productId).replace(/[^\w.-]/g, '-')}-${n}.jpg`);
+const cacheStem = (productId, n = 1) => join(CACHE_DIR, `${String(productId).replace(/[^\w.-]/g, '-')}-${n}`);
+
+/**
+ * The type the bytes really are, read from the bytes.
+ *
+ * Nothing that hands us an image can be trusted to describe it: the model's
+ * declared type was being dropped, the marketplace serves .png URLs as webp,
+ * and the shots already sitting in the cache are PNGs with a .jpg extension.
+ * The first four bytes are the only source here that cannot be wrong.
+ */
+function sniffMime(buf) {
+  if (buf.length > 8 && buf.readUInt32BE(0) === 0x89504e47) return 'image/png';
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg';
+  if (buf.length > 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP')
+    return 'image/webp';
+  return 'image/png';
+}
+
+const extFor = (mime) => (mime === 'image/jpeg' ? '.jpg' : mime === 'image/webp' ? '.webp' : '.png');
+
+/** A cached shot under any extension it may have been written with. */
+function cachedShot(stem) {
+  for (const ext of ['.png', '.jpg', '.webp']) {
+    if (existsSync(stem + ext)) {
+      const buf = readFileSync(stem + ext);
+      return { buf, mime: sniffMime(buf) };
+    }
+  }
+  return null;
+}
 
 /**
  * A home shot for one deal, cached on disk.
@@ -239,9 +296,12 @@ const cachePath = (productId, n = 1) => join(CACHE_DIR, `${String(productId).rep
  * owner approved knowing it was generated and one they did not.
  */
 export async function homeShot(deal, { n = 1, sizeCm = null, force = false } = {}) {
-  const file = cachePath(deal.productId, n);
-  if (!force && existsSync(file)) {
-    return { src: `data:image/jpeg;base64,${readFileSync(file).toString('base64')}`, provenance: 'generated', note: 'cached' };
+  const stem = cacheStem(deal.productId, n);
+  if (!force) {
+    const hit = cachedShot(stem);
+    if (hit) {
+      return { src: `data:${hit.mime};base64,${hit.buf.toString('base64')}`, provenance: 'generated', note: 'cached' };
+    }
   }
 
   const source = sourceFor(deal);
@@ -258,25 +318,31 @@ export async function homeShot(deal, { n = 1, sizeCm = null, force = false } = {
   // coin flip.
   let lastWhy = null;
   for (const attempt of [1, 2]) {
-    let bytes;
+    let made;
     try {
-      bytes = await generate(prompt, photo);
+      made = await generate(prompt, photo);
     } catch (e) {
       lastWhy = e.message;
       continue;
     }
 
+    const { bytes, mime } = made;
     const base64 = bytes.toString('base64');
-    if (!(await verifySameModel(source.url, base64))) {
-      lastWhy = `attempt ${attempt} did not show the same model`;
+    const verdict = await verifySameModel(source.url, base64, mime);
+    if (!verdict.match) {
+      // The reason, not a guess at it. "did not show the same model" was
+      // printed here for every failure of any kind, including the one that was
+      // actually happening.
+      lastWhy = `attempt ${attempt}: ${verdict.why}`;
       continue;
     }
 
+    const file = stem + extFor(mime);
     mkdirSync(dirname(file), { recursive: true });
     const tmp = `${file}.tmp`;
     writeFileSync(tmp, bytes);
     renameSync(tmp, file);
-    return { src: `data:image/jpeg;base64,${base64}`, provenance: 'generated', note: `from the ${source.kind}` };
+    return { src: `data:${mime};base64,${base64}`, provenance: 'generated', note: `from the ${source.kind}` };
   }
 
   throw new ShotError(lastWhy || 'image generation produced nothing usable');
@@ -300,4 +366,4 @@ export async function shotOrProduct(deal, opts = {}) {
   }
 }
 
-export const __test = { cachePath, CACHE_DIR };
+export const __test = { cacheStem, cachedShot, sniffMime, extFor, CACHE_DIR };
