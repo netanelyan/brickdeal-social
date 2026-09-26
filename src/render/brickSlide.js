@@ -287,9 +287,9 @@ body { position:relative; }
    what tells a viewer in half a second that the post has ended and this is the
    ask rather than a sixth deal.
 
-   Three sizes, largest to smallest, reading down: what you get, where to go,
-   the address. The middle line carries the cream, same as the cover, so the
-   post closes on the colour it opened with. */
+   Four lines, reading down: what you get, where to go, why to follow, the
+   address. The second carries the cream, same as the cover, so the post closes
+   on the colour it opened with. */
 .end {
   max-width:${Math.round(0.80 * w)}px;
   margin-inline:auto;
@@ -308,6 +308,18 @@ body { position:relative; }
   color:${ov.emphasis};
   margin-top:${Math.round(scale.line * 0.62)}px;
   line-height:1.2;
+}
+/* The reason to follow, between the cream line and the address.
+
+   Sized under the ask and over the address, which is where it belongs in the
+   frame's argument: it is worth more than a domain and less than the thing the
+   post was about. It does NOT take the cream — one highlighted line per frame,
+   and the line above it has it. Two would leave the eye with nowhere to land. */
+.end .follow {
+  font-size:${Math.round(scale.line * 1.12)}px;
+  margin-top:${Math.round(scale.line * 0.9)}px;
+  opacity:0.9;
+  line-height:1.24;
 }
 /* The address is deliberately the quietest thing on the frame. It is there to
    be read by somebody who has already decided, not to do the persuading — and
@@ -386,12 +398,27 @@ export const coverClass = (text) => (String(text || '').length > 28 ? ' long' : 
  * simply does not highlight instead of appearing twice. And it is held on one
  * line when it is short: "מחיר מלא" broken across a line end is two coloured
  * fragments rather than one shouted phrase.
+ *
+ * IT LOOKS FOR A MATCH THAT STARTS A WORD, and falls back to a plain search
+ * only if there is none. Plain indexOf was enough while every cover was a
+ * sentence; a price-led cover is two numbers, and one number can end with the
+ * other. "במחירון 399₪. אצלי 99₪" shouting "99₪" put the cream on the last two
+ * digits of 399 — the wrong number, coloured mid-word, on the loudest slide in
+ * the post. The fallback is kept because an emphasis that genuinely begins
+ * mid-word is a config decision, not an error.
  */
 export function coverHtml(text, emphasis) {
   const t = String(text || '');
   const e = String(emphasis || '').trim();
   if (!e) return escapeHtml(t);
-  const at = t.indexOf(e);
+  let at = -1;
+  for (let i = t.indexOf(e); i >= 0; i = t.indexOf(e, i + 1)) {
+    if (i === 0 || !/[\p{L}\p{N}]/u.test(t[i - 1])) {
+      at = i;
+      break;
+    }
+  }
+  if (at < 0) at = t.indexOf(e);
   if (at < 0) return escapeHtml(t);
   return (
     escapeHtml(t.slice(0, at)) +
@@ -428,6 +455,12 @@ export function renderBrickSlideHtml(slide, { size = 'tiktok', cover = false, en
       `<div class="end">` +
       `<div class="ask">${escapeHtml(ec.askHe)}</div>` +
       (ec.whereHe ? `<div class="where">${escapeHtml(ec.whereHe)}</div>` : '') +
+      // Above the address rather than below it. The address is the quietest
+      // thing on the frame and has to stay the last thing read; a line of type
+      // under it would make the domain a middle line and the reason to follow
+      // the closing one, which is the wrong emphasis for the only line here
+      // that nothing has to be tapped for.
+      (ec.followHe ? `<div class="follow">${escapeHtml(ec.followHe)}</div>` : '') +
       (ec.siteHe ? `<div class="site">${escapeHtml(ec.siteHe)}</div>` : '') +
       `</div>`;
   } else if (cover) {
@@ -437,7 +470,13 @@ export function renderBrickSlideHtml(slide, { size = 'tiktok', cover = false, en
     // The hook, then the swipe. A question with nothing to do about it is a
     // rhetorical question on a photograph; this is the line that turns it into
     // the first step of something.
-    const swipe = brickConfig().covers.swipeHe;
+    //
+    // A price-led cover gets a different one. The ordinary line offers to show
+    // what the set costs at the original brand, and that cover has just printed
+    // that number — offering to reveal it underneath is the post arguing with
+    // its own first slide.
+    const covers = brickConfig().covers;
+    const swipe = (slide.priceLed && covers.swipePriceHe) || covers.swipeHe;
     body =
       `<div class="cover${coverClass(slide.hookHe)}">${coverHtml(slide.hookHe, slide.emphasisHe)}</div>` +
       (swipe ? `<div class="swipe">${escapeHtml(swipe)}</div>` : '');

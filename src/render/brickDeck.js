@@ -47,7 +47,15 @@ export async function renderBrickDeckSize(deck, { size = 'tiktok', outDir = card
   // the end card washes the picture out and puts the type in front of it.
   const endCard = brickConfig().endCard;
   const items = [
-    { hookHe: deck.hookHe, emphasisHe: deck.emphasisHe, image: deck.slides[0]?.image, cover: true },
+    {
+      hookHe: deck.hookHe,
+      emphasisHe: deck.emphasisHe,
+      image: deck.slides[0]?.image,
+      // Which of the two covers this is, carried as a fact about the slide
+      // rather than re-derived in the renderer. It decides the swipe line.
+      priceLed: deck.hookFrom === 'price',
+      cover: true,
+    },
     ...deck.slides,
     ...(endCard.askHe ? [{ image: deck.slides[0]?.image, end: true }] : []),
   ];
@@ -108,7 +116,7 @@ export async function renderBrickCover(deck, { size = 'tiktok', outDir = cardOut
   if (!SIZES[size]) throw new Error(`unknown deck size: ${size}`);
   const { w, h } = SIZES[size];
   const html = renderBrickSlideHtml(
-    { hookHe: deck.hookHe, emphasisHe: deck.emphasisHe, image },
+    { hookHe: deck.hookHe, emphasisHe: deck.emphasisHe, image, priceLed: deck.hookFrom === 'price' },
     { size, cover: true }
   );
   const rendered = await renderToJpeg(html, {

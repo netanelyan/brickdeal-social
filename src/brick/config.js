@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // brick-config.json, read once and checked on the way in.
 //
@@ -15,13 +17,26 @@ import { readFileSync } from 'node:fs';
 
 let cached = null;
 
+/**
+ * Where the file is.
+ *
+ * Overridable for the same reason STORE_PATH is (see src/store.js): the panel can
+ * now WRITE this file, so the test that proves a broken save is rolled back has to
+ * have its own copy to break. Pointing the suite at the live file would mean a
+ * test that deliberately corrupts the account's caption rules.
+ */
+export const configPath = () =>
+  process.env.BRICK_CONFIG_PATH
+    ? resolve(process.env.BRICK_CONFIG_PATH)
+    : fileURLToPath(new URL('../../brick-config.json', import.meta.url));
+
 /** Everything in brick-config.json, validated. Throws once, loudly, if it can't. */
 export function brickConfig() {
   if (cached) return cached;
 
   let raw;
   try {
-    raw = JSON.parse(readFileSync(new URL('../../brick-config.json', import.meta.url), 'utf8'));
+    raw = JSON.parse(readFileSync(configPath(), 'utf8'));
   } catch (e) {
     throw new Error(`brick-config.json could not be read: ${e.message}`);
   }
@@ -39,7 +54,20 @@ export function brickConfig() {
   const engageLines = Array.isArray(raw.caption?.engage)
     ? raw.caption.engage.map((l) => String(l).trim()).filter(Boolean)
     : [];
+  // The reason to follow, same posture as engage: optional, drawn per post.
+  const followLines = Array.isArray(raw.caption?.follow)
+    ? raw.caption.follow.map((l) => String(l).trim()).filter(Boolean)
+    : [];
   const coverLines = lines(raw.covers?.lines, 'covers.lines').map(coverLine);
+  // The price-led covers. Optional, like the engage pool: an empty list means
+  // no post ever leads with the number, which is the shape every post had
+  // before this existed. Parsed through coverLine so they carry their emphasis
+  // in stars exactly like the pool above — the substitution happens later, in
+  // priceHook, on both halves.
+  const priceLines = (Array.isArray(raw.covers?.priceLines) ? raw.covers.priceLines : [])
+    .map((l) => String(l).trim())
+    .filter(Boolean)
+    .map(coverLine);
 
   const hashtags = raw.hashtags || {};
   const broad = tags(hashtags.broad, 'hashtags.broad');
@@ -71,6 +99,11 @@ export function brickConfig() {
       askHe: String(raw.endCard?.askHe || '').trim(),
       whereHe: String(raw.endCard?.whereHe || '').trim(),
       siteHe: String(raw.endCard?.siteHe || '').trim(),
+      // One fixed line rather than a pool, unlike the caption's. The end card is
+      // the same frame on every post by design — that sameness is what makes it
+      // recognisable — and a reason to follow that changed each time would be
+      // the one thing on it that did not settle.
+      followHe: String(raw.endCard?.followHe || '').trim(),
     },
     overlay: {
       sizeBasis: ov.sizeBasis === 'height' ? 'height' : 'width',
@@ -98,10 +131,27 @@ export function brickConfig() {
       widthPct: num(ov.widthPct, 0.84),
       emphasis: String(ov.emphasis || '#F7E3A1'),
     },
-    covers: { lines: coverLines, swipeHe: String(raw.covers?.swipeHe || '').trim() },
+    covers: {
+      lines: coverLines,
+      swipeHe: String(raw.covers?.swipeHe || '').trim(),
+      // The swipe line for a cover that already printed both numbers. The
+      // ordinary one offers to show what the set costs at the original brand,
+      // which is the thing a price-led cover has just finished saying. Empty
+      // falls back to the ordinary line.
+      swipePriceHe: String(raw.covers?.swipePriceHe || '').trim(),
+      priceLines,
+      // How often a post leads with the number instead of asking for a guess.
+      //
+      // Clamped rather than validated, because the failure it guards against is
+      // a typo in a hand-edited file: `1.5` read literally means every cover is
+      // price-led forever and the guess-the-price shape silently stops being
+      // used, which nobody would notice from the outside for a fortnight.
+      priceLedShare: Math.min(1, Math.max(0, num(raw.covers?.priceLedShare, 0.4))),
+    },
     caption: {
       lines: captionLines,
       engage: engageLines,
+      follow: followLines,
       cta: String(raw.caption?.cta || '').trim(),
       separator: String(raw.caption?.separator || '- - - -'),
     },

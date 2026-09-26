@@ -23,10 +23,10 @@ import { emojiFor, THEME_EMOJI, DEFAULT_EMOJI, missingThemes, ALL_USED as BRICK_
 import { priceRoundup, themeRoundup, savingsRoundup, singleSet, orderSlides, slideScore } from '../src/brick/recipes.js';
 import { hashtagsFor, themeTag, captionFor, instagramCaptionFor, dressing } from '../src/brick/caption.js';
 import { brickConfig, coverLine } from '../src/brick/config.js';
-import { themeKeyFor, chooseRecipe } from '../src/brick/build.js';
+import { themeKeyFor, chooseRecipe, priceHook, PRICE_HOOK_RATIO, MAX_HOOK_WORDS } from '../src/brick/build.js';
 import { brickDeckId, sizesFor, photoSummary, brickRepeats } from '../src/brick/candidate.js';
 import { holdFor, sourceFor, stillPrompt } from '../src/images/homeShot.js';
-import { brickScale, nameClass, coverClass, renderBrickSlideHtml } from '../src/render/brickSlide.js';
+import { brickScale, nameClass, coverClass, coverHtml, renderBrickSlideHtml } from '../src/render/brickSlide.js';
 import { SIZES } from '../src/render/sizes.js';
 import { emojiDataUri } from '../src/render/emojiArt.js';
 import { sampleDeals } from './fixtures/deals.js';
@@ -377,6 +377,19 @@ group('what goes under the post');
     'the comment ask comes before the link',
     tiktok.indexOf(dress.engage) < tiktok.indexOf(brickConfig().caption.cta)
   );
+  ok('and a reason to follow', Boolean(dress.follow) && tiktok.includes(dress.follow));
+  ok('the same reason reaches Instagram', insta.includes(dress.follow));
+  // It is the last thing said before the tags, because it is the only line
+  // about the NEXT post rather than this one.
+  ok(
+    'the reason to follow closes the caption',
+    tiktok.indexOf(dress.follow) > tiktok.indexOf(brickConfig().caption.cta)
+  );
+  eq(
+    'nothing but the separator and the tags comes after it',
+    tiktok.split('\n').slice(-3)[0],
+    dress.follow
+  );
   ok('and a separator before the tags', tiktok.includes(brickConfig().caption.separator));
   ok('no URL anywhere in it — the link lives in the bio', !/https?:\/\/|www\.|\.com|\.co\.il/i.test(tiktok));
   ok("Instagram opens with the title, because a carousel has no title field", insta.startsWith(deck.titleHe));
@@ -417,6 +430,49 @@ group('the candidate');
 }
 
 /* -------------------------------------------------------------------------- */
+group('the cover that leads with the price');
+
+{
+  const slide = (paid, listIls) => ({
+    deal: { price: paid, comparison: { ok: true, paid, listIls, saving: listIls - paid } },
+  });
+
+  const led = priceHook(slide(89, 400), { rand: () => 0 });
+  ok('a wide gap puts both numbers on the cover', led && /89₪/.test(led.hook) && /400₪/.test(led.hook), led?.hook);
+  eq('and says where it came from', led?.from, 'price');
+  ok('the shout is a phrase inside the line, or there is none', !led.emphasis || led.hook.includes(led.emphasis));
+  ok('our price is the one shouted', !led.emphasis || /89₪/.test(led.emphasis), led?.emphasis);
+  ok('no placeholder survives into the line', !/\{(ours|list)\}/.test(led.hook + (led.emphasis || '')));
+  // The numbers on the cover are the numbers on the slide under it. A cover
+  // quoting a price the post does not charge is the one failure that matters.
+  ok('the trademark cannot reach a cover', !TRADEMARK.test(led.hook));
+
+  // Every shape, not just the one the first draw happened to land on.
+  const all = brickConfig().covers.priceLines.map((_, i) =>
+    priceHook(slide(89, 400), { rand: () => i / brickConfig().covers.priceLines.length })
+  );
+  ok('every shape fills in', all.every((h) => h && /89₪/.test(h.hook) && /400₪/.test(h.hook)));
+  ok(
+    'and every one fits the cover, same limit a written hook has',
+    all.every((h) => h.hook.split(/\s+/).filter(Boolean).length <= MAX_HOOK_WORDS),
+    all.map((h) => `${h.hook.split(/\s+/).length}: ${h.hook}`).find((s) => Number(s.split(':')[0]) > MAX_HOOK_WORDS) || 'clean'
+  );
+  ok('none of them names the brand', all.every((h) => !TRADEMARK.test(h.hook)));
+
+  // When there is no number worth leading with, there is no price cover — the
+  // deck asks for a guess instead, where the contrast is whatever the viewer
+  // imagined rather than one we had to defend.
+  eq('a slide with no comparison declines', priceHook({ deal: { price: 89, comparison: { ok: false } } }), null);
+  eq('and so does a missing slide', priceHook(undefined), null);
+  eq(
+    `a gap under ${PRICE_HOOK_RATIO}x is not worth the loudest slide in the post`,
+    priceHook(slide(89, Math.floor(89 * PRICE_HOOK_RATIO) - 1), { rand: () => 0 }),
+    null
+  );
+  ok('a gap at the ratio is', Boolean(priceHook(slide(100, 250), { rand: () => 0 })));
+}
+
+/* -------------------------------------------------------------------------- */
 group('the photograph step');
 
 eq('a small model is held in the fingers', holdFor({ sizeCm: 10 }).fraction, 'most');
@@ -433,7 +489,20 @@ eq('with nothing else, the feed image is what there is', sourceFor({ image: 'ren
   const p = stillPrompt({ nameHe: 'x', sizeCm: 30, theme: 'vehicles' });
   ok('the prompt states the real size rather than guessing silently', p.includes('30 cm'));
   ok('and forbids lettering, which would put a trademark somewhere copy.js cannot see', /lettering on the model/.test(p));
-  ok('and asks for a real room rather than a studio', /bedroom/.test(p));
+  ok('and asks for a real room rather than a studio', /a real room in daylight/.test(p));
+  // A slide is watched at thumbnail size, where a dark frame is a dark smudge.
+  // The prompt used to stage the shot in a dim bedroom at night.
+  ok('the room is bright and lit by daylight', /the room is bright/.test(p) && /daylight/.test(p));
+  ok(
+    'and nothing asks for the dark any more',
+    !/at night|the room is dim|soft shadow/.test(p),
+    p.match(/at night|the room is dim|soft shadow/)?.[0] || 'clean'
+  );
+  ok('a dark scene is refused outright', /dark room/.test(p) && /underexposed/.test(p));
+  ok('and so is the model sitting in shadow', /the model sitting in shadow/.test(p));
+  // The subject is whatever the link sells. A black set is photographed black —
+  // lit and legible, not recoloured. See the note above `stillPrompt`.
+  ok('but the model still has to match the photo exactly', /matches the attached photo exactly/.test(p));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -490,11 +559,40 @@ group('the slide');
     'but the cover hook itself never does',
     !TRADEMARK.test(brickConfig().covers.lines.map((l) => l.text).join(' '))
   );
+  ok(
+    'and neither does a price-led one, which the build would throw on',
+    !TRADEMARK.test(brickConfig().covers.priceLines.map((l) => l.text).join(' '))
+  );
+
+  // A cover that already printed both numbers must not then offer to reveal
+  // the one it printed. It offers the rest of the post instead.
+  const priceCover = renderBrickSlideHtml(
+    { hookHe: 'זה עולה 89₪ במקום 419₪', emphasisHe: '89₪', image: null, priceLed: true },
+    { size: 'tiktok', cover: true }
+  );
+  ok('a price-led cover asks for the swipe differently', priceCover.includes(brickConfig().covers.swipePriceHe));
+  ok(
+    'and does not offer to reveal the number it just printed',
+    !priceCover.includes(brickConfig().covers.swipeHe)
+  );
   ok('the swipe line is quieter than the price lines', /\.swipe\s*\{[^}]*font-size:(\d+)px/.test(coverHtmlOut) &&
     Number(coverHtmlOut.match(/\.swipe\s*\{[^}]*font-size:(\d+)px/)[1]) < s.line);
 
   eq('a long hook is broken over two lines', coverClass('למה אתה עדיין משלם אלף שקל על מכונית מאבנים?'), ' long');
   eq('a short one is left on one', coverClass('שליש מהמחיר'), '');
+
+  // One number can end with the other. The cream belongs on OUR price, not on
+  // the last two digits of the list price.
+  ok(
+    'the shout lands on the whole number, not inside a bigger one',
+    /<span class="emph[^"]*">99₪<\/span>$/.test(coverHtml('במחירון 399₪. אצלי 99₪', '99₪')),
+    coverHtml('במחירון 399₪. אצלי 99₪', '99₪')
+  );
+  ok(
+    'and an emphasis that really is mid-word still highlights',
+    /emph/.test(coverHtml('שליש מהמחיר', 'מחיר')),
+    coverHtml('שליש מהמחיר', 'מחיר')
+  );
 
   const html = renderBrickSlideHtml(
     { nameHe: 'סחלב', emoji: '🌸', lines: slideLines({ ok: true, paid: 45, listIls: 269, saving: 224 }, { price: 45 }), image: null },
@@ -510,7 +608,13 @@ group('the slide');
   const ec = brickConfig().endCard;
   ok('the closing frame carries the ask', endHtml.includes(ec.askHe));
   ok('and says where to go', endHtml.includes(ec.whereHe));
+  ok('and gives a reason to follow', endHtml.includes(ec.followHe));
   ok('and prints the address', endHtml.includes(ec.siteHe));
+  // The address stays the last thing read. See the note beside `.end .follow`.
+  ok(
+    'the reason sits above the address, not under it',
+    endHtml.indexOf(ec.followHe) < endHtml.indexOf(`class="site"`)
+  );
   ok('the closing frame washes the photograph back', endHtml.includes('end-scrim'));
   ok('it carries no price block', !endHtml.includes('class="line'));
   ok('the money bag rides the saving line', html.includes('💰') || /1f4b0/.test(html));
@@ -600,10 +704,292 @@ group('the config refuses to be half-loaded');
     cfg.caption.engage.every((l) => !/(אשלח|בפרטי|בדי'אם|ד''מ|תקבלו לינק)/.test(l)),
     cfg.caption.engage.find((l) => /(אשלח|בפרטי|תקבלו לינק)/.test(l)) || 'clean'
   );
+  ok('and something to give as a reason to follow', cfg.caption.follow.length > 0);
+  // The emoji budget is three — hook, comment ask, cta pin — and the follow
+  // line is the one that reads best without one. See the note in the config.
+  ok(
+    'no reason to follow spends a fourth emoji',
+    cfg.caption.follow.every((l) => !/\p{Extended_Pictographic}/u.test(l)),
+    cfg.caption.follow.find((l) => /\p{Extended_Pictographic}/u.test(l)) || 'clean'
+  );
+  ok('the closing frame gives a reason to follow too', cfg.endCard.followHe.length > 0);
+  // A tag or a save is a fine ask and not this one. This line buys a reply in
+  // the thread, so every entry has to actually ask for one.
+  ok(
+    'every ask asks for a comment, not a tag or a save',
+    cfg.caption.engage.every((l) => /תגיבו/.test(l)),
+    cfg.caption.engage.find((l) => !/תגיבו/.test(l)) || 'clean'
+  );
   ok('the cover pool is not empty', cfg.covers.lines.length > 0);
   ok('there are enough tags to draw the configured number', cfg.hashtags.broad.length >= cfg.hashtags.broadCount);
   ok('and enough niche ones', cfg.hashtags.niche.length >= cfg.hashtags.nicheCount);
   ok('the deck size sits inside its own bounds', cfg.deck.minSlides <= cfg.deck.slides && cfg.deck.slides <= cfg.deck.maxSlides);
+}
+
+/* -------------------------------------------------------------------------- */
+group('who may sign in to the website');
+
+// The bot's Telegram lock is a one-line comparison against OWNER_ID and it is
+// tested by being impossible to get wrong. The website's door is not: it hashes,
+// it signs, it expires, and every one of those has a way to be subtly useless.
+{
+  const { hashPassword, checkPassword, checkUsername, createAdmin, setPassword, setRole, removeAdmin, signIn, session, signOutEveryone, can, ROLES } =
+    await import('../src/web/auth.js');
+
+  ok('a hash is not the password', hashPassword('correct horse battery').hash.includes('correct') === false);
+  const a = hashPassword('correct horse battery');
+  const b = hashPassword('correct horse battery');
+  ok('the same password twice gives different hashes (per-account salt)', a.hash !== b.hash);
+
+  ok('a short password is refused', Boolean(checkPassword('short')));
+  eq('twelve characters is the floor', checkPassword('123456789012'), null);
+  ok('a username with a space is refused', Boolean(checkUsername('two words')));
+  ok('a username in Hebrew is refused', Boolean(checkUsername('נתנאל')));
+  eq('a plain latin username is fine', checkUsername('netanel'), null);
+
+  const first = createAdmin({ username: 'Netanel', password: 'a-good-long-password', name: 'נתנאל', role: 'viewer' });
+  eq('a username is stored lowercased', first.username, 'netanel');
+  // The account that cannot manage accounts cannot add the second one, and there
+  // is no sign-up page to fall back to.
+  eq('the FIRST account is an owner whatever was asked for', first.role, 'owner');
+  ok('and the record handed back carries no hash', !('hash' in first) && !('salt' in first));
+
+  const second = createAdmin({ username: 'shai', password: 'another-long-password', role: 'admin' });
+  eq('the second account gets the role it asked for', second.role, 'admin');
+  throws('the same username cannot be taken twice', () => createAdmin({ username: 'shai', password: 'yet-another-password' }));
+  throws('a weak password is refused at creation', () => createAdmin({ username: 'weak', password: 'abc' }));
+
+  // Capabilities are checked by name rather than by "is not a viewer", so that
+  // adding one means naming who gets it.
+  ok('a viewer may read', can('viewer', 'read'));
+  ok('a viewer may NOT act', !can('viewer', 'act'));
+  ok('an admin may act', can('admin', 'act'));
+  ok('an admin may NOT manage accounts', !can('admin', 'accounts'));
+  ok('an owner may', can('owner', 'accounts'));
+  ok('every role is one of the three', ROLES.length === 3);
+
+  const signed = await signIn('NETANEL', 'a-good-long-password');
+  ok('signing in is case-insensitive on the username', signed.admin.username === 'netanel');
+  const live = session(signed.token);
+  ok('a fresh cookie resolves to the account', live?.username === 'netanel');
+  eq('and carries the role', live.role, 'owner');
+  ok('and a CSRF token', Boolean(live.csrf));
+
+  ok('a tampered cookie is refused', session(`${signed.token}x`) === null);
+  ok('a cookie with no signature is refused', session(signed.token.split('.')[0]) === null);
+  ok('rubbish is refused', session('nonsense') === null);
+  ok('nothing is refused', session('') === null && session(null) === null);
+
+  // The forged cookie: a valid-looking body with a signature that was never
+  // issued. This is the one a naive implementation lets through by decoding the
+  // claims before checking the MAC.
+  const forged = `${Buffer.from(JSON.stringify({ id: signed.admin.id, exp: Date.now() + 1e6, iat: Date.now() })).toString('base64url')}.deadbeef`;
+  ok('a forged cookie is refused', session(forged) === null);
+
+  let failed = null;
+  await signIn('netanel', 'wrong password entirely').catch((e) => (failed = e));
+  ok('a wrong password is refused', Boolean(failed));
+  ok('and the refusal does not say which half was wrong', !/סיסמה שגויה$/.test(failed?.message || ''));
+
+  // Resetting a password must also mean "end that person's sessions", because
+  // that is what somebody resetting a password believes they are doing.
+  setPassword('netanel', 'a-different-long-password');
+  ok('changing a password invalidates the sessions it was minted before', session(signed.token) === null);
+  const again = await signIn('netanel', 'a-different-long-password');
+  ok('and the new password works', session(again.token)?.username === 'netanel');
+
+  throws('the only owner cannot be demoted', () => setRole('netanel', 'admin'));
+  throws('the only owner cannot be removed', () => removeAdmin('netanel'));
+  setRole('shai', 'owner');
+  ok('with a second owner, the first can be demoted', Boolean(setRole('netanel', 'admin')));
+
+  signOutEveryone();
+  ok('signing everybody out invalidates every open session', session(again.token) === null);
+}
+
+/* -------------------------------------------------------------------------- */
+group('the schedule reads, rather than captures');
+
+{
+  const store = await import('../src/store.js');
+
+  // The whole point: these used to be destructured at module load, so a change
+  // took effect at the next deploy.
+  const before = store.setting('POST_INTERVAL_MINUTES');
+  ok('a dial has a value with nothing stored', Number.isFinite(before));
+  eq('setting one returns what was stored', store.setSetting('POST_INTERVAL_MINUTES', 90), 90);
+  eq('and reading it back agrees', store.setting('POST_INTERVAL_MINUTES'), 90);
+
+  throws('a value below the floor is refused', () => store.setSetting('POST_INTERVAL_MINUTES', 1));
+  throws('a value above the ceiling is refused', () => store.setSetting('POST_INTERVAL_MINUTES', 99999));
+  throws('a value that is not a number is refused', () => store.setSetting('POST_INTERVAL_MINUTES', 'soon'));
+  throws('an unknown dial is refused', () => store.setSetting('TG_BOT_TOKEN', 'nice try'));
+
+  const report = store.settingsReport().find((d) => d.key === 'POST_INTERVAL_MINUTES');
+  eq('the report says where the value came from', report.source, 'stored');
+  store.setSetting('POST_INTERVAL_MINUTES', null);
+  eq('clearing a dial falls back', store.settingsReport().find((d) => d.key === 'POST_INTERVAL_MINUTES').source !== 'stored', true);
+
+  // Clamped on READ rather than rejected, because a value that got in out of
+  // range by some other route must not take the drip timer to NaN.
+  ok('a dial is clamped on read, never NaN', Number.isFinite(store.setting('DECKS_PER_DAY')));
+}
+
+/* -------------------------------------------------------------------------- */
+group('one action, two surfaces');
+
+{
+  const store = await import('../src/store.js');
+  const ops = await import('../src/ops/marketing.js');
+  const views = await import('../src/ops/views.js');
+  const { detach: detachSurface } = await import('../src/ops/surface.js');
+  // No Telegram in a test, which is the point of the surface being injected: the
+  // whole approval path runs without a bot token and without pretending to have a
+  // chat.
+  detachSurface();
+
+  const fakeDeck = (headline, targets = ['instagram']) => ({
+    kind: 'deck',
+    id: `test-${headline}`,
+    headline,
+    publishTargets: targets,
+    tiktokDraft: targets.includes('tiktok'),
+    deck: {
+      subject: headline,
+      hookHe: 'שער כלשהו',
+      recipe: 'savings',
+      slides: [{ nameHe: 'סט', productId: 'p1', emoji: '🧱', deal: { price: 100 } }],
+      preview: [],
+    },
+  });
+
+  const { key } = await ops.stage(fakeDeck('בדיקה'), { actor: { kind: 'web', name: 'טסט' } });
+  eq('staging puts one item in front of somebody', store.stagingSize(), 1);
+  eq('and the pending view can see it', views.pending().staged.length, 1);
+  eq('with its headline', views.pending().staged[0].headline, 'בדיקה');
+
+  const approved = await ops.approve(key, { actor: { kind: 'web', name: 'טסט' } });
+  ok('approving succeeds', approved.ok);
+  eq('and the post is now in the queue', store.queueSize(), 1);
+  eq('and no longer waiting', store.stagingSize(), 0);
+
+  // The race that matters. Two admins on one queue means a second tap on the same
+  // card is normal, not exotic — takeStaging is atomic, so the second caller must
+  // get "already handled" rather than a second publish.
+  const twice = await ops.approve(key, { actor: { kind: 'telegram', name: 'שוב' } });
+  ok('approving the same thing twice is refused', !twice.ok);
+  eq('and says so plainly', twice.reason, 'gone');
+  eq('the queue did not grow', store.queueSize(), 1);
+
+  // Rejecting refunds the day's quota slot. Without that, three rejections at
+  // breakfast ended the day: remaining hit zero and nothing could publish.
+  const day = ops.localDay();
+  const { key: key2 } = await ops.stage(fakeDeck('לדחייה'));
+  store.noteStaged(day);
+  const before = store.rejectedToday(day);
+  await ops.reject(key2, { actor: { kind: 'web', name: 'טסט' } });
+  eq('rejecting gives the day its quota slot back', store.rejectedToday(day), before + 1);
+
+  eq('the queue view numbers from 1, the way the list is read', views.queue()[0]?.n, 1);
+  ok('and names where it will actually go', views.queue()[0]?.targets.includes('instagram'));
+
+  // Every action leaves a name behind, because there is now more than one person
+  // who could have taken it.
+  const trail = store.auditTrail({ limit: 20 });
+  ok('the audit trail recorded the approval', trail.some((t) => t.action === 'approved'));
+  ok('with who did it', trail.find((t) => t.action === 'approved')?.actor?.name === 'טסט');
+  ok('and from which surface', trail.find((t) => t.action === 'approved')?.actor?.kind === 'web');
+  eq('the trail is newest first', trail[0].ts >= trail[trail.length - 1].ts, true);
+
+  eq('an actor is described with its surface', ops.describeActor({ kind: 'web', name: 'נתנאל' }), 'נתנאל · מהאתר');
+  eq('the timer is not a person', ops.describeActor({ kind: 'timer' }), 'אוטומטי');
+
+  store.clearQueue();
+  store.clearStaging();
+}
+
+/* -------------------------------------------------------------------------- */
+group('editing the copy cannot break the copy');
+
+{
+  const settings = await import('../src/ops/settings.js');
+  const { brickConfig: reread, __reset } = await import('../src/brick/config.js');
+
+  const original = settings.readRaw();
+  ok('the current file can be read', original.length > 100);
+
+  throws('a save that is not JSON is refused', () => settings.writeRaw('{ not json'));
+  eq('and the file is untouched', settings.readRaw(), original);
+
+  // The one that matters. This IS valid JSON, so a naive editor accepts it — and
+  // src/brick/config.js throws on an empty caption pool, which means the next
+  // build dies with no way to fix it from the page that broke it.
+  const emptied = JSON.stringify({ ...JSON.parse(original), caption: { lines: [] } });
+  throws('a save that is valid JSON but fails validation is refused', () => settings.writeRaw(emptied));
+  eq('and the previous file was put back', settings.readRaw(), original);
+  __reset();
+  ok('so the config still loads after a rejected save', Boolean(reread().caption.lines.length));
+
+  // A real change goes through, and takes effect without a restart — which is
+  // the cache invalidation, and the thing most likely to be forgotten.
+  const changed = JSON.parse(original);
+  changed.labels = { ...changed.labels, saving: 'חוסכים' };
+  const saved = settings.writeRaw(JSON.stringify(changed, null, 2));
+  eq('a valid save is applied', saved.labels.saving, 'חוסכים');
+  eq('and takes effect immediately, with no restart', reread().labels.saving, 'חוסכים');
+  ok('and the previous version is kept to go back to', settings.readBackup() !== null);
+
+  settings.writeRaw(settings.readBackup());
+  eq('restoring the backup works', reread().labels.saving, JSON.parse(original).labels.saving);
+}
+
+/* -------------------------------------------------------------------------- */
+group('jobs and the bus');
+
+{
+  const bus = await import('../src/ops/bus.js');
+  const jobs = await import('../src/ops/jobs.js');
+  jobs.__reset();
+
+  const seen = [];
+  const off = bus.subscribe((e) => seen.push(e.type));
+  bus.emit('test:one', {});
+  // A subscriber that throws must not unwind the action that emitted — by then
+  // the store has usually already been written.
+  const offBad = bus.subscribe(() => {
+    throw new Error('a browser went away mid-write');
+  });
+  bus.emit('test:two', {});
+  offBad();
+  off();
+  ok('subscribers hear events', seen.includes('test:one') && seen.includes('test:two'));
+  ok('a throwing subscriber does not stop the emit', bus.lastId() >= 2);
+  ok('and a client can catch up on what it missed', bus.since(0).length >= 2);
+
+  const done = jobs.run('משהו', async (progress) => {
+    progress('חצי דרך');
+    return { ok: true, message: 'נגמר' };
+  });
+  eq('a job starts running', done.status, 'running');
+  await new Promise((r) => setTimeout(r, 30));
+  eq('and finishes', jobs.get(done.id)?.status, 'done');
+  eq('carrying its result', jobs.get(done.id)?.result?.message, 'נגמר');
+
+  const boom = jobs.run('נשבר', async () => {
+    throw new Error('נפל');
+  });
+  await new Promise((r) => setTimeout(r, 30));
+  eq('a failed job is recorded as failed', jobs.get(boom.id)?.status, 'failed');
+  eq('with the reason', jobs.get(boom.id)?.error, 'נפל');
+
+  // A synchronous throw has to land in the same place. On the Telegram path the
+  // caller is an update handler, and a throw that escapes it restarts the process.
+  const sync = jobs.run('נשבר מיד', () => {
+    throw new Error('מיד');
+  });
+  await new Promise((r) => setTimeout(r, 30));
+  eq('a job that throws synchronously fails rather than escaping', jobs.get(sync.id)?.status, 'failed');
+  eq('nothing is left running', jobs.running(), 0);
 }
 
 /* -------------------------------------------------------------------------- */

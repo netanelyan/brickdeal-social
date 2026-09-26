@@ -116,10 +116,24 @@ export function holdFor({ sizeCm, theme }) {
 /**
  * The still prompt, filled in.
  *
- * Reproduced from the skill verbatim apart from the substitutions. The `Avoid:`
- * list is the longest part of it and the most load-bearing: it is what stops
- * the output reading as a 3D render, which is the default failure mode when you
- * ask an image model for a photograph of a plastic model.
+ * Reproduced from the skill apart from the substitutions and the light. The
+ * `Avoid:` list is the longest part of it and the most load-bearing: it is what
+ * stops the output reading as a 3D render, which is the default failure mode
+ * when you ask an image model for a photograph of a plastic model.
+ *
+ * THE ONE DELIBERATE DEPARTURE FROM THE SKILL IS THE LIGHT. It staged the shot
+ * in a bedroom at night with the room dim and the model the only lit thing in
+ * it, which is a genuinely good-looking photograph and the wrong one for this.
+ * A slide is watched at thumbnail size in a feed, where a dark frame is a dark
+ * smudge that gets scrolled past before the set in it is legible, and the type
+ * laid over it has to fight the one bright area for the same attention. So the
+ * room is bright and the light is daylight.
+ *
+ * WHAT DID NOT CHANGE IS THE MODEL ITSELF. A set that is black is photographed
+ * black — the whole pipeline exists to show the thing the link sells, and rule
+ * 1 above outranks how a frame looks. What the prompt asks for is that a dark
+ * set be lit and legible rather than sitting in shadow, which is a lighting
+ * instruction; "make the subject brighter" would be a different set.
  *
  * `no text, watermark, brand names, logos, lettering on the model` is in there
  * twice over for a reason that is ours rather than the skill's — a generated
@@ -131,7 +145,7 @@ export function stillPrompt({ nameHe, sizeCm, theme, colours = 'the colours and 
   const length = sizeCm ? `${Math.round(sizeCm)} cm` : 'about 25 cm';
   const handed = !hold.includes('NO HAND');
 
-  return `Using the brick-built model in the attached photo, generate a photorealistic vertical 9:16 photo, shot casually on an iPhone in a bedroom at night.
+  return `Using the brick-built model in the attached photo, generate a photorealistic vertical 9:16 photo, shot casually on an iPhone in a bright room during the day.
 
 ${hold}${
     handed
@@ -149,15 +163,15 @@ The model matches the attached photo exactly: ${colours}, matte plastic with sha
 
 Framing: the camera is at the model's own height, looking straight at its side, not down at it. The model is the subject, filling about two thirds of the frame width, entirely inside the frame, positioned slightly off center. The camera is not perfectly level, tilted a degree or two, the way a person holds a phone.
 
-Background: a real bedroom at night, tidy but unplanned, photographed from an angle rather than straight on, so the furniture runs at a slight diagonal and objects are partly cut off by the edges of the frame. Ordinary things a person has, a wardrobe, a shelf, a desk edge, a chair, arranged by life and not by a photographer. Nothing centered behind the model, nothing symmetrical, nothing that looks placed for the shot.
+Background: a real room in daylight, tidy but unplanned, photographed from an angle rather than straight on, so the furniture runs at a slight diagonal and objects are partly cut off by the edges of the frame. Ordinary things a person has in a bright home, a pale wall, a shelf, a desk edge, a chair, arranged by life and not by a photographer. Nothing centered behind the model, nothing symmetrical, nothing that looks placed for the shot.
 
-Light: the room is dim. No lamp in the frame, no bright glow or hotspot on the wall, no light source behind the model. The background sits in soft shadow with only a faint cool glow off to one side. The model is the brightest thing in the photo, lit softly from the front, from the camera side.
+Light: the room is bright, full of soft daylight from a window off to one side and slightly in front of the model. Everything in the frame is clearly lit and easy to read, with open, gentle shadows and no dark corners. The model is still the brightest thing in the photo, lit softly from the front, from the camera side. No window or lamp visible in the frame, no hotspot or glare on the wall, no light source behind the model.
 
 Focus: the model and hand are perfectly sharp. The background is clearly out of focus with soft, even blur, objects reading as simple shapes but not melted into abstract color. Natural lens falloff, not a cutout effect.
 
-Slightly uneven exposure, faint sensor noise in the shadows, no color grading, no studio lighting. Looks like a real photo someone took at home, calm and quiet, not a product advertisement.
+Slightly uneven exposure on the bright side, clean shadows, no color grading, no studio lighting. Looks like a real photo someone took at home on a bright afternoon, calm and quiet, not a product advertisement.
 
-Avoid: smoothed or melted brick surfaces, rounded soft edges, 3D render look, CGI look, high camera angle, looking down at the model, visible roof or top, small toy scale, symmetrical composition, centered background object, staged scene, empty grey wall, studio look, bright background, lamp in frame, glowing wall, backlight, messy clutter, sharp background, portrait mode cutout, floating model, cropped model, text, watermark, brand names, logos, lettering on the model${
+Avoid: smoothed or melted brick surfaces, rounded soft edges, 3D render look, CGI look, high camera angle, looking down at the model, visible roof or top, small toy scale, symmetrical composition, centered background object, staged scene, empty grey wall, studio look, blown-out background, window in frame, lamp in frame, glowing wall, backlight, night, evening, dark room, dim light, low light, moody lighting, underexposed, dark shadows, heavy shadows, dark walls, dark furniture, dark surface under the model, dark or black background, the model sitting in shadow, messy clutter, sharp background, portrait mode cutout, floating model, cropped model, text, watermark, brand names, logos, lettering on the model${
     handed
       ? ', oversized hand, hand close to the camera, forearm, arm, elbow, deformed hand, extra fingers, two hands, open flat hand with the model merely resting on it, hand lying beside the model instead of holding it'
       : ', hand, hands, fingers, thumb, wrist, arm, any part of a person, anybody holding the model'
@@ -306,13 +320,35 @@ export async function verifySameModel(sourceUrl, generatedBase64, mime = 'image/
   }
 }
 
-// The aspect ratio is part of the cache key, so changing it invalidates the
-// cache instead of silently serving pictures cut to the old shape. Every shot
-// on disk when this was written was 1024x1024, and without this they would have
-// outlived the fix — a cached square is indistinguishable from a fresh one to
-// everything downstream.
+/**
+ * What makes a cached shot the same shot.
+ *
+ * The aspect ratio is in here so that changing it invalidates the cache instead
+ * of silently serving pictures cut to the old shape. Every shot on disk when
+ * that was written was 1024x1024, and without it they would have outlived the
+ * fix — a cached square is indistinguishable from a fresh one to everything
+ * downstream.
+ *
+ * LOOK is the same argument applied to the prompt, and it was added the first
+ * time the prompt changed what the photograph looks like rather than what is in
+ * it. The shots were staged in a dim bedroom at night and are now staged in
+ * daylight; nothing about a cached file records which of the two it is, so
+ * without a token in the key the change would have applied only to sets nobody
+ * had posted yet and the feed would have gone out half dark, indefinitely,
+ * with every file looking perfectly valid.
+ *
+ * BUMP IT WHENEVER AN EDIT TO `stillPrompt` CHANGES THE PICTURE. It is a
+ * deliberate re-spend: every set costs one more generation the next time it is
+ * used. That is the price of the edit actually taking effect, and it is smaller
+ * than it looks — only sets that come round again are ever paid for.
+ */
+const LOOK = 'bright1';
+
 const cacheStem = (productId, n = 1) =>
-  join(CACHE_DIR, `${String(productId).replace(/[^\w.-]/g, '-')}-${n}-${ASPECT_RATIO.replace(':', 'x')}`);
+  join(
+    CACHE_DIR,
+    `${String(productId).replace(/[^\w.-]/g, '-')}-${n}-${ASPECT_RATIO.replace(':', 'x')}-${LOOK}`
+  );
 
 /**
  * The type the bytes really are, read from the bytes.

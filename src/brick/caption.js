@@ -5,8 +5,8 @@ import { THEME_HE } from './themes.js';
 // What goes under the post.
 //
 // The reference's shape exactly: one or two sentences, the call to the
-// community, a separator line, then five hashtags. Two or three emoji in the
-// whole thing and no more.
+// community, the reason to follow, a separator line, then five hashtags. Two or
+// three emoji in the whole thing and no more.
 //
 // The one thing it deliberately does NOT carry is a link, and that is enforced
 // twice over rather than trusted. The community is reachable from the bio,
@@ -101,12 +101,34 @@ export const dressing = (deck, { rand = Math.random } = {}) => ({
   // captionFor would give Instagram one ask and TikTok another — one post
   // wearing two faces.
   engage: engageAsk({ rand }),
+  // Drawn here for the same reason, and see `followReason` for why it is drawn
+  // at all rather than written once into `cta`.
+  follow: followReason({ rand }),
   tags: hashtagsFor(deck, { rand }),
 });
 
 /** The ask for a comment, or '' when the pool is empty. */
 export const engageAsk = ({ rand = Math.random } = {}) => {
   const pool = brickConfig().caption.engage || [];
+  return pool.length ? pool[Math.floor(rand() * pool.length)] : '';
+};
+
+/**
+ * Why somebody should follow, or '' when the pool is empty.
+ *
+ * A pool rather than one fixed line, drawn per post like the hook and the
+ * comment ask. The account's whole argument is that there is ANOTHER post
+ * coming with more sets in it, and the same sentence under every post stops
+ * being read by exactly the people who see every post — the ones already
+ * following are not the audience for it, but the ones who have scrolled past
+ * three of these this week are, and they will have read it three times.
+ *
+ * It is a reason and not an instruction. "עוקבים?" on its own asks for
+ * something and offers nothing; every line here names what the next post
+ * contains, which is the only honest argument for following a feed.
+ */
+export const followReason = ({ rand = Math.random } = {}) => {
+  const pool = brickConfig().caption.follow || [];
   return pool.length ? pool[Math.floor(rand() * pool.length)] : '';
 };
 
@@ -118,20 +140,38 @@ export const engageAsk = ({ rand = Math.random } = {}) => {
  * and wrong for a deck going to two places, so every caller with two
  * destinations passes both.
  */
-export function captionFor(deck, { hook, tags, engage, rand = Math.random } = {}) {
+export function captionFor(deck, { hook, tags, engage, follow, rand = Math.random } = {}) {
   const cfg = brickConfig().caption;
-  const drawn = hook != null && tags != null ? { hook, tags, engage } : dressing(deck, { rand });
-  // Three lines before the tags, in the order they are worth something.
+  const drawn =
+    hook != null && tags != null ? { hook, tags, engage, follow } : dressing(deck, { rand });
+  // Four lines before the tags, in the order they are worth something.
   //
   // The hook says what this is. THE ENGAGEMENT ASK comes next, because it is
   // the cheapest thing a viewer can do and the only one that happens without
-  // leaving the post. The link CTA goes last: it converts, but whoever taps it
-  // is gone, so it should not be the first thing offered.
+  // leaving the post. The link CTA goes last of the two asks that cost
+  // something: it converts, but whoever taps it is gone, so it should not be
+  // the first thing offered.
+  //
+  // THE REASON TO FOLLOW closes the caption, under the link and immediately
+  // above the tags. Last because it is the only line about the NEXT post rather
+  // than this one, and a reader who has got that far has finished with this one
+  // — which is the moment the argument for another one is worth making. It sits
+  // below the link rather than above it deliberately: the link leaves the app,
+  // the follow does not, so it is the thing still standing for a viewer who
+  // read the CTA and did not tap it.
   //
   // On its own line rather than run together with the hook. Two asks in one
   // sentence read as neither.
   const ask = engage !== undefined ? engage : drawn.engage;
-  const text = [hook ?? drawn.hook, ask, cfg.cta, cfg.separator, (tags ?? drawn.tags).join(' ')]
+  const reason = follow !== undefined ? follow : drawn.follow;
+  const text = [
+    hook ?? drawn.hook,
+    ask,
+    cfg.cta,
+    reason,
+    cfg.separator,
+    (tags ?? drawn.tags).join(' '),
+  ]
     .filter(Boolean)
     .join('\n');
   return assertCopy(assertNoUrl(text, 'the caption'), 'the caption');

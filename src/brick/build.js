@@ -4,7 +4,7 @@ import { loadDeals } from './feed.js';
 import { lookup as bricksetLookup, compare, configured as bricksetConfigured } from './rrp.js';
 import { rateToIls } from './fx.js';
 import { brickConfig } from './config.js';
-import { slideLines, assertCopy, CopyError } from './copy.js';
+import { slideLines, assertCopy, CopyError, shekels } from './copy.js';
 import { emojiFor } from './emoji.js';
 import { available, priceRoundup, themeRoundup, singleSet, oneListingPerSet } from './recipes.js';
 import { THEME_HE } from './themes.js';
@@ -202,6 +202,70 @@ export async function draftHook(recipe, { rand = Math.random, avoid = [] } = {})
     if (e instanceof CopyError) return { ...fallback(), from: `pool (model said: ${e.reason})` };
     return fallback();
   }
+}
+
+/**
+ * How much cheaper the number has to be before it is allowed to be the cover.
+ *
+ * A cover that says "89₪ במקום 110₪" is a true sentence and a bad hook: the gap
+ * is the entire argument, and one small enough to shrug at spends the loudest
+ * slide in the post making the case look weak. Below this the deck falls back
+ * to asking the viewer to guess, where the contrast is whatever they imagined
+ * rather than a number we had to defend.
+ *
+ * Two and a half, because the account's own claim is "a third of the price".
+ */
+export const PRICE_HOOK_RATIO = 2.5;
+
+/**
+ * The cover line for a post that leads with the deal.
+ *
+ * Built from the numbers rather than written by a model, and that is the whole
+ * design. Everywhere else a hook is a sentence about the post and a model is
+ * the right tool for it; here the hook is two prices, and the one failure that
+ * matters — a cover stating a number the slides do not — is exactly the failure
+ * a language model cannot be relied on not to produce. So the shapes are
+ * hand-written in the config with `{ours}` and `{list}` in them, and the only
+ * thing chosen at run time is which shape and which numbers.
+ *
+ * IT TAKES THE SLIDE, NOT THE RECIPE, and that is not incidental. The cover
+ * carries `deck.slides[0].image` — the first slide's photograph — so the set on
+ * screen when the line is read is that slide's set. Built from the recipe it
+ * would quote the first DEAL, which is the same set right up until a
+ * photograph fails and that deal is dropped, and then the cover is a price
+ * label on a picture of something else.
+ *
+ * Returns null rather than something weaker, for every reason it can: no
+ * comparison, a gap too small to be worth shouting, or no shapes configured.
+ * The caller then drafts an ordinary hook, which is not a fallback so much as
+ * the other half of the rotation.
+ */
+export function priceHook(slide, { rand = Math.random } = {}) {
+  const shapes = brickConfig().covers.priceLines;
+  if (!shapes.length) return null;
+
+  const cmp = slide?.deal?.comparison;
+  if (!cmp?.ok) return null;
+
+  const ours = Number(cmp.paid ?? slide.deal.price);
+  const list = Number(cmp.listIls);
+  if (!Number.isFinite(ours) || !Number.isFinite(list) || ours <= 0) return null;
+  if (list < ours * PRICE_HOOK_RATIO) return null;
+
+  const shape = shapes[Math.floor(rand() * shapes.length)];
+  // Both halves, or the emphasis stops matching the line it came from and the
+  // renderer finds nothing to colour — the same failure draftHook throws a
+  // model hook away for.
+  const fill = (s) => String(s || '').replaceAll('{ours}', shekels(ours)).replaceAll('{list}', shekels(list));
+
+  const hook = assertCopy(fill(shape.text), 'the price cover line');
+  const emphasis = shape.emphasis ? assertCopy(fill(shape.emphasis), 'the price cover emphasis') : null;
+  return {
+    hook,
+    emphasis: emphasis && hook.includes(emphasis) ? emphasis : null,
+    title: null,
+    from: 'price',
+  };
 }
 
 /**
@@ -442,11 +506,36 @@ export async function buildProposed(proposal, { wantImages = true, onProgress = 
     slides: proposal.slideSpecs,
   };
 
-  onProgress?.('cover');
-  const { hook, emphasis, title, from } = await draftHook(ready, { rand });
-
+  // THE PHOTOGRAPHS COME FIRST NOW, and the cover after them. It used to be the
+  // other way round and the order was arbitrary then — the hook did not depend
+  // on anything the slides produced. It does now: a price-led cover quotes the
+  // first SLIDE, which is only the first deal until a photograph fails and that
+  // deal is dropped. See `priceHook`.
   onProgress?.('photographs');
   const { slides, dropped } = await buildSlides(ready, { wantImages, onProgress });
+
+  onProgress?.('cover');
+  // Some posts lead with the deal, the rest ask the viewer to guess it.
+  //
+  // Both shapes work and they work on different people. A number on the cover
+  // is the account's whole argument in the first second, which is the right
+  // thing to show somebody who has never seen this feed; asking for a guess
+  // makes them swipe to find out, which is worth more from somebody who has.
+  // Neither is good enough to be every post — a feed of price tags reads as a
+  // shop and a feed of riddles never quite says what it is selling — so it is
+  // a coin weighted by `covers.priceLedShare`.
+  //
+  // The draw happens even when the price hook then declines, so that the share
+  // means what it says: a run of decks whose first slide has no comparison
+  // does not make the NEXT one more likely to lead with a price.
+  const wantPrice = rand() < brickConfig().covers.priceLedShare;
+  const led = wantPrice ? priceHook(slides[0], { rand }) : null;
+  // Only the hook is taken from it. The title is what the queue and the
+  // Instagram caption call this post, it is not on a slide, and "89₪ במקום
+  // 400₪" is a useless name for a post about six sets.
+  const { hook, emphasis, title, from } = led
+    ? { ...led, title: ready.subject, from: 'price' }
+    : await draftHook(ready, { rand });
 
   return {
     kind: 'brick',
