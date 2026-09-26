@@ -93,7 +93,7 @@ export function brickConfig() {
       widthPct: num(ov.widthPct, 0.84),
       emphasis: String(ov.emphasis || '#F7E3A1'),
     },
-    covers: { lines: coverLines },
+    covers: { lines: coverLines, swipeHe: String(raw.covers?.swipeHe || '').trim() },
     caption: {
       lines: captionLines,
       cta: String(raw.caption?.cta || '').trim(),

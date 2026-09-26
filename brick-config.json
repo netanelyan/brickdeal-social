@@ -135,7 +135,23 @@
       "כמה *באמת* צריך לשלם על סט כזה?",
       "עשיתי את החישוב *ונדהמתי*",
       "זה אותו דגם. *זה לא אותו מחיר.*"
-    ]
+    ],
+    "_swipeComment": [
+      "The line under the hook that asks for the swipe.",
+      "",
+      "A cover asks a question and then has to give somebody something to DO",
+      "with it. Without this the first slide is a rhetorical question on a",
+      "photograph, and the swipe rate is whatever curiosity alone buys.",
+      "",
+      "Quieter and smaller than the hook on purpose. It is an instruction, not",
+      "the argument - if it competes with the question for attention it has",
+      "taken the attention the question needed.",
+      "",
+      "The arrow points LEFT because these slides are Hebrew: in a right to",
+      "left post the next thing is to the left. Set it to an empty string to",
+      "turn the line off entirely."
+    ],
+    "swipeHe": "החליקו לכל המחירים ←"
   },
 
   "caption": {
@@ -178,7 +194,7 @@
       "",
       "Three lines and no more. The ask, where to go, and the address."
     ],
-    "askHe": "אני מוצא. אתם בונים.",
+    "askHe": "בדקתי בשבילכם את כולם",
     "whereHe": "כל הקישורים בקהילה בטלגרם",
     "siteHe": "brickdealil.com"
   },

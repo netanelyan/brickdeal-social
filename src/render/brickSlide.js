@@ -320,6 +320,25 @@ body { position:relative; }
   direction:ltr;
 }
 
+/* The swipe line, under the hook.
+
+   Small, and set below the line rather than beside it. Two things are being
+   asked for on this frame and only one of them can be loud: the question is
+   what stops the scroll, and an instruction competing with it for attention
+   has taken the attention the question needed to work.
+
+   No chip, no pill, no rounded box behind it — the anatomy at the top of this
+   file rules those out for the whole format, and an instruction is exactly
+   where a template would reach for one. It is type, at 0.78 of a price line,
+   a little transparent, with room above it so it reads as a separate beat
+   rather than a third line of the hook. */
+.swipe {
+  font-size:${Math.round(scale.line * 0.78)}px;
+  margin-top:${Math.round(scale.line * 1.15)}px;
+  opacity:0.82;
+  letter-spacing:0.01em;
+}
+
 /* A long hook, broken deliberately rather than left to run.
 
    The block is 84% of the frame, which a 44-character question fits on one
@@ -415,7 +434,13 @@ export function renderBrickSlideHtml(slide, { size = 'tiktok', cover = false, en
     // The hook, and nothing else. No price block on a cover: the first slide's
     // whole job is to stop the scroll, and a number there answers the question
     // the next four slides are for.
-    body = `<div class="cover${coverClass(slide.hookHe)}">${coverHtml(slide.hookHe, slide.emphasisHe)}</div>`;
+    // The hook, then the swipe. A question with nothing to do about it is a
+    // rhetorical question on a photograph; this is the line that turns it into
+    // the first step of something.
+    const swipe = brickConfig().covers.swipeHe;
+    body =
+      `<div class="cover${coverClass(slide.hookHe)}">${coverHtml(slide.hookHe, slide.emphasisHe)}</div>` +
+      (swipe ? `<div class="swipe">${escapeHtml(swipe)}</div>` : '');
   } else {
     const name =
       escapeHtml(slide.nameHe) + (slide.emoji ? emojiHtml(slide.emoji, { size: '0.9em' }) : '');

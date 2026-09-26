@@ -429,6 +429,17 @@ group('the slide');
   eq('a clean name is left alone', repairGeresh('מכונית ספורט שחורה'), 'מכונית ספורט שחורה');
   eq('and a prefix letter is not a lost geresh', repairGeresh('ה מכונית'), 'ה מכונית');
 
+  // The cover asks for the swipe, and asks quieter than it asks the question.
+  const coverHtmlOut = renderBrickSlideHtml(
+    { hookHe: 'כמה באמת צריך לשלם?', emphasisHe: 'באמת', image: null },
+    { size: 'tiktok', cover: true }
+  );
+  const plainSlide = renderBrickSlideHtml({ nameHe: 'סחלב', emoji: '🌸', lines: [], image: null }, { size: 'tiktok' });
+  ok('the cover asks for the swipe', coverHtmlOut.includes(brickConfig().covers.swipeHe));
+  ok('and a product slide does not', !plainSlide.includes(brickConfig().covers.swipeHe));
+  ok('the swipe line is quieter than the price lines', /\.swipe\s*\{[^}]*font-size:(\d+)px/.test(coverHtmlOut) &&
+    Number(coverHtmlOut.match(/\.swipe\s*\{[^}]*font-size:(\d+)px/)[1]) < s.line);
+
   eq('a long hook is broken over two lines', coverClass('למה אתה עדיין משלם אלף שקל על מכונית מאבנים?'), ' long');
   eq('a short one is left on one', coverClass('שליש מהמחיר'), '');
 
