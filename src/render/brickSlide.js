@@ -1,4 +1,11 @@
-import { palette, rubikDataUri, escapeHtml } from './theme.js';
+import {
+  palette,
+  tiktokSansDataUri,
+  arimoDataUri,
+  assistantDataUri,
+  heeboDataUri,
+  escapeHtml,
+} from './theme.js';
 import { emojiHtml } from './emojiArt.js';
 import { brickConfig } from '../brick/config.js';
 import { priceLineHtml } from '../brick/copy.js';
@@ -106,6 +113,23 @@ const photoTag = (image) =>
 const strokeCss = (visible, shadow) =>
   `paint-order:stroke fill;-webkit-text-stroke:${visible * 2}px rgba(0,0,0,0.85);text-shadow:${shadow};`;
 
+/**
+ * The stack, and the order is the whole of it.
+ *
+ * TikTok Sans first. It has no Hebrew, which is the point: it takes the digits,
+ * the ₪ and any stray Latin in a set name — on a slide whose middle three lines
+ * are prices, that is most of the characters on the frame — and every Hebrew
+ * letter falls past it, glyph by glyph, into Arimo. The app behaves the same
+ * way: its own text tool has no Hebrew in this face either and hands those
+ * letters to the phone.
+ *
+ * Assistant and Heebo sit behind Arimo so that a face which fails to parse
+ * degrades to legible-but-wrong rather than to tofu — and render/index.js
+ * refuses the render in that case anyway, so this is the second line of defence
+ * rather than the first.
+ */
+const STACK = `'TikTok Sans', 'Arimo', 'Assistant', 'Heebo', sans-serif`;
+
 function css(size, scale) {
   const { w, h } = size;
   const ov = scale.ov;
@@ -113,11 +137,45 @@ function css(size, scale) {
   const side = Math.round(ov.sidePct * w);
 
   return `
+/* The same four faces the travel channel's slides are set in, declared in the
+   order they are reached.
+
+   Each range below is the range the bundled FILE has. Declaring a range wider
+   than the file covers is not harmless: it tells Chromium this face can serve
+   the requested weight, so the weight is silently ignored rather than
+   synthesised, and the type comes out lighter than the CSS says. Arimo is the
+   one that matters — a single static SemiBold, declared as the 600 it is.
+
+   font-display is block rather than the default swap. A swap period means
+   Chromium is allowed to paint the fallback first, and the screenshot is taken
+   as soon as the page settles; blocking makes that race impossible. */
 @font-face {
-  font-family: 'Rubik';
-  src: url('${rubikDataUri()}') format('truetype');
+  font-family: 'TikTok Sans';
+  src: url('${tiktokSansDataUri()}') format('truetype');
   font-weight: 300 900;
   font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'Arimo';
+  src: url('${arimoDataUri()}') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'Assistant';
+  src: url('${assistantDataUri()}') format('truetype');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'Heebo';
+  src: url('${heeboDataUri()}') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 html, body { width:${w}px; height:${h}px; overflow:hidden; background:${palette.ink}; }
@@ -163,7 +221,7 @@ body { position:relative; }
   margin-inline:auto;
   direction:rtl;
   text-align:${ov.align};
-  font-family:'Rubik', sans-serif;
+  font-family:${STACK};
   font-weight:${ov.weight};
   line-height:${ov.lineHeight};
   color:#fff;
@@ -212,7 +270,7 @@ body { position:relative; }
   bottom:${watermarkBottom(size)}px;
   text-align:center;
   direction:rtl;
-  font-family:'Rubik', sans-serif;
+  font-family:${STACK};
   font-weight:600;
   font-size:${scale.watermark}px;
   color:rgba(255,255,255,${wm.opacity});

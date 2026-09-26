@@ -43,9 +43,12 @@ export async function renderBrickDeckSize(deck, { size = 'tiktok', outDir = card
       width: w,
       height: h,
       outDir,
-      // Rubik carries every word on these slides. Naming it is what stops the
-      // guard proving that a font the page never uses did or did not load.
-      face: 'Rubik',
+      // Arimo carries every Hebrew word on these slides, and the guard measures
+      // Hebrew — so this has to be Arimo and not TikTok Sans, which is first in
+      // the stack but has no Hebrew in it at all. Naming the face is what stops
+      // the guard proving that a font the page never draws with did or did not
+      // load; naming the wrong one would have it prove nothing while passing.
+      face: 'Arimo',
     });
     out.push({
       ...rendered,

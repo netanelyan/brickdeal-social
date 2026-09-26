@@ -126,9 +126,9 @@ export async function renderToJpeg(
     //
     // It was hardcoded to Heebo, from when Heebo carried all the Hebrew on
     // every surface. It no longer does: a BrickDeal slide sets its Hebrew in
-    // Rubik and declares nothing else, so the hardcoded check refused to render
-    // a page that was perfectly correct — the guard against a silent failure
-    // failing loudly on the wrong thing.
+    // Arimo, with Heebo declared only as the last fallback under it, so the
+    // hardcoded check would prove a face the page never draws with — the guard
+    // against a silent failure, passing silently.
     //
     // Naming the face rather than guessing it keeps the check exactly as strict
     // as it was. What it must never become is "some font loaded", which is the
@@ -184,8 +184,9 @@ export async function renderToJpeg(
         //
         // The check above was written when Heebo carried all the Hebrew and it
         // still earns its place — it proves a font reached the page at all. But
-        // the slides now set Hebrew in Assistant and the info style sets it in
-        // Rubik, and a face that fails to PARSE falls through to the next
+        // the slides now declare four faces and draw with two of them, TikTok
+        // Sans on the digits and Arimo on the Hebrew, and a face that fails to
+        // PARSE falls through to the next
         // family silently: the render succeeds, the text is legible, and it is
         // in the wrong typeface. Four of the bundled files turned out to be
         // corrupt and had never once loaded, which is exactly that failure.

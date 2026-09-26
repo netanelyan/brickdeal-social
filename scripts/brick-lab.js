@@ -16,7 +16,7 @@ import { ROOMS } from './lib/rooms.js';
 //
 // The typography on these cannot be reviewed by reading the HTML. Hebrew
 // shaping, bidi, whether "1,234₪" lands on the correct side of its label,
-// whether a 6px outline closes the counters of Rubik at 35px, whether white
+// whether a 6px outline closes the counters of Arimo at 35px, whether white
 // type survives on a white wall — all of it happens at render time.
 //
 // Deliberately free of the model, the feed, Brickset and the network. The
@@ -82,7 +82,7 @@ async function main() {
 
     const coverHtml = renderBrickSlideHtml({ ...COVER, image: { src: bg.src } }, { size: 'tiktok', cover: true });
     slides.push({
-      file: (await renderToJpeg(coverHtml, { stem: `brick-${r}-00`, width: SIZES.tiktok.w, height: SIZES.tiktok.h, outDir: OUT, face: 'Rubik' })).file,
+      file: (await renderToJpeg(coverHtml, { stem: `brick-${r}-00`, width: SIZES.tiktok.w, height: SIZES.tiktok.h, outDir: OUT, face: 'Arimo' })).file,
       index: 0,
       nameHe: `כריכה — ${COVER.hookHe}`,
       spot: null,
@@ -94,7 +94,7 @@ async function main() {
         { nameHe: fixture.nameHe, emoji: fixture.emoji, lines, image: { src: bg.src } },
         { size: 'tiktok' }
       );
-      const out = await renderToJpeg(html, { stem: `brick-${r}-${String(i + 1).padStart(2, '0')}`, width: SIZES.tiktok.w, height: SIZES.tiktok.h, outDir: OUT, face: 'Rubik' });
+      const out = await renderToJpeg(html, { stem: `brick-${r}-${String(i + 1).padStart(2, '0')}`, width: SIZES.tiktok.w, height: SIZES.tiktok.h, outDir: OUT, face: 'Arimo' });
       slides.push({ file: out.file, index: i + 1, nameHe: fixture.nameHe, spot: null });
     }
 

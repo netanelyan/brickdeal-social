@@ -186,7 +186,7 @@ npm start
 
 Slides cannot be reviewed by reading the HTML. Hebrew shaping, bidi, whether
 `1,234₪` lands on the correct side of its label, whether a heavy outline closes
-the counters of Rubik at 45px, whether white type survives on a white wall — all
+the counters of Arimo at 45px, whether white type survives on a white wall — all
 of it happens at render time. Two scripts exist to look at them:
 
 - **`brick-lab`** renders hand-written fixtures over three synthetic
@@ -324,5 +324,9 @@ audience searches and the reference spends a slot on it. See `copy.allowTrademar
 
 ## Licence
 
-Not currently licensed for reuse. The bundled Rubik font is under the SIL Open
-Font License; the emoji artwork is Noto, under the same.
+Not currently licensed for reuse. The bundled fonts — TikTok Sans, Arimo,
+Assistant and Heebo, the same four the travel channel's slides are set in — are
+each under the SIL Open Font License, as is the Noto emoji artwork. Only two of
+those licence texts are in `assets/fonts` (`OFL.txt` covers Heebo,
+`OFL-Assistant.txt` covers Assistant); TikTok Sans's and Arimo's are still
+missing and should be added before anything here is published under a licence.
