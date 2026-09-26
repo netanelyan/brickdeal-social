@@ -317,6 +317,14 @@ export async function buildSlides(recipe, { wantImages = true, onProgress = null
         link: deal.link,
         theme: deal.theme,
         comparison: deal.comparison,
+        // The photograph this slide was built FROM, kept so it can be built
+        // again. Two URLs, not an image: the megabytes of base64 are stripped
+        // from a staged candidate on purpose, but the addresses they were made
+        // from cost a few hundred bytes and are the only way to ask for a
+        // different photograph of the same set later. Without them /photo can
+        // only fail with "the deal has no photograph to build from".
+        image: deal.image || null,
+        sourceImage: deal.sourceImage || null,
       },
     });
   }

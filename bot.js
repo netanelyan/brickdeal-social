@@ -52,8 +52,8 @@ import {
   TARGET_HE,
   allowedForKind,
 } from './src/publish/targets.js';
-import { configured as imagesEnabled, cachedShotFor } from './src/images/homeShot.js';
-import { renderBrickCover } from './src/render/brickDeck.js';
+import { configured as imagesEnabled, cachedShotFor, shotOrProduct } from './src/images/homeShot.js';
+import { renderBrickCover, renderBrickSlideAt } from './src/render/brickDeck.js';
 import { runOverridden, noteOverride, overrideNotes } from './src/override.js';
 import { startOAuthServer, stopOAuthServer } from './src/oauthServer.js';
 
@@ -1181,6 +1181,70 @@ bot.command('next', async (ctx) => {
  * the queue and keeps its turn, because that half is a real publish and the
  * drip exists for it.
  */
+/**
+ * A different photograph for one slide.
+ *
+ * A command rather than buttons. Five slides would mean five buttons on every
+ * approval card for something used occasionally, and this reads the way
+ * /draft 2 already does — a number off the list in front of you.
+ *
+ * THIS ONE COSTS MONEY, which is why it says so in the reply rather than
+ * quietly generating. The cover button re-uses the cached shot because the
+ * picture is meant to stay the same; here the whole point is a different
+ * picture, so it must generate, and the reply reports that a call was spent.
+ *
+ * It acts on the newest staged deck and names it, so there is no ambiguity
+ * about which card was changed when two are waiting.
+ */
+bot.command('photo', async (ctx) => {
+  const arg = (ctx.message.text || '').replace(/^\/photo(@\S+)?\s*/, '').trim();
+  const n = Number(arg);
+  if (!arg || !Number.isInteger(n) || n < 1) {
+    return ctx.reply('שימוש: /photo 3 — מספר השקופית (בלי הכריכה), מהכרטיס האחרון');
+  }
+
+  const decks = store.stagingItems().filter(({ cand }) => cand.kind === 'deck');
+  if (!decks.length) return ctx.reply('אין מצגת שממתינה לאישור');
+  // Newest, because this follows looking at a card that just arrived.
+  const { key, cand } = decks[decks.length - 1];
+
+  const at = n - 1;
+  const slide = cand.deck?.slides?.[at];
+  if (!slide) return ctx.reply(`אין שקופית ${n} ב"${cand.headline}" — יש ${cand.deck?.slides?.length || 0}`);
+
+  const deal = { productId: slide.productId, product: slide.nameHe, ...(slide.deal || {}) };
+  if (!deal.image && !deal.sourceImage) {
+    return ctx.reply(
+      `⚠️ השקופית הזו נבנתה לפני שהמקור נשמר — /deck לבנות מחדש\n("${slide.nameHe}")`
+    );
+  }
+
+  await ctx.reply(`🖼️ מייצר תמונה חדשה לשקופית ${n} — "${slide.nameHe}" (קריאה אחת למודל)`);
+
+  detach('תמונה חדשה', async () => {
+    // force, because a cached shot is exactly what we are trying to get away
+    // from. shotOrProduct falls back to the catalogue photo rather than
+    // failing, and says so in its provenance — which the approval card prints.
+    const image = await shotOrProduct(deal, { n: at + 1, sizeCm: slide.deal?.sizeCm ?? null, force: true });
+
+    const deck = cand.deck;
+    deck.slides[at] = { ...slide, image: { provenance: image.provenance, note: image.note || null } };
+
+    for (const size of ['tiktok', 'instagram']) {
+      if (!Array.isArray(deck[size]) || !deck[size][at + 1]) continue;
+      deck[size][at + 1] = await renderBrickSlideAt(deck, at, { size, image });
+    }
+    if (Array.isArray(deck.preview) && deck.preview[at + 1]) {
+      deck.preview[at + 1] = deck[deck.instagram ? 'instagram' : 'tiktok'][at + 1];
+    }
+
+    store.updateStaging(key, { deck });
+    const fresh = store.getStaging(key);
+    console.log(`deck: new photo for slide ${n} · ${image.provenance} · ${slide.nameHe}`);
+    await sendForApproval(bot.telegram, ctx.chat.id, fresh, brickApprovalMessage(fresh), stagingButtons(key, fresh));
+  }, ctx.chat.id);
+});
+
 bot.command('draft', async (ctx) => {
   const arg = (ctx.message.text || '').replace(/^\/draft(@\S+)?\s*/, '').trim();
   const n = Number(arg);
@@ -1674,6 +1738,7 @@ bot.command('help', (ctx) =>
       '/next — מפרסם את הבא בתור',
       '/post <מספר> — מפרסם אחד מסוים מהתור, מדלג על הסדר',
       '/draft <מספר> — שולח את החצי של טיקטוק לטיוטות עכשיו',
+      '/photo <מספר> — תמונה חדשה לשקופית מסוימת (עולה קריאה למודל)',
       '/held — מצגות מאושרות שממתינות ליעד שנפל',
       '/retry — אחרי שתיקנת: מחזיר אותן לתור',
       '/clear_held — מוותר על המוחזקות ומסמן את היעדים כתקינים',

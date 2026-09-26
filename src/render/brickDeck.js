@@ -128,6 +128,35 @@ export async function renderBrickCover(deck, { size = 'tiktok', outDir = cardOut
   };
 }
 
+/**
+ * Re-draw one product slide, in place.
+ *
+ * `at` is the index into deck.slides — the same number a person counts off the
+ * approval album minus the cover. The rendered array is offset by one because
+ * item zero is the cover, and that offset lives here rather than at the call
+ * site so nothing else has to know it.
+ *
+ * Same stem, so the same file and the same public URL, for the reason
+ * renderBrickCover documents: a staged deck has not published, so nothing
+ * outside this box has fetched the old bytes.
+ */
+export async function renderBrickSlideAt(deck, at, { size = 'tiktok', outDir = cardOutputDir(), image = null } = {}) {
+  if (!SIZES[size]) throw new Error(`unknown deck size: ${size}`);
+  const slide = deck.slides?.[at];
+  if (!slide) throw new Error(`no slide ${at} on this deck`);
+  const { w, h } = SIZES[size];
+
+  const html = renderBrickSlideHtml({ ...slide, image }, { size });
+  const rendered = await renderToJpeg(html, {
+    stem: slideStem(deck.id, size, at + 2),
+    width: w,
+    height: h,
+    outDir,
+    face: 'Arimo',
+  });
+  return { ...rendered, index: at + 2, cover: false, end: false, nameHe: slide.nameHe, url: cardPublicUrl(rendered.filename) };
+}
+
 export async function renderBrickDeck(deck, { outDir = cardOutputDir(), sizes = ['tiktok', 'instagram'] } = {}) {
   const rendered = {};
   for (const size of sizes) {
