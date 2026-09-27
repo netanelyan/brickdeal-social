@@ -129,6 +129,19 @@ export function holdFor({ sizeCm, theme }) {
  * laid over it has to fight the one bright area for the same attention. So the
  * room is bright and the light is daylight.
  *
+ * THE SECOND DEPARTURE IS THE HEADROOM PARAGRAPH, and it is here because a
+ * slide is not a photograph — it is a photograph with four lines of Hebrew
+ * across the top of it. Everything downstream was written assuming this shot
+ * leaves empty room above the model for those lines to sit in, and nothing in
+ * the prompt ever asked for it: the only framing instruction was about WIDTH
+ * ("filling about two thirds of the frame width"), which a car obeys and a
+ * bouquet held up in the fist does not. Tall subjects came back filling the
+ * frame top to bottom and the type landed on them.
+ *
+ * It is stated as a fraction of the frame rather than as "leave space", because
+ * a fraction is the only form of it that survives the 4:5 crop — see the
+ * anchor note in render/sizes.js, which is the other half of the same fix.
+ *
  * WHAT DID NOT CHANGE IS THE MODEL ITSELF. A set that is black is photographed
  * black — the whole pipeline exists to show the thing the link sells, and rule
  * 1 above outranks how a frame looks. What the prompt asks for is that a dark
@@ -163,6 +176,10 @@ The model matches the attached photo exactly: ${colours}, matte plastic with sha
 
 Framing: the camera is at the model's own height, looking straight at its side, not down at it. The model is the subject, filling about two thirds of the frame width, entirely inside the frame, positioned slightly off center. The camera is not perfectly level, tilted a degree or two, the way a person holds a phone.
 
+Headroom: the whole model sits in the lower two thirds of the frame. The top third is empty room above it — plain wall, or the far side of the room, out of focus — with nothing in it. The highest point of the model, ${
+    handed ? 'held up in the hand, ' : ''
+  }including anything that sticks up from it, stays clearly below that top third and comes nowhere near the top edge. The person taking the photo stepped back far enough to leave that space above it.
+
 Background: a real room in daylight, tidy but unplanned, photographed from an angle rather than straight on, so the furniture runs at a slight diagonal and objects are partly cut off by the edges of the frame. Ordinary things a person has in a bright home, a pale wall, a shelf, a desk edge, a chair, arranged by life and not by a photographer. Nothing centered behind the model, nothing symmetrical, nothing that looks placed for the shot.
 
 Light: the room is bright, full of soft daylight from a window off to one side and slightly in front of the model. Everything in the frame is clearly lit and easy to read, with open, gentle shadows and no dark corners. The model is still the brightest thing in the photo, lit softly from the front, from the camera side. No window or lamp visible in the frame, no hotspot or glare on the wall, no light source behind the model.
@@ -171,7 +188,7 @@ Focus: the model and hand are perfectly sharp. The background is clearly out of 
 
 Slightly uneven exposure on the bright side, clean shadows, no color grading, no studio lighting. Looks like a real photo someone took at home on a bright afternoon, calm and quiet, not a product advertisement.
 
-Avoid: smoothed or melted brick surfaces, rounded soft edges, 3D render look, CGI look, high camera angle, looking down at the model, visible roof or top, small toy scale, symmetrical composition, centered background object, staged scene, empty grey wall, studio look, blown-out background, window in frame, lamp in frame, glowing wall, backlight, night, evening, dark room, dim light, low light, moody lighting, underexposed, dark shadows, heavy shadows, dark walls, dark furniture, dark surface under the model, dark or black background, the model sitting in shadow, messy clutter, sharp background, portrait mode cutout, floating model, cropped model, text, watermark, brand names, logos, lettering on the model${
+Avoid: smoothed or melted brick surfaces, rounded soft edges, 3D render look, CGI look, high camera angle, looking down at the model, visible roof or top, small toy scale, model reaching the top edge of the frame, model filling the frame from top to bottom, no space above the model, tight crop, close-up, symmetrical composition, centered background object, staged scene, empty grey wall, studio look, blown-out background, window in frame, lamp in frame, glowing wall, backlight, night, evening, dark room, dim light, low light, moody lighting, underexposed, dark shadows, heavy shadows, dark walls, dark furniture, dark surface under the model, dark or black background, the model sitting in shadow, messy clutter, sharp background, portrait mode cutout, floating model, cropped model, text, watermark, brand names, logos, lettering on the model${
     handed
       ? ', oversized hand, hand close to the camera, forearm, arm, elbow, deformed hand, extra fingers, two hands, open flat hand with the model merely resting on it, hand lying beside the model instead of holding it'
       : ', hand, hands, fingers, thumb, wrist, arm, any part of a person, anybody holding the model'
@@ -221,9 +238,15 @@ async function generate(prompt, photo) {
       //
       // 9:16 rather than anything else because that is the TikTok frame and
       // TikTok is what these decks are for. The Instagram 4:5 render crops the
-      // same photo vertically instead, trimming above and below the model
-      // rather than through it — the right way round, since the model sits in
-      // the lower middle and the type sits over empty space above it.
+      // same photo vertically instead.
+      //
+      // THAT CROP IS NOT FREE, WHICH THIS COMMENT USED TO CLAIM IT WAS. It
+      // said the 4:5 frame trims above and below the model rather than through
+      // it, "the right way round, since the model sits in the lower middle and
+      // the type sits over empty space above it" — and the second half of that
+      // sentence is the problem with the first. The empty space above the model
+      // is the space the type needs, and a centred crop takes 285px of it. The
+      // crop is biased upward in render/sizes.js for exactly this reason.
       generationConfig: { imageConfig: { aspectRatio: ASPECT_RATIO } },
     }),
     signal: AbortSignal.timeout(120000),
@@ -342,7 +365,7 @@ export async function verifySameModel(sourceUrl, generatedBase64, mime = 'image/
  * used. That is the price of the edit actually taking effect, and it is smaller
  * than it looks — only sets that come round again are ever paid for.
  */
-const LOOK = 'bright1';
+const LOOK = 'bright2';
 
 const cacheStem = (productId, n = 1) =>
   join(

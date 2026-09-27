@@ -65,7 +65,20 @@ const THEMES = [
   ['castle', ['טירה', 'טירת', 'אביר', 'אבירים', 'ימי הביניים', 'מבצר', 'קסטל']],
   ['fantasy', ['דרקון', 'קוסם', 'קסם', 'אלף', 'גמד', 'שר הטבעות', 'הוביט', 'משחקי הכס', 'חד קרן', 'פיה', 'מכשפה']],
   ['vehicles', ['מכונית', 'מכוניות', 'רכב', 'פורשה', 'פרארי', 'למבורגיני', 'בוגאטי', 'מוסטנג', 'ג׳יפ', 'ג׳יפים', 'אופנוע', 'מרוץ', 'מרוצ', 'פורמולה', 'משאית', 'קורבט', 'מרצדס', 'ב.מ.וו', 'במוו', 'מכונית הזמן']],
-  ['flowers', ['פרח', 'פרחים', 'זר ', 'בונסאי', 'סחלב', 'ורדים', 'צמח', 'עציץ', 'קקטוס', 'חמנייה', 'חמניות', 'עץ ']],
+  // NO BARE 'עץ ' HERE, and it is the one keyword in this file that had to be
+  // taken out rather than tuned.
+  //
+  // It read as "tree" and matched as "wood". One theme roundup came back as a
+  // Christmas tree, a tree house and a wooden robot — three sets out of five,
+  // none of them botanical, all of them matching 'עץ ' — under a cover that
+  // said פרחים וצמחים. A theme deck carrying sets that are not of that theme
+  // has told the viewer something false, which is the one thing themeRoundup
+  // refuses to do by padding and must not do by detection either.
+  //
+  // What replaced it is the set of words that can only mean a plant. A
+  // botanical tree still lands here through 'בונסאי' and through 'פורח',
+  // because a tree this theme wants is always named as one that blossoms.
+  ['flowers', ['פרח', 'פרחים', 'פריחה', 'פורח', 'זר ', 'בונסאי', 'סחלב', 'ורדים', 'ורד ', 'סאקורה', 'טוליפ', 'חבצלת', 'לבנדר', 'סוקולנט', 'צמח', 'עציץ', 'קקטוס', 'חמנייה', 'חמניות']],
   ['friends', ['חברות', 'פרנדס', 'סלון יופי', 'בית קפה', 'חנות', 'קניון', 'מספרה', 'ספא']],
   ['city', ['עיר', 'תחנת משטרה', 'משטרה', 'מכבי אש', 'כבאית', 'אמבולנס', 'בית חולים', 'בניין', 'שדה תעופה', 'תחנת דלק', 'אוטובוס']],
   ['duplo', ['פעוטות', 'לפעוט', 'גיל הרך', 'קוביות גדולות', 'דופלו']],

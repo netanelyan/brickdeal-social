@@ -169,8 +169,17 @@ html, body { width:${w}px; height:${h}px; overflow:hidden; background:${palette.
 body { position:relative; }
 
 /* Edge to edge, cropped rather than letterboxed. A slide with a white band
-   down one side is the single most obvious sign of an automated post. */
-.photo { position:absolute; inset:0; width:${w}px; height:${h}px; object-fit:cover; }
+   down one side is the single most obvious sign of an automated post.
+
+   WHERE it is cropped is a per-frame decision and it lives in sizes.js, with
+   the reasoning. Short version: these photographs are made 9:16 with empty room
+   above the model, the type sits in that room, and a centred crop into the 4:5
+   frame is what takes it away. */
+.photo {
+  position:absolute; inset:0; width:${w}px; height:${h}px;
+  object-fit:cover;
+  object-position:50% ${Math.round((size.photoAnchorPct ?? 0.5) * 100)}%;
+}
 
 /* Almost nothing, and it is not a panel.
 
@@ -181,13 +190,28 @@ body { position:relative; }
 
    This is where legibility comes from now that the outline is 2px, so it is
    load-bearing rather than decorative — see the note at the top of this file
-   about white walls. */
+   about white walls.
+
+   THE TOP BAND IS DEEPER THAN IT WAS, and the reason is a failure rather than
+   a preference. The whole design assumes the photograph has empty room above
+   the model for the type to sit in; the crop fix in sizes.js and the framing
+   rule in homeShot.js are what produce that room, and neither can guarantee
+   it — a tall subject held up in the hand, a stock catalogue fallback, a
+   generation that ignored the instruction. When the room is not there the type
+   lands on the model, and 0.24 over a brightly lit build is not enough to keep
+   four lines of Hebrew readable on it.
+
+   It fades out by 38% rather than 28%, which is just under where the price
+   block ends, so the band covers the type and nothing below it. The middle of
+   the picture is still left alone, because the middle of the picture is still
+   the set. */
 .scrim {
   position:absolute; inset:0;
   background:linear-gradient(to bottom,
-    rgba(4,10,12,0.24) 0%,
-    rgba(4,10,12,0.05) 28%,
-    rgba(4,10,12,0.04) 60%,
+    rgba(4,10,12,0.36) 0%,
+    rgba(4,10,12,0.30) 16%,
+    rgba(4,10,12,0.06) 38%,
+    rgba(4,10,12,0.04) 62%,
     rgba(4,10,12,${size.h === 1920 ? 0.42 : 0.16}) 100%);
 }
 
