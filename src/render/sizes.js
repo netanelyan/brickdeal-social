@@ -35,7 +35,43 @@
 // the 9:16 one, which is the property the type placement is written against.
 //
 // The 9:16 render has no slack at all and the value is inert there.
+//
+// `photoDropMaxPct` AND `photoZoomMin` ARE THE TWO LEVERS render/headroom.js IS
+// ALLOWED TO PULL when the crop above cannot save a photograph — when the shot
+// came back with the model filling the frame and there is no room above it to
+// preserve. Neither is free, so both are bounded here rather than in the code
+// that uses them:
+//
+//   photoDropMaxPct — how far down the frame the picture may be pushed, as a
+//   fraction of the frame's height. Paid for by cropping the bottom, and the
+//   bottom is where the hand enters. TikTok can afford more of it because the
+//   app draws its own caption over the foot of the frame anyway, so the last
+//   fifth of that picture is half lost before we touch it; the Instagram frame
+//   is seen whole, and 0.10 is about where the wrist goes and the fingers stay.
+//
+//   photoZoomMin — how far the picture may be shrunk once the drop has run
+//   out. This keeps everything in the photograph and makes the subject smaller,
+//   and it is the lever that costs a sliver of non-photograph down each side,
+//   filled with the same picture blurred. 0.8 is a fifth off the width, which
+//   is the most that still reads as a photograph in a frame rather than a
+//   picture pasted onto one.
 export const SIZES = {
-  tiktok: { w: 1080, h: 1920, topSafe: 300, bottomSafe: 400, photoAnchorPct: 0.5 },
-  instagram: { w: 1080, h: 1350, topSafe: 150, bottomSafe: 175, photoAnchorPct: 0.33 },
+  tiktok: {
+    w: 1080,
+    h: 1920,
+    topSafe: 300,
+    bottomSafe: 400,
+    photoAnchorPct: 0.5,
+    photoDropMaxPct: 0.14,
+    photoZoomMin: 0.8,
+  },
+  instagram: {
+    w: 1080,
+    h: 1350,
+    topSafe: 150,
+    bottomSafe: 175,
+    photoAnchorPct: 0.33,
+    photoDropMaxPct: 0.1,
+    photoZoomMin: 0.8,
+  },
 };

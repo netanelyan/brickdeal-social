@@ -11,6 +11,18 @@ import { brickConfig } from '../brick/config.js';
 // sameness is what makes five swipes read as one post rather than five posts.
 // So there is no placement search here, which also means a deck renders in
 // about a second a slide instead of ten.
+//
+// EACH SLIDE DOES STILL MEASURE ITS OWN PHOTOGRAPH, and that is not the same
+// thing wearing a different hat. The measurement in render/headroom.js decides
+// where the PICTURE goes, not where the type goes — the block stays exactly
+// where it is on every slide of every deck, and the photograph is moved under
+// it so there is something empty for it to sit on. The sameness the paragraph
+// above is about is preserved by doing it that way round; a deck of five
+// photographs was never going to be five identical pictures anyway.
+//
+// It happens inside the slide's own page rather than here, so it reaches the
+// single-slide redraws further down this file and the lab without any of them
+// having to remember to ask for it.
 
 export const slideStem = (deckId, size, index) =>
   `brick-${deckId}-${size}-${String(index).padStart(2, '0')}`;

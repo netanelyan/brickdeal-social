@@ -926,6 +926,12 @@ function stagedCard(s) {
             ? el('span', {
                 class: `tag ${sl.image.provenance === 'generated' ? 'accent' : 'warn'}`,
                 text: sl.image.provenance === 'generated' ? 'AI' : sl.image.provenance,
+                // Where the picture came from and what was wrong with it, on
+                // hover. It says whether a shot came back on the second
+                // attempt and whether it had room above the model, which is
+                // the answer to "why is that one smaller in the frame" — a
+                // question the slide itself cannot answer.
+                title: sl.image.note || null,
               })
             : null
         ),

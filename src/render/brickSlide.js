@@ -10,6 +10,23 @@ import { emojiHtml } from './emojiArt.js';
 import { brickConfig } from '../brick/config.js';
 import { priceLineHtml } from '../brick/copy.js';
 import { SIZES } from './sizes.js';
+import { fitScript } from './headroom.js';
+
+// How hard the scrim has to work over the type, once the type is where the
+// measurement put it.
+//
+// 3:1 rather than a WCAG number because the letters are not bare: they carry a
+// dark outline and a soft shadow, and the anatomy at the top of this file makes
+// those the thing that carries legibility. The scrim's job is to stop a white
+// wall in daylight swallowing white type, not to do the whole of it — sized for
+// 4.5 it paints a grey band across the top of every bright slide, which is what
+// the fixed 0.36 it replaces was already doing.
+//
+// The floor is what keeps a block of type reading as a block over a photograph
+// that happens to be dark, where the arithmetic would otherwise ask for no
+// scrim at all and the words would look like they landed where they did by
+// accident.
+const SCRIM = { want: 3, floor: 0.12, ceiling: 0.55 };
 
 // A BrickDeal slide, set the way @lego_from_ali sets one.
 //
@@ -78,9 +95,21 @@ export function brickScale({ w, h }) {
   };
 }
 
+/**
+ * The photograph, and the two layers that exist so it can be moved.
+ *
+ * `backdrop` and `wallfill` are empty and hidden on every slide until the
+ * measurement in render/headroom.js says otherwise, which on a photograph that
+ * came back with room above the model is never. They are in the markup rather
+ * than created by that script so their styling lives in the stylesheet with
+ * everything else, and so the failure mode of the script not running is a slide
+ * that renders exactly as it always did.
+ */
 const photoTag = (image) =>
   image?.src
-    ? `<img class="photo" src="${escapeHtml(image.src)}" alt="">`
+    ? `<img class="backdrop" alt="" hidden>
+<img class="photo" src="${escapeHtml(image.src)}" alt="">
+<div class="wallfill" hidden></div>`
     : `<div class="photo" style="background:linear-gradient(160deg, ${palette.inkSoft}, ${palette.ink})"></div>`;
 
 /**
@@ -174,12 +203,55 @@ body { position:relative; }
    WHERE it is cropped is a per-frame decision and it lives in sizes.js, with
    the reasoning. Short version: these photographs are made 9:16 with empty room
    above the model, the type sits in that room, and a centred crop into the 4:5
-   frame is what takes it away. */
+   frame is what takes it away.
+
+   THIS IS THE STARTING POSITION, NOT NECESSARILY THE FINAL ONE. When the
+   photograph turns out to have no room above the model, render/headroom.js
+   overwrites the four numbers below with a position it measured — see the note
+   on the script at the foot of this file. */
 .photo {
   position:absolute; inset:0; width:${w}px; height:${h}px;
   object-fit:cover;
   object-position:50% ${Math.round((size.photoAnchorPct ?? 0.5) * 100)}%;
 }
+
+/* What shows through when the photograph has been shrunk to make room: the
+   same photograph, covered, overscanned and thrown out of focus.
+
+   The alternative is a colour, and a colour is a letterbox however it is
+   chosen. This is the room the picture was taken in, blurred — which is what
+   the background of the picture already is, so the eye reads the slivers down
+   the sides as depth rather than as a border. Dimmed a touch so the sharp
+   picture in front of it stays the brightest thing on the frame. */
+.backdrop {
+  position:absolute; inset:0; width:${w}px; height:${h}px;
+  object-fit:cover; object-position:50% 50%;
+  transform:scale(1.12);
+  filter:blur(26px) saturate(0.92) brightness(0.94);
+}
+.backdrop[hidden] { display:none; }
+
+/* The wall, continued upward.
+
+   The preferred fill by a distance, and the reason is that it is not a fill: it
+   is the photograph's own top strip — plain out-of-focus wall on a shot framed
+   the way the prompt asks — scaled vertically to cover the room the fit needed.
+   A wall has no vertical detail to smear, so under about a factor of two this
+   is invisible, and unlike the blurred backdrop it keeps the frame edge to edge
+   and in focus.
+
+   Drawn OVER the top of the photograph rather than above it, so the strip and
+   the picture meet inside one continuous image. Every number on it — the box,
+   the bleed past the frame's edges, the scale, the blur and the mask that
+   dissolves the join — is measured and written inline; what is here is only
+   what cannot vary. */
+.wallfill {
+  position:absolute; top:0; left:0;
+  background-repeat:no-repeat;
+  -webkit-mask-image:linear-gradient(to bottom, #000 0%, #000 72%, transparent 100%);
+  mask-image:linear-gradient(to bottom, #000 0%, #000 72%, transparent 100%);
+}
+.wallfill[hidden] { display:none; }
 
 /* Almost nothing, and it is not a panel.
 
@@ -192,19 +264,18 @@ body { position:relative; }
    load-bearing rather than decorative — see the note at the top of this file
    about white walls.
 
-   THE TOP BAND IS DEEPER THAN IT WAS, and the reason is a failure rather than
-   a preference. The whole design assumes the photograph has empty room above
-   the model for the type to sit in; the crop fix in sizes.js and the framing
-   rule in homeShot.js are what produce that room, and neither can guarantee
-   it — a tall subject held up in the hand, a stock catalogue fallback, a
-   generation that ignored the instruction. When the room is not there the type
-   lands on the model, and 0.24 over a brightly lit build is not enough to keep
-   four lines of Hebrew readable on it.
+   WHAT IS WRITTEN HERE IS THE UNMEASURED FALLBACK. On any slide whose
+   photograph could be decoded, render/headroom.js replaces this gradient with
+   one sized to the luminance of what the type actually ended up over, and
+   holds that value across the block rather than fading it out a third of the
+   way down.
 
-   It fades out by 38% rather than 28%, which is just under where the price
-   block ends, so the band covers the type and nothing below it. The middle of
-   the picture is still left alone, because the middle of the picture is still
-   the set. */
+   These numbers are what a slide gets when that cannot run — a cross-origin
+   catalogue photo, a decode failure — so they are still the ones written for
+   the worst photograph there is, a white wall in daylight. That is why the top
+   band is 0.36: deep enough to keep four lines of Hebrew readable even in the
+   case the fit was unable to do anything about. A measured slide almost always
+   comes out lighter than this. */
 .scrim {
   position:absolute; inset:0;
   background:linear-gradient(to bottom,
@@ -532,5 +603,20 @@ export function renderBrickSlideHtml(slide, { size = 'tiktok', cover = false, en
 ${photoTag(slide.image)}
 <div class="scrim${end ? ' end-scrim' : ''}"></div>
 <div class="block ${end ? 'at-center' : cover ? 'at-mid' : 'at-top'}">${body}</div>
+${fitScript({
+  frameW: s.w,
+  frameH: s.h,
+  anchorPct: s.photoAnchorPct ?? 0.5,
+  dropMax: Math.round((s.photoDropMaxPct ?? 0) * s.h),
+  zoomMin: s.photoZoomMin ?? 1,
+  scrim: SCRIM,
+  bottomA: s.h === 1920 ? 0.42 : 0.16,
+  // Not on the end card. Its photograph is washed flat to a texture and the
+  // type sits in the middle of the frame on purpose, so there is nothing to
+  // dodge and nothing a measurement could improve — moving the picture there
+  // would be motion with no reason, on the one slide whose picture is not
+  // supposed to be looked at.
+  enabled: !end,
+})}
 </body></html>`;
 }

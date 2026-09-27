@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { headroomOf } from '../render/headroom.js';
 
 // The photograph on a slide.
 //
@@ -142,6 +143,21 @@ export function holdFor({ sizeCm, theme }) {
  * a fraction is the only form of it that survives the 4:5 crop — see the
  * anchor note in render/sizes.js, which is the other half of the same fix.
  *
+ * THE WIDTH RULE NOW GIVES WAY TO THE HEIGHT RULE, which is the part the first
+ * version of this got wrong. Asking for two thirds of the width AND the lower
+ * two thirds of the height is not one instruction, it is two, and for a tall
+ * narrow subject they contradict: a bouquet two thirds of the frame wide is
+ * taller than the frame. The model resolved that contradiction the way it was
+ * written, width first, and a deck went out with the type across a nightshade
+ * plant, a Christmas tree and a bunch of tulips. So the width is now explicitly
+ * the one that yields.
+ *
+ * `insist` HARDENS IT FOR A SECOND ATTEMPT, and is only ever passed after the
+ * first one came back measurably wrong — see the headroom gate in homeShot()
+ * below. Two thirds becomes a half, and the rule moves to the top of the
+ * prompt, where instructions carry more weight than they do six paragraphs
+ * down.
+ *
  * WHAT DID NOT CHANGE IS THE MODEL ITSELF. A set that is black is photographed
  * black — the whole pipeline exists to show the thing the link sells, and rule
  * 1 above outranks how a frame looks. What the prompt asks for is that a dark
@@ -153,13 +169,25 @@ export function holdFor({ sizeCm, theme }) {
  * logo on a generated clone set would be a trademark on a slide, which is the
  * one thing src/brick/copy.js exists to prevent and cannot see.
  */
-export function stillPrompt({ nameHe, sizeCm, theme, colours = 'the colours and distinctive parts visible in the attached photo' }) {
+export function stillPrompt({
+  nameHe,
+  sizeCm,
+  theme,
+  colours = 'the colours and distinctive parts visible in the attached photo',
+  insist = false,
+}) {
   const { hold, contact, fraction, landmark } = holdFor({ sizeCm, theme });
   const length = sizeCm ? `${Math.round(sizeCm)} cm` : 'about 25 cm';
   const handed = !hold.includes('NO HAND');
 
   return `Using the brick-built model in the attached photo, generate a photorealistic vertical 9:16 photo, shot casually on an iPhone in a bright room during the day.
-
+${
+  insist
+    ? `
+THE MOST IMPORTANT THING ABOUT THIS PHOTO IS HOW MUCH SPACE IS ABOVE THE MODEL. The whole model sits inside the BOTTOM HALF of the frame. Its highest point — the topmost leaf, petal, flower, tip, aerial, spire, anything that sticks up — is below the halfway line of the frame, and the entire top half of the frame is empty: plain wall, or the far side of the room, out of focus, with nothing in it at all. The photographer stood well back. The model is therefore SMALLER in the frame than it would otherwise be, and that is correct and deliberate. Do not fill the frame with it.
+`
+    : ''
+}
 ${hold}${
     handed
       ? ' Only the hand and a small part of the wrist are visible, entering the frame from the bottom edge. No forearm, no elbow, no arm filling the frame.'
@@ -174,11 +202,13 @@ Scale: the model is ${length} long${
 
 The model matches the attached photo exactly: ${colours}, matte plastic with sharp crisp edges on every brick, clearly visible seams between panels, defined stud edges with small shadows in the gaps.
 
-Framing: the camera is at the model's own height, looking straight at its side, not down at it. The model is the subject, filling about two thirds of the frame width, entirely inside the frame, positioned slightly off center. The camera is not perfectly level, tilted a degree or two, the way a person holds a phone.
+Framing: the camera is at the model's own height, looking straight at its side, not down at it. The model is the subject, entirely inside the frame and positioned slightly off center. It fills about two thirds of the frame width — or less, whatever it takes to obey the headroom rule below, which always wins: for a tall model, a bouquet or a plant, it will be narrower than that, and that is right. The camera is not perfectly level, tilted a degree or two, the way a person holds a phone.
 
-Headroom: the whole model sits in the lower two thirds of the frame. The top third is empty room above it — plain wall, or the far side of the room, out of focus — with nothing in it. The highest point of the model, ${
+Headroom: the whole model sits in the lower ${insist ? 'half' : 'two thirds'} of the frame. The ${
+    insist ? 'top half' : 'top third'
+  } is empty room above it — plain wall, or the far side of the room, out of focus — with nothing in it. The highest point of the model, ${
     handed ? 'held up in the hand, ' : ''
-  }including anything that sticks up from it, stays clearly below that top third and comes nowhere near the top edge. The person taking the photo stepped back far enough to leave that space above it.
+  }including any leaf, petal, tip or part that sticks up from it, is below that line and comes nowhere near the top edge. The person taking the photo stepped back far enough to leave that space above it, so the model takes up less of the frame than it would in a photo framed tight around it.
 
 Background: a real room in daylight, tidy but unplanned, photographed from an angle rather than straight on, so the furniture runs at a slight diagonal and objects are partly cut off by the edges of the frame. Ordinary things a person has in a bright home, a pale wall, a shelf, a desk edge, a chair, arranged by life and not by a photographer. Nothing centered behind the model, nothing symmetrical, nothing that looks placed for the shot.
 
@@ -365,7 +395,20 @@ export async function verifySameModel(sourceUrl, generatedBase64, mime = 'image/
  * used. That is the price of the edit actually taking effect, and it is smaller
  * than it looks — only sets that come round again are ever paid for.
  */
-const LOOK = 'bright2';
+const LOOK = 'bright3';
+
+/**
+ * How much of a shot has to be empty above the model, as a fraction of its
+ * height, before the slide renderer has to bend the picture to fit the type.
+ *
+ * Derived rather than picked. The renderer can push a photograph down the
+ * frame for free — see photoDropMaxPct in render/sizes.js — and past that it
+ * has to shrink it, which opens slivers down the sides that are not
+ * photograph. 0.27 is the point where the harder of the two frames, Instagram's
+ * 4:5, still clears the type on the drop alone. Above it the fit is invisible;
+ * below it the slide still works and starts to look handled.
+ */
+export const HEADROOM_MIN = 0.27;
 
 const cacheStem = (productId, n = 1) =>
   join(
@@ -428,15 +471,38 @@ export async function homeShot(deal, { n = 1, sizeCm = null, force = false } = {
   if (!configured()) throw new ShotError('IMAGE_GEN_API_KEY is not set');
 
   const photo = await fetchImage(source.url);
-  const prompt = stillPrompt({ nameHe: deal.product, sizeCm, theme: deal.theme });
 
   // One retry and no more. The skill's own troubleshooting list is a set of
   // prompt EDITS a person makes after looking at the output, which is not
-  // something this can do — so the second attempt is the same prompt against a
-  // stochastic model, and a third would only be spending money on the same
-  // coin flip.
+  // something this can do in general — so a third attempt would be spending
+  // money on the same coin flip.
+  //
+  // WHAT THE SECOND ATTEMPT IS FOR HAS CHANGED, and it now costs real money it
+  // did not cost before. It used to run only when the first came back showing
+  // a different model, which is rare. It now also runs when the first came
+  // back with the model filling the frame, which is not rare at all — it is
+  // most tall subjects — and in that case the prompt is hardened rather than
+  // repeated, because repeating a prompt the model has already ignored is the
+  // coin flip and rewriting it is not.
+  //
+  // The spend is deliberate and it is bounded at one extra image per set, once,
+  // since the result is cached. It buys the only version of this fix that
+  // produces a good photograph: everything downstream of here can move a
+  // picture around a frame, and none of it can put room into a picture that
+  // has none.
   let lastWhy = null;
+  let best = null;
   for (const attempt of [1, 2]) {
+    // Hardened only when the first attempt failed ON HEADROOM. A retry after a
+    // wrong model is a retry of the same instruction; shouting the framing
+    // rule at it would not make it the right set.
+    const prompt = stillPrompt({
+      nameHe: deal.product,
+      sizeCm,
+      theme: deal.theme,
+      insist: attempt > 1 && best !== null,
+    });
+
     let made;
     try {
       made = await generate(prompt, photo);
@@ -456,15 +522,45 @@ export async function homeShot(deal, { n = 1, sizeCm = null, force = false } = {
       continue;
     }
 
-    const file = stem + extFor(mime);
-    mkdirSync(dirname(file), { recursive: true });
-    const tmp = `${file}.tmp`;
-    writeFileSync(tmp, bytes);
-    renameSync(tmp, file);
-    return { src: `data:${mime};base64,${base64}`, provenance: 'generated', note: `from the ${source.kind}` };
+    // How much room it left above the model. A null means the measurement
+    // could not run at all, and that is never a reason to throw away a
+    // photograph that has been paid for and has passed its identity check — it
+    // is treated as "no opinion", which is what it is.
+    const room = await headroomOf(`data:${mime};base64,${base64}`);
+    const subject = room?.subject ?? null;
+    if (!best || (subject ?? 1) > (best.subject ?? 1)) best = { bytes, mime, base64, subject, attempt };
+    if (subject === null || subject >= HEADROOM_MIN) return keep(stem, best, source);
+    lastWhy = `attempt ${attempt}: the model starts ${Math.round(subject * 100)}% down the frame, leaving no room above it for the type`;
   }
 
+  // The best of what came back, rather than nothing.
+  //
+  // A photograph that shows the right set and is framed badly is worth more
+  // than the catalogue image this would otherwise fall back to, because the
+  // renderer can do something about framing and can do nothing about a picture
+  // that looks like an advertisement. The note says which it is, so the
+  // approval message can too.
+  if (best) return keep(stem, best, source);
+
   throw new ShotError(lastWhy || 'image generation produced nothing usable');
+}
+
+/** A shot to disk, and the answer the caller gets back. */
+function keep(stem, best, source) {
+  const file = stem + extFor(best.mime);
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, best.bytes);
+  renameSync(tmp, file);
+  const tight = best.subject !== null && best.subject < HEADROOM_MIN;
+  return {
+    src: `data:${best.mime};base64,${best.base64}`,
+    provenance: 'generated',
+    note:
+      `from the ${source.kind}` +
+      (best.attempt > 1 ? `, on the second attempt` : '') +
+      (tight ? ` — little room above the model, so the slide re-frames it` : ''),
+  };
 }
 
 /**
@@ -481,7 +577,30 @@ export async function shotOrProduct(deal, opts = {}) {
   } catch (e) {
     const source = sourceFor(deal);
     if (!source.url) throw e;
-    return { src: source.url, provenance: 'stock', note: `catalogue photo — ${e.message}` };
+
+    // THE BYTES, NOT THE ADDRESS, and it is not an optimisation.
+    //
+    // A slide measures its own photograph in a canvas to decide where the type
+    // can go, and a canvas that has drawn an image from another origin refuses
+    // to be read back — so a picture that arrives as a marketplace URL cannot
+    // be measured, and the slide falls back to the unmeasured geometry and the
+    // heaviest scrim. Which is exactly backwards: the catalogue fallback is the
+    // worst-framed picture in the pipeline, a product centred on white with
+    // nothing above it, and it is the one that needs the fit most.
+    //
+    // Inlined here rather than by the renderer because this is where a fetch
+    // already lives, and a failure has somewhere sensible to go: the URL, which
+    // is what this returned before.
+    try {
+      const photo = await fetchImage(source.url);
+      return {
+        src: `data:${photo.mime};base64,${photo.base64}`,
+        provenance: 'stock',
+        note: `catalogue photo — ${e.message}`,
+      };
+    } catch {
+      return { src: source.url, provenance: 'stock', note: `catalogue photo — ${e.message}` };
+    }
   }
 }
 

@@ -29,10 +29,10 @@ let idleTimer = null;
 // re-render from an edit, with room to spare.
 const IDLE_SHUTDOWN_MS = Number(process.env.RENDER_IDLE_MS ?? 5 * 60_000);
 
-// Shared rather than private because the photo measuring in ./photo.js runs in
-// the same Chromium: it decodes each slide's image to a canvas and reads the
-// pixels back, which is a page and a browser, and launching a second one to do
-// it would double the resident memory for no gain.
+// Shared rather than private because the photo measuring in ./headroom.js runs
+// in the same Chromium: it decodes an image to a canvas and reads the pixels
+// back, which is a page and a browser, and launching a second one to do it
+// would double the resident memory for no gain.
 export function getBrowser() {
   // Chromium takes a second or two to start; a handful of cards a day would
   // otherwise pay that every time. Launched lazily so `npm start` doesn't need it.
@@ -40,7 +40,11 @@ export function getBrowser() {
   return browserPromise;
 }
 
-function scheduleIdleShutdown() {
+// Exported for ./headroom.js, which borrows this browser to measure a
+// photograph before the photograph is ever put on a slide. Without it, a
+// measurement taken on a run that then failed before rendering anything would
+// leave Chromium resident until the process exited.
+export function scheduleIdleShutdown() {
   if (idleTimer) clearTimeout(idleTimer);
   if (!(IDLE_SHUTDOWN_MS > 0)) return;
   idleTimer = setTimeout(() => {
@@ -225,6 +229,22 @@ export async function renderToJpeg(
           'refusing to render, because the text would silently come out in a fallback typeface'
       );
     }
+
+    // A page is allowed to finish arranging itself before it is photographed.
+    //
+    // A brick slide measures its own photograph and moves it — see
+    // render/headroom.js — and that work is asynchronous: it decodes the image
+    // to a canvas, reads pixels back, and only then writes the geometry. None
+    // of that is complete when `load` fires, and a screenshot taken before it
+    // lands is a slide with the type across the model, which is precisely the
+    // failure the measurement exists to fix. It would also be intermittent,
+    // since whether it wins is a race against IPC latency.
+    //
+    // Any page that does not set the promise resolves to undefined here and
+    // pays one round trip for the question. The promise itself carries a hard
+    // timeout on the page side, so a decode that never settles produces an
+    // unimproved slide rather than a render that never returns.
+    await page.evaluate(() => window.__slideReady);
 
     const buf = await page.screenshot({ type: 'jpeg', quality: 92 });
 

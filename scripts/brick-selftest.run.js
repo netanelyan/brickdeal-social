@@ -25,7 +25,8 @@ import { hashtagsFor, themeTag, captionFor, instagramCaptionFor, dressing } from
 import { brickConfig, coverLine } from '../src/brick/config.js';
 import { themeKeyFor, chooseRecipe, priceHook, PRICE_HOOK_RATIO, MAX_HOOK_WORDS } from '../src/brick/build.js';
 import { brickDeckId, sizesFor, photoSummary, brickRepeats } from '../src/brick/candidate.js';
-import { holdFor, sourceFor, stillPrompt } from '../src/images/homeShot.js';
+import { holdFor, sourceFor, stillPrompt, HEADROOM_MIN } from '../src/images/homeShot.js';
+import { subjectTopRow, fitPhoto, scrimAlpha, underScrim } from '../src/render/headroom.js';
 import { brickScale, nameClass, coverClass, coverHtml, renderBrickSlideHtml } from '../src/render/brickSlide.js';
 import { SIZES } from '../src/render/sizes.js';
 import { emojiDataUri } from '../src/render/emojiArt.js';
@@ -503,6 +504,19 @@ eq('with nothing else, the feed image is what there is', sourceFor({ image: 'ren
   // The subject is whatever the link sells. A black set is photographed black —
   // lit and legible, not recoloured. See the note above `stillPrompt`.
   ok('but the model still has to match the photo exactly', /matches the attached photo exactly/.test(p));
+
+  // The two framing rules contradict each other for a tall subject — a bouquet
+  // two thirds of the frame wide is taller than the frame — and the deck that
+  // went out with the type across a Christmas tree is what the model did with
+  // that contradiction. One of them has to be named as the one that yields.
+  ok('the width rule gives way to the headroom rule', /which always wins/.test(p));
+  ok('and the headroom rule is a fraction of the frame, which survives the crop', /lower two thirds of the frame/.test(p));
+
+  const again = stillPrompt({ nameHe: 'x', sizeCm: 30, theme: 'flowers', insist: true });
+  ok('a second attempt asks for the bottom half instead', /lower half of the frame/.test(again));
+  ok('and says so before anything else, where it carries weight', again.indexOf('BOTTOM HALF') < again.indexOf('Framing:'));
+  ok('and warns that the model will look smaller, so it is not corrected back', /SMALLER in the frame/.test(again));
+  ok('the ordinary prompt does not shout', !/BOTTOM HALF/.test(p));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -658,6 +672,115 @@ group('the slide');
   eq('an unmarked line has no emphasis', coverLine('בלי דגש').emphasis, null);
   eq('an unbalanced star is stripped rather than published', coverLine('חצי *דגש').text, 'חצי דגש');
   ok('every configured cover survives the round trip', brickConfig().covers.lines.every((l) => l.text && !l.text.includes('*')));
+}
+
+/* -------------------------------------------------------------------------- */
+group('the room above the model');
+
+{
+  // The detector. `energy` is one number per row of the photograph: how sharp
+  // the sharpest part of that row is. The subject is the sharp thing, because
+  // the prompt puts everything else out of focus.
+  const rows = (n, f) => Array.from({ length: n }, (_, i) => f(i / n));
+  const quiet = 0.01;
+  const sharp = 0.4;
+
+  eq(
+    'a model in the lower half is found where it starts',
+    Math.round(subjectTopRow(rows(100, (y) => (y < 0.4 ? quiet : sharp))) * 100),
+    40
+  );
+  eq('a photograph of nothing is empty all the way down', subjectTopRow(rows(100, () => quiet)), 1);
+  eq(
+    'an out-of-focus room is not a subject',
+    subjectTopRow(rows(100, (y) => (y < 0.4 ? 0.02 : 0.03))),
+    1
+  );
+  // The absolute floor is what stops the relative one turning grain into a
+  // plant: dividing by a small peak makes everything look large.
+  eq(
+    'grain on a bare wall is not a subject either',
+    subjectTopRow(rows(100, (y) => (y === 0.5 ? 0.012 : 0.008))),
+    1
+  );
+  ok(
+    'one bright row is not a model — four in a row are',
+    subjectTopRow(rows(100, (y) => (Math.abs(y - 0.2) < 0.011 ? sharp : quiet))) > 0.5
+  );
+
+  // The fit. All frame pixels; `need` is the bottom of the type.
+  const IG = { frameW: 1080, frameH: 1350, imgW: 768, imgH: 1344, anchorPct: 0.33, dropMax: 135, zoomMin: 0.8 };
+
+  ok('a photograph with room above the model is not touched at all', fitPhoto({ ...IG, subject: 0.5, need: 458 }) === null);
+
+  {
+    const p = fitPhoto({ ...IG, subject: 0.3, need: 458 });
+    ok('one that is nearly there is dropped rather than shrunk', p && p.zoom === 1, JSON.stringify(p));
+    ok('and the type then clears the model', p.top >= 458, `${p?.top}`);
+    ok('the picture still reaches both sides', !p.sides);
+    ok('and its bottom edge is still below the frame', p.y + p.h >= 1350);
+  }
+
+  {
+    const p = fitPhoto({ ...IG, subject: 0.1, need: 458 });
+    ok('a model reaching the top is shrunk once the drop runs out', p.zoom < 1 && p.zoom >= 0.8, `${p?.zoom}`);
+    ok('the drop is spent first, because it costs less', p.drop === 135, `${p?.drop}`);
+    ok('the type clears it', p.top >= 458, `${p?.top}`);
+    ok('the bottom of the frame is still photograph', p.y + p.h >= 1350);
+    ok('the band above it is filled with the wall out of the picture itself', p.stretch !== null);
+    ok('and the fill reaches past the frame so its blur cannot show an edge', p.stretch.top < 0 && p.stretch.left < 0);
+    ok(
+      'the fill never fades further than the strip it is made of',
+      p.stretch.fade <= Math.max(6, p.stretch.strip),
+      `${p.stretch.fade} vs ${p.stretch.strip}`
+    );
+  }
+
+  {
+    // Both levers run out. The honest answer is a number, not a silent pass.
+    const p = fitPhoto({ ...IG, subject: 0.01, need: 458 });
+    eq('a model filling the frame hits the shrink limit', p.zoom, 0.8);
+    ok('and says how far short it fell', p.short > 0, `${p?.short}`);
+    ok('rather than cropping the hand off to get there', p.drop <= 135);
+  }
+
+  // The threshold the generator gates on is derived from the frame it is
+  // hardest for, not chosen. At exactly HEADROOM_MIN the 4:5 frame must still
+  // clear the type on the drop alone — no shrink, no slivers down the sides.
+  {
+    const p = fitPhoto({ ...IG, subject: HEADROOM_MIN, need: 458 });
+    ok('a shot at the gate threshold needs no shrinking', p === null || p.zoom === 1, JSON.stringify(p));
+    const worse = fitPhoto({ ...IG, subject: HEADROOM_MIN - 0.06, need: 458 });
+    ok('and one meaningfully under it does', worse && worse.zoom < 1, JSON.stringify(worse));
+  }
+
+  // The scrim, measured off what the type actually ended up over.
+  ok('a white wall in daylight gets a real scrim', scrimAlpha(0.85) > 0.3, `${scrimAlpha(0.85)}`);
+  ok('a dim room gets almost none', scrimAlpha(0.03) <= 0.15, `${scrimAlpha(0.03)}`);
+  ok('but never none at all, or the type looks like it landed there', scrimAlpha(0.0) >= 0.1);
+  ok('the wash it asks for always clears the bar', 1.05 / (underScrim(0.85, scrimAlpha(0.85)) + 0.05) >= 3);
+  ok('and it is bounded, because a slide is a photograph', scrimAlpha(1) <= 0.55);
+
+  // The measurement runs in the page, which is what makes it reach every
+  // caller — the deck, both single-slide redraws and the lab — rather than
+  // only the ones that remembered to ask for it.
+  const measured = renderBrickSlideHtml(
+    { nameHe: 'סחלב', emoji: '🌸', lines: [], image: { src: 'data:image/png;base64,iVBOR' } },
+    { size: 'instagram' }
+  );
+  ok('a slide measures its own photograph', measured.includes('__slideReady'));
+  ok('and carries the two layers that let it be moved', measured.includes('class="backdrop"') && measured.includes('class="wallfill"'));
+  ok('the fit knows which frame it is in', measured.includes('"frameH":1350'));
+  ok(
+    'a slide with no photograph has nothing to measure and says so',
+    !renderBrickSlideHtml({ nameHe: 'סחלב', lines: [], image: null }, { size: 'instagram' }).includes('class="backdrop"')
+  );
+  ok(
+    'the end card is left alone, since its picture is washed out anyway',
+    renderBrickSlideHtml({ image: { src: 'data:image/png;base64,iVBOR' } }, { size: 'tiktok', end: true }).includes(
+      '"enabled":false'
+    )
+  );
 }
 
 /* -------------------------------------------------------------------------- */
