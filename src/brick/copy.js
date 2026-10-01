@@ -163,6 +163,24 @@ export const repairGeresh = (text) =>
 export const shekels = (n) => `${Math.round(Number(n) || 0).toLocaleString('en-US')}₪`;
 
 /**
+ * A count of agorot, whole, with the word for it.
+ *
+ * This is NOT the rule above being bent. That rule bans agorot as the tail of a
+ * price — "129.40₪", a second digit after a point that has never changed
+ * whether anybody taps. Here the agora is the unit itself and the number is a
+ * whole one: "4 אגורות" is the same shape as "822 חלקים", not the same shape as
+ * a price with change on the end.
+ *
+ * Singular when it is one. "1 אגורות" is a grammatical error, and a
+ * grammatical error set in 40px white type across a photograph is the whole
+ * frame — the same argument repairGeresh is here for.
+ */
+export const agorotText = (n) => {
+  const whole = Math.round(Number(n) || 0);
+  return `${whole} ${whole === 1 ? 'אגורה' : 'אגורות'}`;
+};
+
+/**
  * One price line, as the renderer wants it.
  *
  * `value` is returned separately from `label` rather than pre-joined because
@@ -170,6 +188,17 @@ export const shekels = (n) => `${Math.round(Number(n) || 0).toLocaleString('en-U
  * that impossible later. See `priceLineHtml`.
  */
 export const priceLine = (label, amount) => ({ label: String(label), value: shekels(amount) });
+
+/**
+ * A line whose value is not money — a count, a unit.
+ *
+ * Same two halves and the same bidi treatment as a price line, because the
+ * problem is the same one: "10,001" is a left-to-right run of digits and a
+ * comma dropped into a right-to-left paragraph. It is a separate constructor
+ * only so that nothing has to pass a number through `shekels` to get a line
+ * out of it.
+ */
+export const factLine = (label, value) => ({ label: String(label), value: String(value) });
 
 /**
  * A price line, bidi-safe.
@@ -224,5 +253,38 @@ export function slideLines(comparison, { price, labels = brickConfig().labels } 
     priceLine(labels.ours, comparison.paid),
     priceLine(labels.list, comparison.listIls),
     priceLine(labels.saving, comparison.saving),
+  ];
+}
+
+/**
+ * The lines on a per-piece slide: what it costs, how many pieces, what that is
+ * each.
+ *
+ * Three lines, always, whether or not Brickset knew the set — which is the
+ * whole reason this is a separate function and not a fourth line bolted onto
+ * the one above.
+ *
+ * THE LIST PRICE AND THE SAVING ARE DELIBERATELY NOT HERE, and on a deck that
+ * could source them. Two reasons, and the second is the one that decided it:
+ *
+ *   - One deck, one argument. This post's claim is what a piece costs. A slide
+ *     that also shows what the original brand charges is making the savings
+ *     deck's case in smaller type underneath, and four lines of Hebrew over a
+ *     photograph is where the block stops being read at a glance.
+ *   - The arithmetic is on the slide. Price, pieces, and price divided by
+ *     pieces: a viewer can check the third line against the first two without
+ *     leaving the frame. That is a stronger thing to put in front of somebody
+ *     than a number they have to trust, and it is only true if the block
+ *     contains nothing else.
+ *
+ * `agorot` is passed in rather than divided here. The recipe already computed
+ * it to pick the ceiling the cover claims, and a second division in a second
+ * file is how a slide comes to disagree with the post it is in.
+ */
+export function perPieceLines(deal, agorot, { labels = brickConfig().labels } = {}) {
+  return [
+    priceLine(labels.ours, deal.price),
+    factLine(labels.pieces, Number(deal.pieces).toLocaleString('en-US')),
+    factLine(labels.perPiece, agorotText(agorot)),
   ];
 }

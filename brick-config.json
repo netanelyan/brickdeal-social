@@ -46,11 +46,16 @@
 
   "labels": {
     "_comment": [
-      "The three price lines, in this order, on every slide of every deck.",
+      "The price lines, in this order, on every slide of every deck.",
       "",
       "The order and the labels never vary within a deck. A slide whose fields",
       "differ from its neighbour's reads as improvised, and the consistency is",
       "what makes a swipe scan as one post.",
+      "",
+      "`pieces` and `perPiece` are the per-piece deck's, and only that deck's.",
+      "It carries three lines of its own - what it costs, how many pieces, what",
+      "that is each - instead of the comparison, so the arithmetic on the slide",
+      "can be checked from the slide. See perPieceLines in src/brick/copy.js.",
       "",
       "`list` is NOT a claim about any Israeli shelf. It is the original brand's",
       "recommended retail price, read off Brickset and converted. See rrp.js.",
@@ -75,7 +80,9 @@
     ],
     "ours": "בקהילה",
     "list": "מחיר בלגו",
-    "saving": "חיסכון"
+    "saving": "חיסכון",
+    "pieces": "חלקים",
+    "perPiece": "לחלק"
   },
 
   "overlay": {
@@ -418,11 +425,23 @@
       "Five is the reference's count and it is not arbitrary: five slides is five",
       "chances to hook a viewer in one post, and each swipe is a watch-time",
       "signal. Below three the post reads as thin; above seven the last slides",
-      "are seen by almost nobody."
+      "are seen by almost nobody.",
+      "",
+      "`priceCeilings` is in SHEKELS and `agorotCeilings` is in AGOROT - two",
+      "units, two keys, deliberately. Both are walked from the lowest upward and",
+      "the first that can still fill a deck wins, because 'עד 8 אגורות לחלק' is",
+      "a tighter claim than 'עד 20' and a tighter claim is a better hook.",
+      "",
+      "`minPieces` is the floor under the per-piece deck. Price per piece is an",
+      "average over the box, and a small set of large elements averages low",
+      "while being a worse buy than the figure suggests - the standard caveat on",
+      "the metric, and the reason the deck refuses to be anchored by one."
     ],
     "slides": 5,
     "minSlides": 3,
     "maxSlides": 7,
-    "priceCeilings": [50, 100, 150, 200]
+    "priceCeilings": [50, 100, 150, 200],
+    "agorotCeilings": [5, 8, 10, 15, 20],
+    "minPieces": 200
   }
 }

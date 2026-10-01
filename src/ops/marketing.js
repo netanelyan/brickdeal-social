@@ -277,6 +277,7 @@ export function newCover(key, { actor = null } = {}) {
           subject: deck.subject,
           theme: deck.theme || null,
           ceiling: deck.ceiling || null,
+          agorotCeiling: deck.agorotCeiling || null,
           deals: (deck.slides || []).map((s) => ({
             product: s.nameHe,
             price: s.deal?.price,

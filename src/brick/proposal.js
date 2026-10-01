@@ -1,6 +1,8 @@
 import { brickConfig } from './config.js';
 import { THEME_HE } from './themes.js';
 import { emojiFor } from './emoji.js';
+import { agorotPerPiece } from './recipes.js';
+import { agorotText } from './copy.js';
 import { configured as imagesConfigured } from '../images/homeShot.js';
 
 // The first card: what this post would be, before anything is paid for.
@@ -26,19 +28,35 @@ const money = (n) => `${Math.round(Number(n) || 0).toLocaleString('en-US')}₪`;
  */
 export function proposalMessage(p) {
   const lines = [];
-  const kindHe = { theme: 'לפי נושא', price: 'לפי מחיר', savings: 'הנחות', set: 'סט בודד' };
+  const kindHe = { theme: 'לפי נושא', price: 'לפי מחיר', savings: 'הנחות', perPiece: 'מחיר לחלק', set: 'סט בודד' };
 
   lines.push(`💡 הצעה למצגת · ${kindHe[p.recipe] || p.recipe}`);
   lines.push(`🏷️ ${p.subject}${p.theme && THEME_HE[p.theme] ? '' : ''}`);
   lines.push('');
 
+  // WHAT THE SLIDES WILL SAY, which on a per-piece deck is not the comparison.
+  // That deck prints the price, the piece count and the figure between them and
+  // nothing else — see perPieceLines — so a card counting how many of its sets
+  // got a list price would be describing a different post.
+  const perPiece = p.recipe === 'perPiece';
   const withComparison = p.deals.filter((d) => d.comparison?.ok);
-  lines.push(`📦 ${p.deals.length} סטים · ${withComparison.length} עם השוואת מחיר`);
+  lines.push(
+    perPiece
+      ? `📦 ${p.deals.length} סטים · מחיר לחלק על כל שקופית`
+      : `📦 ${p.deals.length} סטים · ${withComparison.length} עם השוואת מחיר`
+  );
   lines.push('');
 
   for (const d of p.deals) {
     const c = d.comparison;
     lines.push(`   ${emojiFor(d)} ${d.product}`);
+    if (perPiece) {
+      lines.push(
+        `      ${money(d.price)} · ${Number(d.pieces || 0).toLocaleString('en-US')} חלקים · ` +
+          `${agorotText(agorotPerPiece(d))} לחלק`
+      );
+      continue;
+    }
     lines.push(
       c?.ok
         ? `      ${money(c.paid)} מול ${money(c.listIls)} · חיסכון ${money(c.saving)}`
@@ -79,6 +97,14 @@ export function proposalMessage(p) {
  * moment that is cheap to act on is now.
  */
 export function proposalWarning(p) {
+  // A per-piece deck is not thin for having no comparisons — it was never going
+  // to show one. Warning about it here would train the owner to ignore the line
+  // on the one recipe that can be built entirely out of sets Brickset has never
+  // heard of, which is half of what that recipe is for.
+  if (p.recipe === 'perPiece') {
+    return p.deals.length < brickConfig().deck.slides ? `${p.deals.length} סטים בלבד — פחות מהרגיל` : null;
+  }
+
   const withComparison = p.deals.filter((d) => d.comparison?.ok).length;
   if (!withComparison) return 'אף סט לא קיבל מחיר מחירון — המצגת תציג מחירים בלבד, בלי חיסכון';
   if (withComparison < Math.ceil(p.deals.length / 2)) {

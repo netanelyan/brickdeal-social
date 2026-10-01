@@ -6,7 +6,8 @@ import path from 'node:path';
 import { renderToJpeg, closeBrowser } from '../src/render/index.js';
 import { renderBrickSlideHtml } from '../src/render/brickSlide.js';
 import { SIZES } from '../src/render/sizes.js';
-import { slideLines } from '../src/brick/copy.js';
+import { slideLines, perPieceLines } from '../src/brick/copy.js';
+import { agorotPerPiece } from '../src/brick/recipes.js';
 import { writeContactSheet } from './lib/contact-sheet.js';
 import { ROOMS } from './lib/rooms.js';
 
@@ -69,6 +70,22 @@ const SLIDES = [
     comparison: { ok: false, why: 'no such set on Brickset' },
     price: 78,
   },
+  {
+    nameHe: 'מגדל אייפל',
+    emoji: '🏛️',
+    // A per-piece block, and the reason it is in here rather than trusted: its
+    // last two lines are a bidi case nothing else on this list produces. A
+    // price is digits with a sign hard against them; "10,001" is a bare
+    // grouped number, and "4 אגורות" is a number LEADING a Hebrew word inside
+    // an isolate in a right-to-left paragraph. Whether the digit stays on the
+    // correct side of the word it belongs to is decided at render time.
+    //
+    // It also has the most crowded value half of any slide the pipeline can
+    // build, which is the other thing worth looking at: the type step is sized
+    // for "1,499₪" and this asks it to set two words.
+    pieces: 10001,
+    price: 420,
+  },
 ];
 
 const COVER = { hookHe: 'איך אנשים עדיין משלמים מחיר מלא?', emphasisHe: 'מחיר מלא' };
@@ -89,7 +106,9 @@ async function main() {
     });
 
     for (const [i, fixture] of SLIDES.entries()) {
-      const lines = slideLines(fixture.comparison, { price: fixture.price ?? fixture.comparison.paid });
+      const lines = fixture.pieces
+        ? perPieceLines(fixture, agorotPerPiece(fixture))
+        : slideLines(fixture.comparison, { price: fixture.price ?? fixture.comparison.paid });
       const html = renderBrickSlideHtml(
         { nameHe: fixture.nameHe, emoji: fixture.emoji, lines, image: { src: bg.src } },
         { size: 'tiktok' }

@@ -47,6 +47,11 @@ export function brickConfig() {
       throw new Error(`brick-config.json: labels.${k} is empty — every price line needs a label`);
     }
   }
+  // The two a per-piece deck adds, defaulted rather than demanded. Same posture
+  // as caption.engage and covers.priceLines: a config written before that
+  // recipe existed is not a broken config, and throwing on it would take the
+  // whole pipeline down over a deck shape nobody had asked for yet.
+  const fallback = (v, or) => String(v || '').trim() || or;
 
   const captionLines = lines(raw.caption?.lines, 'caption.lines');
   // Optional, unlike the others: an empty pool means no engagement line, which
@@ -91,7 +96,13 @@ export function brickConfig() {
 
   cached = {
     copy: { allowTrademark: raw.copy?.allowTrademark === true },
-    labels: { ours: labels.ours.trim(), list: labels.list.trim(), saving: labels.saving.trim() },
+    labels: {
+      ours: labels.ours.trim(),
+      list: labels.list.trim(),
+      saving: labels.saving.trim(),
+      pieces: fallback(labels.pieces, 'חלקים'),
+      perPiece: fallback(labels.perPiece, 'לחלק'),
+    },
     // The closing frame. Empty strings are a supported setup rather than a
     // misconfiguration: clear askHe and the deck simply ends on its last deal,
     // which is what it did before there was an end card.
@@ -161,6 +172,17 @@ export function brickConfig() {
       minSlides,
       maxSlides,
       priceCeilings: (deck.priceCeilings || [50, 100, 150, 200]).map(Number).filter((n) => Number.isFinite(n) && n > 0),
+      // The per-piece deck's ceilings, IN AGOROT — a different unit from the
+      // list above and therefore a different key. Walked upward the same way,
+      // for the same reason: "עד 8 אגורות לחלק" is a tighter claim than "עד 20"
+      // and a better hook, so the lowest one that can still fill a deck wins.
+      agorotCeilings: (deck.agorotCeilings || [5, 8, 10, 15, 20]).map(Number).filter((n) => Number.isFinite(n) && n > 0),
+      // Below this a per-piece figure flatters rather than informs: the metric
+      // is an average over the box, and a box of forty big elements averages
+      // low while being a worse buy than the number says. The bar is on the
+      // recipe rather than on the feed because it is a rule about what this one
+      // deck may claim, not about what may be sold.
+      minPieces: count(deck.minPieces, 200),
     },
   };
 

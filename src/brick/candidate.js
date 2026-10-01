@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { renderBrickDeck } from '../render/brickDeck.js';
 import { captionFor, instagramCaptionFor, dressing } from './caption.js';
 import { brickConfig } from './config.js';
+import { agorotPerPiece } from './recipes.js';
+import { agorotText } from './copy.js';
 import { targetsForKind } from '../publish/targets.js';
 import { overrideActive, overrideNotes } from '../override.js';
 import { recentPublished } from '../store.js';
@@ -121,6 +123,18 @@ export function brickApprovalMessage(cand) {
   for (const [i, s] of deck.slides.entries()) {
     const c = s.deal?.comparison;
     lines.push(`   ${i + 2}. ${s.emoji} ${s.nameHe}`);
+    // The claim this slide is actually making. On a per-piece deck that is the
+    // arithmetic on the frame and not the comparison, which the slide does not
+    // print — and the entire purpose of this message is that what it lists and
+    // what publishes are the same sentences.
+    if (deck.recipe === 'perPiece') {
+      const each = agorotPerPiece(s.deal);
+      lines.push(
+        `      ${money(s.deal?.price)} · ${Number(s.deal?.pieces || 0).toLocaleString('en-US')} חלקים` +
+          (each ? ` · ${agorotText(each)} לחלק` : ' · ללא ספירת חלקים')
+      );
+      continue;
+    }
     if (c?.ok) {
       lines.push(`      ${money(c.paid)} מול ${money(c.listIls)} · חיסכון ${money(c.saving)}`);
       lines.push(`      מקור: ${c.source.region} ${c.source.amount} ${c.source.currency} @ ${c.source.rate} (${c.source.rateDate})`);

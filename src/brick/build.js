@@ -4,9 +4,9 @@ import { loadDeals } from './feed.js';
 import { lookup as bricksetLookup, compare, configured as bricksetConfigured } from './rrp.js';
 import { rateToIls } from './fx.js';
 import { brickConfig } from './config.js';
-import { slideLines, assertCopy, CopyError, shekels } from './copy.js';
+import { slideLines, perPieceLines, assertCopy, CopyError, shekels } from './copy.js';
 import { emojiFor } from './emoji.js';
-import { available, priceRoundup, themeRoundup, singleSet, oneListingPerSet } from './recipes.js';
+import { available, priceRoundup, themeRoundup, pricePerPiece, singleSet, oneListingPerSet, agorotPerPiece } from './recipes.js';
 import { THEME_HE } from './themes.js';
 import { shotOrProduct } from '../images/homeShot.js';
 import { hasPublished, wasProposed, noteProposed } from '../store.js';
@@ -331,9 +331,16 @@ export async function buildSlides(recipe, { wantImages = true, onProgress = null
 
   // A single-set post has its own slide list - one deal, several shots - so it
   // is the recipe that says what the slides are, not the deal list.
+  //
+  // A per-piece deck does NOT get its own list, and that is the point of
+  // reading the kind here instead. Its slides are one per deal like every other
+  // roundup's; only the three lines under the name differ. Emitting specs for
+  // it would put a second copy of every deal into the stored proposal and
+  // inherit singleSet's problem - a slide list built before the deals were
+  // priced, and rebuilt afterwards or quietly stale.
   const specs =
     recipe.slides ||
-    recipe.deals.map((deal) => ({ deal, showPrices: true }));
+    recipe.deals.map((deal) => ({ deal, showPrices: true, perPiece: recipe.kind === 'perPiece' }));
 
   for (const [i, spec] of specs.entries()) {
     const { deal } = spec;
@@ -352,9 +359,18 @@ export async function buildSlides(recipe, { wantImages = true, onProgress = null
     // A fact slide carries a sentence, not a label and a number, so it has no
     // value half. copy.js renders a line with an empty value as plain text -
     // otherwise every fact slide would show a trailing colon.
+    //
+    // The per-piece figure is re-derived from the deal rather than carried on
+    // the spec so that a deal which lost its piece count between the proposal
+    // and the build falls back to an ordinary price slide instead of printing
+    // a figure divided by nothing. The recipe cannot select such a deal, but
+    // this function is also reachable from a hand-built recipe.
+    const agorot = spec.perPiece ? agorotPerPiece(deal) : null;
     const lines = spec.fact
       ? [{ label: spec.fact.text, value: '' }]
-      : slideLines(deal.comparison, { price: deal.price });
+      : agorot
+        ? perPieceLines(deal, agorot)
+        : slideLines(deal.comparison, { price: deal.price });
 
     try {
       assertCopy(deal.product, `the name of ${deal.productId}`);
@@ -481,6 +497,7 @@ export async function proposeDeck(request = null, { onProgress = null } = {}) {
     subject: ready.subject,
     theme: ready.theme || null,
     ceiling: ready.ceiling || null,
+    agorotCeiling: ready.agorotCeiling || null,
     deals: ready.deals,
     slideSpecs: ready.slides || null,
     rates: priced.rates,
@@ -502,6 +519,7 @@ export async function buildProposed(proposal, { wantImages = true, onProgress = 
     subject: proposal.subject,
     theme: proposal.theme,
     ceiling: proposal.ceiling,
+    agorotCeiling: proposal.agorotCeiling,
     deals: proposal.deals,
     slides: proposal.slideSpecs,
   };
@@ -528,7 +546,15 @@ export async function buildProposed(proposal, { wantImages = true, onProgress = 
   // The draw happens even when the price hook then declines, so that the share
   // means what it says: a run of decks whose first slide has no comparison
   // does not make the NEXT one more likely to lead with a price.
-  const wantPrice = rand() < brickConfig().covers.priceLedShare;
+  //
+  // A PER-PIECE DECK IS NOT IN THE DRAW AT ALL, which is a different thing from
+  // drawing and declining. Its slides do not print the list price — see
+  // perPieceLines — so a cover reading "420₪ במקום 2,400₪" would be a number
+  // nothing behind it repeats, and that is precisely the failure priceHook was
+  // written to make impossible. Excluded before the coin rather than inside it,
+  // because the share is a statement about the decks that CAN lead with a
+  // price, and counting a draw that could never land would quietly shrink it.
+  const wantPrice = ready.kind !== 'perPiece' && rand() < brickConfig().covers.priceLedShare;
   const led = wantPrice ? priceHook(slides[0], { rand }) : null;
   // Only the hook is taken from it. The title is what the queue and the
   // Instagram caption call this post, it is not on a slide, and "89₪ במקום
@@ -543,6 +569,7 @@ export async function buildProposed(proposal, { wantImages = true, onProgress = 
     subject: ready.subject,
     theme: ready.theme || null,
     ceiling: ready.ceiling || null,
+    agorotCeiling: ready.agorotCeiling || null,
     titleHe: title,
     hookHe: hook,
     emphasisHe: emphasis || null,
@@ -591,6 +618,22 @@ export function chooseRecipe(deals, request) {
     if (theme) {
       const byTheme = themeRoundup(deals, { theme });
       if (byTheme) return byTheme;
+    }
+
+    // WHAT A PIECE COSTS. Before the price branch, and that order is the whole
+    // reason this is written as a word test rather than folded into the number
+    // test below: "10 אגורות" also matches "a number with a bit of text round
+    // it", so left to the price branch it would come back as a roundup of sets
+    // under ten shekels — a deck that answers a question nobody asked, built
+    // from a request that parsed perfectly.
+    //
+    // The number inside it is the ceiling in agorot when one is given, and the
+    // configured walk when it is not, so both "/deck אגורות" and "/deck 8
+    // אגורות" mean what they look like they mean.
+    if (/אגור|לחלק|ppp|per[\s-]?piece/i.test(want)) {
+      const n = want.match(/\d{1,3}/);
+      const value = pricePerPiece(deals, n ? { agorotCeilings: [Number(n[0])] } : {});
+      if (value) return value;
     }
 
     // A PRICE. Only when the number is the whole request or nearly so — a set

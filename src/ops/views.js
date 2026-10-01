@@ -143,6 +143,7 @@ export function proposalView(key, held) {
     recipe: p.recipe || null,
     theme: p.theme || null,
     ceiling: p.ceiling || null,
+    agorotCeiling: p.agorotCeiling || null,
     text: proposalMessage(p),
     warning: proposalWarning(p),
     rates: p.rates || {},

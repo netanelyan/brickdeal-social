@@ -102,7 +102,13 @@ async function buildOne(request, n) {
 
   console.log(`\n  ${deck.titleHe}`);
   console.log(
-    `  recipe: ${deck.recipe}${deck.ceiling ? ` (under ${deck.ceiling}₪)` : ''}${deck.theme ? ` · ${deck.theme}` : ''}`
+    `  recipe: ${deck.recipe}` +
+      // Two ceilings, two units. `ceiling` is shekels and `agorotCeiling` is
+      // agorot a piece; printing either with the other's sign is the bug the
+      // second field exists to make impossible.
+      (deck.ceiling ? ` (under ${deck.ceiling}₪)` : '') +
+      (deck.agorotCeiling ? ` (under ${deck.agorotCeiling} agorot a piece)` : '') +
+      (deck.theme ? ` · ${deck.theme}` : '')
   );
   console.log(
     `  cover:  "${deck.hookHe}"${deck.emphasisHe ? `   [shout: ${deck.emphasisHe}]` : ''}   [${deck.hookFrom}]`
@@ -120,11 +126,17 @@ async function buildOne(request, n) {
     // so printing the price under all of them reads as five identical slides
     // when they are nothing of the sort. What a slide SAYS is what to print.
     const carriesPrices = s.lines.length > 1 || Boolean(s.lines[0]?.value);
+    // Same rule again for a per-piece deck, which HAS a comparison on most of
+    // its sets and does not print one. Falling through to the branch below
+    // would report a saving the slide never shows, on the one deck built to
+    // make a different argument.
     const claim = !carriesPrices
       ? s.lines.map((l) => l.label).join(' · ')
-      : c?.ok
-        ? `${money(c.paid)} vs ${money(c.listIls)} (${c.source.region} ${c.source.amount} ${c.source.currency}) saves ${money(c.saving)}`
-        : `${money(s.deal.price)} · no comparison — ${c?.why || 'unknown'}`;
+      : deck.recipe === 'perPiece'
+        ? s.lines.map((l) => `${l.label}: ${l.value}`).join(' · ')
+        : c?.ok
+          ? `${money(c.paid)} vs ${money(c.listIls)} (${c.source.region} ${c.source.amount} ${c.source.currency}) saves ${money(c.saving)}`
+          : `${money(s.deal.price)} · no comparison — ${c?.why || 'unknown'}`;
     console.log(`    ${s.emoji} ${s.nameHe}`);
     console.log(`       ${claim}`);
     console.log(`       photo: ${s.image?.provenance || 'none'}${s.image?.note ? ` (${s.image.note})` : ''}`);

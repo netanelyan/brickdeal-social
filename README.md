@@ -58,10 +58,12 @@ heavy version in one line.
 
 **One phrase per cover is set in cream.** Hebrew has no capitals, so a shout has
 to be carried by colour. It is one phrase and not the line: if every word is
-cream then no word is shouted. On a slide the same colour goes on the saving,
-which is the one number the whole post is an argument about. Cover emphasis is
-marked with `*stars*` in the config and the model is asked for it by name; the
-stars are stripped at load, so one unbalanced marker can never reach a slide.
+cream then no word is shouted. On a slide the same colour goes on the last of
+the three lines — the saving, or the agorot-per-piece figure on a per-piece
+deck — which is the one number the whole post is an argument about. Cover
+emphasis is marked with `*stars*` in the config and the model is asked for it by
+name; the stars are stripped at load, so one unbalanced marker can never reach a
+slide.
 
 One post is a **roundup**: five slides, five different sets, five chances to
 hook a viewer, and every swipe is a watch-time signal.
@@ -150,7 +152,7 @@ Unlike the travel pipeline this grew out of, the proposal is not a plan that the
 build might not keep. Every set on it is already in the feed and already priced,
 so what it names is what the slides will carry.
 
-## Three ways to choose five sets
+## Four ways to choose five sets
 
 `src/brick/recipes.js`, in the order they are tried when nothing is asked for:
 
@@ -158,7 +160,24 @@ so what it names is what the slides will carry.
 |---|---|
 | **theme** | one theme's best current deals — the most specific post available, so the best one when it is available at all |
 | **savings** | the largest real savings on the feed, whatever they cost |
+| **perPiece** | the most brick per shekel — `5 סטים עד 8 אגורות לחלק`, the hobby's own yardstick |
 | **price** | everything under a ceiling, walking the ceilings upward so `5 סטים עד 100₪` is the tightest true claim rather than a safe round number |
+
+**perPiece is below savings on purpose.** A saving is checked against somebody
+else's published retail price; a per-piece figure is arithmetic on our own two
+numbers. Both are true, and when both are available the one with a source
+outside this repository should go out. What earns it a place anyway is that it
+needs *no* comparison — piece count and price are on every usable feed record
+by definition, so it can be filled from exactly the sets the savings deck has
+to throw away when Brickset has never heard of the set number.
+
+Its slides are also the one departure from the three-line price block: they
+carry **what it costs, how many pieces, and what that is each** — 420₪, 10,001,
+4 אגורות — instead of the comparison. One deck, one argument, and the
+arithmetic on the frame can be checked from the frame. A per-piece deck is
+therefore excluded from the price-led cover draw: its slides never print a list
+price, so a cover quoting one would be stating a number nothing behind it
+repeats.
 
 There is also a **single-set** post, and it is the one place the format departs
 from the reference structurally: with only one price block to show, repeating it
@@ -178,7 +197,7 @@ Requires Node 18+ (developed on 24) and no build step.
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env      # then fill it in
-npm test                  # 180 offline checks, no credentials needed
+npm test                  # 389 offline checks, no credentials needed
 npm run brick-lab         # look at the slides, ~15s a round
 npm run brick-once -- --fixture --no-images   # the whole path, publishing nothing
 npm start
@@ -293,8 +312,8 @@ exist.
 
 ## Commands
 
-`/deck` build one now · `/deck harry-potter`, `/deck 100`, `/deck בונסאי` name
-it · `/site` where the panel is · `/status` · `/health` every destination
+`/deck` build one now · `/deck harry-potter`, `/deck 100`, `/deck 8 אגורות`,
+`/deck בונסאי` name it · `/site` where the panel is · `/status` · `/health` every destination
 separately, with its last error · `/usage` tokens and cost · `/igquota` ·
 `/tiktok` connection, tokens, granted scopes · `/tiktok_connect` · `/pending` ·
 `/queue` what is waiting, numbered · `/next` publish the next · `/post 3`

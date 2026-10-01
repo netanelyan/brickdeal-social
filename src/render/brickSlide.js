@@ -56,8 +56,10 @@ const SCRIM = { want: 3, floor: 0.12, ceiling: 0.55 };
 //   - the photograph fills the frame, edge to edge. No card, no border, no
 //     blur, no badge, no logo chip.
 //   - the text CENTRED: a set name near the top, a hook across the middle.
-//   - four lines: the set name and one emoji, largest; then three price lines
-//     of equal size - what it costs us, what it lists for, the difference.
+//   - four lines: the set name and one emoji, largest; then three lines of
+//     equal size - what it costs us, what it lists for, the difference. A
+//     per-piece deck fills those three with its own argument instead (price,
+//     pieces, agorot each) and the frame is identical; see copy.js.
 //   - one phrase in cream rather than white, because Hebrew has no capitals and
 //     a shout has to be carried by colour. One phrase and not the line: if
 //     every word is cream then no word is shouted.
@@ -526,10 +528,11 @@ export function coverHtml(text, emphasis) {
  * One slide.
  *
  * `slide.lines` is what copy.js built: one price line, or three. Both are
- * normal. Three means the comparison could be sourced; one means it could not,
- * and the slide then says what the set costs and nothing about what it is
- * worth — which is the correct thing to say when Brickset has never heard of
- * the set number.
+ * normal. Three means the deck had an argument it could source — the
+ * comparison on most decks, the per-piece arithmetic on a per-piece one; one
+ * means it did not, and the slide then says what the set costs and nothing
+ * about what it is worth, which is the correct thing to say when Brickset has
+ * never heard of the set number.
  *
  * No `spot` argument, and that is a departure from the travel slides worth
  * naming. There the placement search decides where the block goes, per
@@ -580,15 +583,21 @@ export function renderBrickSlideHtml(slide, { size = 'tiktok', cover = false, en
       escapeHtml(slide.nameHe) + (slide.emoji ? emojiHtml(slide.emoji, { size: '0.9em' }) : '');
     const lines = (slide.lines || [])
       .map((l, i) => {
-        // The money bag and the cream both ride the saving line, which is the
-        // last one when there is a comparison to make and absent when there is
-        // not. Tied to the position rather than to the label, so rewording the
+        // The money bag and the cream both ride the LAST OF THREE, which is
+        // the line the block was built to arrive at: the saving on a deck that
+        // sourced a comparison, the agorot-per-piece figure on a per-piece
+        // deck. Absent on a slide with one line, because a slide that only
+        // knows what it costs has nothing to shout.
+        //
+        // Tied to the position rather than to the label, so rewording the
         // labels in the config cannot silently move the emphasis onto the
-        // wrong number.
-        const isSaving = (slide.lines || []).length === 3 && i === 2;
+        // wrong number — and, now that two recipes build a three-line block,
+        // so that a new one inherits the emphasis by putting its argument
+        // last rather than by being named here.
+        const isPoint = (slide.lines || []).length === 3 && i === 2;
         return (
-          `<div class="line${isSaving ? ' emph' : ''}">${priceLineHtml(l, escapeHtml)}` +
-          (isSaving ? emojiHtml('💰', { size: '0.9em' }) : '') +
+          `<div class="line${isPoint ? ' emph' : ''}">${priceLineHtml(l, escapeHtml)}` +
+          (isPoint ? emojiHtml('💰', { size: '0.9em' }) : '') +
           `</div>`
         );
       })

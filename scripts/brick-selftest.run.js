@@ -11,16 +11,28 @@ import {
   assertNoEmDash,
   assertCopy,
   shekels,
+  agorotText,
   priceLine,
+  factLine,
   priceLineHtml,
   slideLines,
+  perPieceLines,
   repairGeresh,
   CopyError,
 } from '../src/brick/copy.js';
 import { setNumber, pickPrice, longestSideCm, compare } from '../src/brick/rrp.js';
 import { deckImageUrls, renderedSizes } from '../src/publish/deckImages.js';
 import { emojiFor, THEME_EMOJI, DEFAULT_EMOJI, missingThemes, ALL_USED as BRICK_EMOJI } from '../src/brick/emoji.js';
-import { priceRoundup, themeRoundup, savingsRoundup, singleSet, orderSlides, slideScore } from '../src/brick/recipes.js';
+import {
+  priceRoundup,
+  themeRoundup,
+  savingsRoundup,
+  pricePerPiece,
+  agorotPerPiece,
+  singleSet,
+  orderSlides,
+  slideScore,
+} from '../src/brick/recipes.js';
 import { hashtagsFor, themeTag, captionFor, instagramCaptionFor, dressing } from '../src/brick/caption.js';
 import { brickConfig, coverLine } from '../src/brick/config.js';
 import { themeKeyFor, chooseRecipe, priceHook, PRICE_HOOK_RATIO, MAX_HOOK_WORDS } from '../src/brick/build.js';
@@ -235,6 +247,28 @@ eq('a line with no value is a sentence, and carries no dangling colon', priceLin
 }
 
 /* -------------------------------------------------------------------------- */
+group('agorot a piece — the one unit on a slide that is not a shekel');
+
+eq('whole agorot, never a fraction of one', agorotText(4.28), '4 אגורות');
+eq('rounded up as well as down', agorotText(7.6), '8 אגורות');
+eq('singular when it is one, because "1 אגורות" is a typo in 40px type', agorotText(1.2), '1 אגורה');
+eq('a count line is a label and a value, same as a price line', JSON.stringify(factLine('חלקים', '822')), JSON.stringify({ label: 'חלקים', value: '822' }));
+eq('and its digits are isolated too', priceLineHtml(factLine('חלקים', '10,001')), 'חלקים: <bdi>10,001</bdi>');
+
+{
+  const lines = perPieceLines({ price: 420, pieces: 10001 }, agorotPerPiece({ price: 420, pieces: 10001 }));
+  eq('a per-piece slide is three lines, same block as every other slide', lines.length, 3);
+  eq('what it costs, first', lines[0].value, '420₪');
+  eq('how many pieces, grouped', lines[1].value, '10,001');
+  eq('and what that is each, last — where the renderer puts the shout', lines[2].value, '4 אגורות');
+  ok(
+    'the arithmetic on the slide checks out against the slide',
+    Math.round((420 / 10001) * 100) === Number(lines[2].value.split(' ')[0])
+  );
+  ok('the list price is deliberately not on it', !lines.some((l) => l.label === brickConfig().labels.list));
+}
+
+/* -------------------------------------------------------------------------- */
 group('the comparison — an empty comparison beats an invented one');
 
 eq('a bare set number gets the -1 variant Brickset keys on', setNumber('10328'), '10328-1');
@@ -320,6 +354,42 @@ group('recipes — which five deals, in which order');
   eq('a savings roundup needs deals that have savings', savingsRoundup(priced, { want: 3 }), null);
   const withSavings = priced.map((d, i) => ({ ...d, comparison: { ok: true, paid: d.price, listIls: d.price * 3, saving: 100 + i * 10 } }));
   ok('and finds them when they exist', Boolean(savingsRoundup(withSavings, { want: 3 })));
+
+  // ---- the per-piece deck -------------------------------------------------
+  eq('agorot a piece is the price over the count, in agorot', Math.round(agorotPerPiece({ price: 420, pieces: 10001 })), 4);
+  eq('no piece count means no figure, never a division by nothing', agorotPerPiece({ price: 88, pieces: null }), null);
+  eq('and neither does a count of zero', agorotPerPiece({ price: 88, pieces: 0 }), null);
+  eq(
+    'under half an agora it refuses rather than printing "0 אגורות לחלק"',
+    agorotPerPiece({ price: 1, pieces: 1000 }),
+    null
+  );
+
+  {
+    const value = pricePerPiece(priced, { want: 3 });
+    ok('a per-piece roundup fills from a feed where nothing has a comparison', Boolean(value));
+    eq('and it is its own kind, not a price deck', value.kind, 'perPiece');
+    ok('every set really is under the ceiling it claims', value.deals.every((d) => agorotPerPiece(d) <= value.agorotCeiling));
+    ok('the tightest true ceiling, not a safe round number', value.agorotCeiling === 5, `chose ${value.agorotCeiling}`);
+    ok('the claim is in the subject, in agorot', value.subject.includes(String(value.agorotCeiling)) && value.subject.includes('אגורות'));
+    ok('the ceiling is NOT carried in the shekel field, which prints with a ₪', value.ceiling === undefined);
+    eq(
+      'the cheapest piece leads, because that is what this deck argues',
+      Math.round(agorotPerPiece(value.deals[0])),
+      Math.min(...value.deals.map((d) => Math.round(agorotPerPiece(d))))
+    );
+
+    eq(
+      'a set too small for the average to mean anything cannot anchor one',
+      pricePerPiece([{ productId: 'tiny', price: 4, pieces: 40 }], { want: 1 }),
+      null
+    );
+    eq(
+      'and a feed with no piece counts at all is refused rather than padded',
+      pricePerPiece(priced.map((d) => ({ ...d, pieces: null })), { want: 3 }),
+      null
+    );
+  }
 
   ok(
     'a sourced comparison outranks anything a piece count can say',
@@ -798,6 +868,17 @@ eq('and so is an empty request', themeKeyFor(''), null);
   eq('a theme name builds that theme', chooseRecipe(deals, 'harry-potter')?.theme, 'harry-potter');
   eq('a bare number builds a price roundup', chooseRecipe(deals, '100')?.kind, 'price');
   eq('and takes the number as the ceiling', chooseRecipe(deals, '100')?.ceiling, 100);
+
+  // The unit collision, and the reason the per-piece branch is tried first.
+  // "10 אגורות" also parses as "a number with a bit of text round it", so read
+  // by the price branch it comes back as a roundup of sets under ten SHEKELS —
+  // a deck that answers a question nobody asked, built from a request that
+  // parsed perfectly and reported no error.
+  eq('a request about agorot builds a per-piece deck', chooseRecipe(deals, 'אגורות')?.kind, 'perPiece');
+  eq('so does one about what a piece costs', chooseRecipe(deals, 'לחלק')?.kind, 'perPiece');
+  eq('and the English the hobby uses for it', chooseRecipe(deals, 'ppp')?.kind, 'perPiece');
+  eq('a number inside it is the ceiling in agorot', chooseRecipe(deals, '8 אגורות')?.agorotCeiling, 8);
+  eq('and NOT a price ceiling in shekels', chooseRecipe(deals, '8 אגורות')?.ceiling, undefined);
 
   // The regression. `themeRoundup(deals, { theme: null })` does not mean "no
   // theme", it means "pick the best theme" — so passing an unresolved request
