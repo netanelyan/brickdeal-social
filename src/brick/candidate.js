@@ -151,6 +151,14 @@ export function brickApprovalMessage(cand) {
   if (photos.generated) {
     lines.push('   ⚠️ יש לסמן את הפוסט כתוכן שנוצר בבינה מלאכותית באפליקציה');
   }
+  // A catalogue photo is the marketplace's own listing image, and a listing
+  // image is an advertisement: a piece-count badge, a price, English captions,
+  // a coloured banner. The generated path refuses all of that outright — see
+  // verifyShot — and this is the path where it arrives untouched, so the one
+  // surface that can still catch it is a person looking at the album.
+  if (photos.stock) {
+    lines.push('   ⚠️ שקופית עם תמונת קטלוג — עלולה לשאת טקסט ותגיות של המוכר, כדאי להסתכל לפני אישור');
+  }
 
   if (deck.dropped?.length) {
     lines.push('');

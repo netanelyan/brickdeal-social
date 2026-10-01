@@ -27,14 +27,22 @@ import { headroomOf } from '../render/headroom.js';
 //      house rule, and the failure it prevents — a post showing one product
 //      while the link sells another — is the one that causes refunds, angry
 //      comments and affiliate complaints whatever the caption says.
-//   2. Check what came back. A generated image that is not the same model is
-//      worse than a catalogue shot, because it is a catalogue shot's problem
-//      plus a false claim. Same guard, and largely the same prompt, as
-//      brickdeal-automation's setImage.js.
-//   3. Never silently substitute. A failure falls back to the product photo
-//      with its provenance CHANGED, so the approval message says the slide is
-//      a catalogue shot and the decision to publish it anyway is made by a
-//      person looking at it.
+//   2. Check what came back, on all three counts. It has to be the same model —
+//      a generated image that is not is worse than a catalogue shot, because it
+//      is a catalogue shot's problem plus a false claim. It has to READ AS A
+//      PHOTOGRAPH rather than a drawing. And it has to be free of the seller's
+//      own artwork. The identity half is the guard brickdeal-automation's
+//      setImage.js has; the other two were added after a deck went out carrying
+//      a grey pencil sketch of a Star Destroyer with a red "1500+PCS" badge
+//      across it, which every check in this file passed at the time.
+//   3. Never silently substitute, and never substitute something unpublishable.
+//      A failure falls back to the product photo with its provenance CHANGED,
+//      so the approval message says the slide is a catalogue shot and a person
+//      decides. But the listing image is an ADVERTISEMENT — badges, prices,
+//      captions, age marks, and on this marketplace quite often a drawing
+//      rather than a photograph — so it is screened the same way before it is
+//      allowed to stand in. When it fails, this file has no picture for that
+//      deal and says so, and the deal does not get a slide.
 
 const MODEL = process.env.IMAGE_GEN_MODEL || 'gemini-2.5-flash-image';
 // The frame the slides are cut to. Overridable only because the day this
@@ -48,6 +56,20 @@ const CACHE_DIR = process.env.SHOT_CACHE_DIR
   : fileURLToPath(new URL('../../data/shots/', import.meta.url));
 
 export const configured = () => Boolean(process.env.IMAGE_GEN_API_KEY);
+
+/**
+ * How many times one slide's photograph may be generated before giving up.
+ *
+ * Three, and the number is the budget rather than a target: the first attempt
+ * succeeds on most sets and nothing after it is paid for. Read from the
+ * environment at call time rather than captured at import, so the bill can be
+ * capped on a running bot without a redeploy — `IMAGE_GEN_ATTEMPTS=1` turns
+ * every retry off.
+ *
+ * Floored at one. Zero attempts is not a cheaper pipeline, it is a pipeline
+ * where every deck silently falls back to catalogue images.
+ */
+export const attemptsAllowed = () => Math.max(1, Math.round(Number(process.env.IMAGE_GEN_ATTEMPTS ?? '3')) || 1);
 
 export class ShotError extends Error {
   constructor(message) {
@@ -168,6 +190,28 @@ export function holdFor({ sizeCm, theme }) {
  * twice over for a reason that is ours rather than the skill's — a generated
  * logo on a generated clone set would be a trademark on a slide, which is the
  * one thing src/brick/copy.js exists to prevent and cannot see.
+ *
+ * THE THIRD DEPARTURE IS THE PARAGRAPH THAT SAYS THIS IS A PHOTOGRAPH, and it
+ * is here because a deck went out with one that was not. A slide came back as a
+ * grey pencil sketch — the model, the sofa, the floor, the whole room drawn in
+ * graphite — and every guard in this file passed it, because the `Avoid:` list
+ * was written against ONE way of not being a photograph. "3D render look, CGI
+ * look" is the failure you get when you ask for a photo of a plastic model; a
+ * drawing is a different failure and nothing here had ever named it. Neither
+ * had anything named greyscale, which is how the same frame lost its colour.
+ *
+ * THE FOURTH IS THE PARAGRAPH ABOUT THE SELLER'S OWN GRAPHICS, from the same
+ * slide. It carried a red `1500+PCS` badge and the words `Desktop Decoration`
+ * in English across the middle of the picture, both lifted straight off the
+ * marketplace listing the shot was built from. That is not the model drifting:
+ * the prompt hands over a listing image and says "the model matches the
+ * attached photo exactly", and a badge sitting on top of the model is part of
+ * what is attached. `Avoid: text, watermark` four paragraphs later did not
+ * outweigh it, and nothing in the instructions had ever told the model that the
+ * picture it was given has somebody else's advertising printed over it.
+ *
+ * Both are also CHECKED after the fact now — see `verifyShot`. A rule in a
+ * prompt is a request, and these two are exactly the kind that has to be true.
  */
 export function stillPrompt({
   nameHe,
@@ -175,6 +219,7 @@ export function stillPrompt({
   theme,
   colours = 'the colours and distinctive parts visible in the attached photo',
   insist = false,
+  insistPhoto = false,
 }) {
   const { hold, contact, fraction, landmark } = holdFor({ sizeCm, theme });
   const length = sizeCm ? `${Math.round(sizeCm)} cm` : 'about 25 cm';
@@ -182,6 +227,16 @@ export function stillPrompt({
 
   return `Using the brick-built model in the attached photo, generate a photorealistic vertical 9:16 photo, shot casually on an iPhone in a bright room during the day.
 ${
+  insistPhoto
+    ? `
+THE LAST ATTEMPT WAS NOT A PHOTOGRAPH. Read this before anything else.
+
+OUTPUT A PHOTOGRAPH. A real frame off a real phone camera, in full natural colour. NOT a drawing. NOT a pencil sketch. NOT line art, an illustration, a painting, a cartoon, an engraving or a 3D render. NOT greyscale, not black and white, not sepia, not a colour-drained or toned image. Every surface in the frame — the model, the floor, the furniture, the wall — is a photographed surface with its real colour and real texture, not a drawn one.
+
+AND NO GRAPHICS ANYWHERE IN IT. The attached picture is an advertisement and has the seller's artwork printed over it. Not one pixel of that artwork appears in what you produce: no badge, no piece count, no price, no English caption, no banner, no arrow, no star, no border, no panel. The frame you make contains a room and a model and nothing else.
+`
+    : ''
+}${
   insist
     ? `
 THE MOST IMPORTANT THING ABOUT THIS PHOTO IS HOW MUCH SPACE IS ABOVE THE MODEL. The whole model sits inside the BOTTOM HALF of the frame. Its highest point — the topmost leaf, petal, flower, tip, aerial, spire, anything that sticks up — is below the halfway line of the frame, and the entire top half of the frame is empty: plain wall, or the far side of the room, out of focus, with nothing in it at all. The photographer stood well back. The model is therefore SMALLER in the frame than it would otherwise be, and that is correct and deliberate. Do not fill the frame with it.
@@ -199,6 +254,10 @@ Scale: the model is ${length} long${
       ? ` and the hand spans only about ${fraction} of its length, fingertips reaching no further than ${landmark}, so it looks big and heavy. The hand and the model are the same distance from the camera, so perspective does not enlarge the hand.`
       : ', and the objects around it are their real everyday size, so it reads as big.'
   }
+
+Medium: this is a PHOTOGRAPH, in full natural colour. A real camera frame with real grain, real depth of field and real surface texture. It is not a drawing, a pencil sketch, line art, an illustration, a painting, a cartoon or a 3D render, and it is not greyscale, monochrome or colour-drained. Every object in it — the model and the whole room around it — is photographed, not drawn.
+
+The attached picture is a marketplace listing, and the seller has printed artwork over it. Expect a piece-count badge like "1500+PCS", a price, an English caption like "Desktop Decoration", a coloured banner, arrows, stars, a border, or several views collaged into one image. NONE OF THAT IS PART OF THE MODEL AND NONE OF IT IS COPIED. Take the built model out of the picture and leave every piece of that artwork behind. What you generate carries no text, no numbers, no badges, no banners, no borders and no panels anywhere in the frame.
 
 The model matches the attached photo exactly: ${colours}, matte plastic with sharp crisp edges on every brick, clearly visible seams between panels, defined stud edges with small shadows in the gaps.
 
@@ -218,7 +277,7 @@ Focus: the model and hand are perfectly sharp. The background is clearly out of 
 
 Slightly uneven exposure on the bright side, clean shadows, no color grading, no studio lighting. Looks like a real photo someone took at home on a bright afternoon, calm and quiet, not a product advertisement.
 
-Avoid: smoothed or melted brick surfaces, rounded soft edges, 3D render look, CGI look, high camera angle, looking down at the model, visible roof or top, small toy scale, model reaching the top edge of the frame, model filling the frame from top to bottom, no space above the model, tight crop, close-up, symmetrical composition, centered background object, staged scene, empty grey wall, studio look, blown-out background, window in frame, lamp in frame, glowing wall, backlight, night, evening, dark room, dim light, low light, moody lighting, underexposed, dark shadows, heavy shadows, dark walls, dark furniture, dark surface under the model, dark or black background, the model sitting in shadow, messy clutter, sharp background, portrait mode cutout, floating model, cropped model, text, watermark, brand names, logos, lettering on the model${
+Avoid: drawing, sketch, pencil sketch, pencil drawing, graphite, charcoal, line art, outlines, hatching, cross-hatching, illustration, painting, watercolour, cartoon, comic, anime, engraving, woodcut, blueprint, CAD drawing, concept art, storyboard, greyscale, monochrome, black and white, sepia, desaturated, colour-drained, text overlay, caption, English words, price tag, sticker, badge, piece-count badge, "PCS", banner, coloured banner, arrow, star rating, border, frame around the photo, collage, split frame, multiple views in one image, product listing graphics, advertisement layout, smoothed or melted brick surfaces, rounded soft edges, 3D render look, CGI look, high camera angle, looking down at the model, visible roof or top, small toy scale, model reaching the top edge of the frame, model filling the frame from top to bottom, no space above the model, tight crop, close-up, symmetrical composition, centered background object, staged scene, empty grey wall, studio look, blown-out background, window in frame, lamp in frame, glowing wall, backlight, night, evening, dark room, dim light, low light, moody lighting, underexposed, dark shadows, heavy shadows, dark walls, dark furniture, dark surface under the model, dark or black background, the model sitting in shadow, messy clutter, sharp background, portrait mode cutout, floating model, cropped model, text, watermark, brand names, logos, lettering on the model${
     handed
       ? ', oversized hand, hand close to the camera, forearm, arm, elbow, deformed hand, extra fingers, two hands, open flat hand with the model merely resting on it, hand lying beside the model instead of holding it'
       : ', hand, hands, fingers, thumb, wrist, arm, any part of a person, anybody holding the model'
@@ -311,14 +370,40 @@ async function generate(prompt, photo) {
   return { bytes: Buffer.from(inline.data, 'base64'), mime };
 }
 
-const VERIFY_PROMPT = `Image 1 is a marketplace seller's photo of a brick-building set. Image 2 is a generated photo that is supposed to show the SAME built model, restaged in a room.
+const VERIFY_PROMPT = `Image 1 is a marketplace seller's photo of a brick-building set. Image 2 is a generated photo that is supposed to show the SAME built model, restaged as a photograph in a real room.
 
-Is the model in image 2 the same build as image 1? Judge by the built model itself: shape, colours, main features, figures. Ignore background, lighting, angle, the hand, and photo quality. A different set from the same franchise, a different scale, or a different vehicle/building of the same kind is NOT a match. If image 2 does not show a built model at all, it is NOT a match.
+Answer three separate questions about image 2.
 
-Return ONLY a JSON object, no markdown: {"match": true or false}`;
+1. match — is the model in image 2 the same build as image 1? Judge by the built model itself: shape, colours, main features, figures. Ignore background, lighting, angle, the hand, and photo quality, and ignore the two pictures being in different styles — image 1 is often a sketch or an exploded diagram of the very same build, and that is still a match. A different set from the same franchise, a different scale, or a different vehicle/building of the same kind is NOT a match. If image 2 does not show a built model at all, it is NOT a match.
+
+2. style — what does image 2 LOOK LIKE? Answer with exactly one of these words:
+   "photo" — an ordinary colour photograph of a real room.
+   "drawing" — hand-drawn or illustrated: pencil sketch, graphite, charcoal, line art with visible outlines or hatching, watercolour, painting, cartoon, comic, engraving, blueprint.
+   "greyscale" — photograph-like but drained of colour: black and white, monochrome or sepia.
+   IMAGE 2 WAS PRODUCED BY AN IMAGE MODEL. That is expected and is not what this question is about, so do NOT answer "drawing" because the picture is AI-generated, or because it looks clean, tidy, bright or well composed. Judge the visual style and nothing else: a generated picture that reads as a normal colour photo of somebody's living room is "photo". Judge the whole frame, not only the model. This question is about image 2 only — the style of image 1 is irrelevant to it.
+
+3. clean — is image 2 free of overlaid graphics? Answer false if any text, number, piece count, price, English caption, badge, sticker, watermark, logo, coloured banner, arrow, star, border or collage panel is laid over the picture or printed across the model — the kind of artwork a marketplace listing carries. Ignore small incidental text that genuinely belongs to the room, such as a book spine on a shelf or the letters on a keyboard.
+
+Return ONLY a JSON object, no markdown: {"match": true|false, "style": "photo"|"drawing"|"greyscale", "clean": true|false}`;
 
 /**
- * Does the generated photo show the set the link sells?
+ * Is this generated picture publishable: the right set, actually a photograph,
+ * and free of the seller's artwork?
+ *
+ * THREE QUESTIONS IN ONE CALL, which is the whole reason they are asked
+ * together. The identity check was already being paid for on every generated
+ * image; adding two more questions to the same request costs a few dozen tokens
+ * and no extra round trip, and the alternative — a second verifier — would
+ * double the per-image bill to ask a model that is already looking at the
+ * picture something it could have answered the first time.
+ *
+ * THE OTHER TWO EXIST BECAUSE THIS FUNCTION USED TO WAVE THEM THROUGH. It asked
+ * only whether the build matched and told the judge in as many words to "ignore
+ * background, lighting, angle, the hand, and photo quality" — so a grey pencil
+ * drawing of the correct ship, with the seller's red "1500+PCS" badge still
+ * printed across it, was a clean pass. It was the right model. It was also not
+ * a photograph and not ours to publish, and the only thing standing between it
+ * and TikTok was whether somebody looked at the approval album closely.
  *
  * Any failure — no key, an API error, an unparseable answer — is a "no", never
  * a pass. The fallback costs us a nicer photograph; a false pass costs a post
@@ -332,18 +417,30 @@ Return ONLY a JSON object, no markdown: {"match": true or false}`;
  * reason it went unnoticed: the pipeline looked like it was working and making
  * a judgement, when it was failing and inventing one.
  *
+ * It now says which of the three failed as well, because the caller retries
+ * differently for each: a wrong model is retried as-is, a drawing is retried
+ * with the medium shouted at the top of the prompt.
+ *
  * Fail closed, always. Explain accurately, always.
  */
-export async function verifySameModel(sourceUrl, generatedBase64, mime = 'image/png') {
+export async function verifyShot(sourceUrl, generatedBase64, mime = 'image/png') {
+  // Nulls rather than falses on the three verdicts, so "the check did not run"
+  // is distinguishable from "the check ran and said no". The caller hardens
+  // the prompt on a `false` and must not harden it on a timeout.
+  const no = (why) => ({ ok: false, match: null, photo: null, clean: null, why });
   const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return { match: false, why: 'no ANTHROPIC_API_KEY, so nothing can check the photo' };
+  if (!key) return no('no ANTHROPIC_API_KEY, so nothing can check the photo');
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
         model: VERIFY_MODEL,
-        max_tokens: 30,
+        // Three booleans instead of one. Still a single short line of JSON,
+        // but 30 tokens was sized for `{"match": true}` and would now truncate
+        // the answer into an unparseable fragment — which fails closed, so the
+        // symptom would have been every generated photograph quietly rejected.
+        max_tokens: 100,
         messages: [
           {
             role: 'user',
@@ -361,15 +458,135 @@ export async function verifySameModel(sourceUrl, generatedBase64, mime = 'image/
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      return { match: false, why: `the check could not run: HTTP ${res.status} ${body.slice(0, 160)}` };
+      return no(`the check could not run: HTTP ${res.status} ${body.slice(0, 160)}`);
     }
     const data = await res.json();
     let text = (data.content || []).map((b) => b.text || '').join('').trim();
     text = text.replace(/^```json/i, '').replace(/```$/, '').trim();
-    const match = JSON.parse(text).match === true;
-    return { match, why: match ? null : 'the photo does not show the same model' };
+    const said = JSON.parse(text);
+
+    // Each one read strictly. A missing or unrecognised answer is a "no", so a
+    // judge that answers two of the three questions cannot have the third one
+    // assumed in its favour.
+    const match = said.match === true;
+    const clean = said.clean === true;
+
+    // THE MEDIUM IS ASKED AS A CLASSIFICATION, NOT A YES/NO, and the first
+    // version of this question is the reason why.
+    //
+    // It asked "is image 2 a PHOTOGRAPH?" and told the judge that an "obvious
+    // 3D/CGI render" was not one. Every picture this function is ever shown is
+    // generated by an image model, so that is very close to asking "was this
+    // made by a machine" — and the honest answer is always yes. Two perfectly
+    // good restaged photographs of a Star Destroyer on a desk, the exact output
+    // this pipeline exists to produce, were both judged `photo: false`, which
+    // would have thrown away every generated image in the project and sent
+    // every deck to the catalogue fallback.
+    //
+    // Naming the three styles instead takes the loaded word out of the question
+    // and leaves a judgement about what the picture LOOKS like, which is the
+    // only thing that was ever being asked.
+    const style = String(said.style || '').toLowerCase().trim();
+    const photo = style === 'photo';
+
+    // Reported in the order that decides what to do about it. A wrong model is
+    // the worst of the three and the one with no retry worth making; a drawing
+    // and a copied badge are both fixable by shouting at the prompt, so they
+    // are named separately from each other and from the identity failure.
+    const why = !match
+      ? 'the photo does not show the same model'
+      : !photo
+        ? `what came back reads as ${style || 'neither a photo nor anything it could name'}, not a photograph`
+        : !clean
+          ? "the seller's own text or badges were copied onto the picture"
+          : null;
+
+    return { ok: match && photo && clean, match, photo, clean, style, why };
   } catch (e) {
-    return { match: false, why: `the check could not run: ${e.message}` };
+    return no(`the check could not run: ${e.message}`);
+  }
+}
+
+const SCREEN_PROMPT = `This picture is a product image from a marketplace listing for a brick-building set, and it is a candidate to be published as-is on a social media slide. Judge the picture itself.
+
+1. style — what does it look like? Answer with exactly one of these words:
+   "photo" — an ordinary colour photograph of the product.
+   "drawing" — hand-drawn or illustrated: pencil sketch, graphite, charcoal, line art, watercolour, painting, cartoon, engraving, blueprint, or a drawn diagram of the parts.
+   "greyscale" — photograph-like but drained of colour: black and white, monochrome or sepia.
+
+2. clean — is it free of overlaid graphics? Answer false if it carries any text, number, piece count, price, caption, badge, sticker, watermark, logo, coloured banner, arrow, star, border or age mark, or if it is several views collaged into one image. Ignore small incidental text that is genuinely part of the product or the room.
+
+Return ONLY a JSON object, no markdown: {"style": "photo"|"drawing"|"greyscale", "clean": true|false}`;
+
+/**
+ * Can this marketplace image be published exactly as it is?
+ *
+ * The fallback path's version of `verifyShot`, and it exists because the
+ * fallback is what actually shipped the bad slide. A listing image goes onto a
+ * slide untouched when generation fails, and the one that went out was the
+ * seller's own pencil drawing with a red `1500+PCS` badge, an English caption
+ * and a `14+` age mark printed across it — an advertisement, published as
+ * though it were a photograph of the product.
+ *
+ * ONE IMAGE AND TWO QUESTIONS. There is nothing to compare it against here:
+ * this IS the source, so identity cannot be wrong and is not asked. What can be
+ * wrong is everything else, and it is the same everything else.
+ *
+ * `ran` is the field the caller branches on, and this is the one check in the
+ * file that does NOT fail closed. Everywhere else a check that cannot run is a
+ * "no", because the thing it guards against is publishing the wrong product.
+ * Here the thing on the other side of the scale is a deck that cannot be built
+ * at all: a missing ANTHROPIC_API_KEY would otherwise drop every slide of every
+ * deck, and silently turning the whole pipeline off is a worse failure than
+ * letting a picture through with a note on the approval card saying it was
+ * never looked at.
+ */
+export async function screenListing(base64, mime = 'image/jpeg') {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return { ran: false, ok: false, why: 'no ANTHROPIC_API_KEY, so nothing looked at it' };
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: VERIFY_MODEL,
+        max_tokens: 100,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: mime, data: base64 } },
+              { type: 'text', text: SCREEN_PROMPT },
+            ],
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      return { ran: false, ok: false, why: `the check could not run: HTTP ${res.status} ${body.slice(0, 160)}` };
+    }
+    const data = await res.json();
+    let text = (data.content || []).map((b) => b.text || '').join('').trim();
+    text = text.replace(/^```json/i, '').replace(/```$/, '').trim();
+    const said = JSON.parse(text);
+    const style = String(said.style || '').toLowerCase().trim();
+    const clean = said.clean === true;
+    const ok = style === 'photo' && clean;
+    return {
+      ran: true,
+      ok,
+      style,
+      clean,
+      why: ok
+        ? null
+        : style !== 'photo'
+          ? `the catalogue picture is ${style || 'not a photograph'} rather than a photograph`
+          : "the catalogue picture carries the seller's own text or badges",
+    };
+  } catch (e) {
+    return { ran: false, ok: false, why: `the check could not run: ${e.message}` };
   }
 }
 
@@ -394,8 +611,16 @@ export async function verifySameModel(sourceUrl, generatedBase64, mime = 'image/
  * deliberate re-spend: every set costs one more generation the next time it is
  * used. That is the price of the edit actually taking effect, and it is smaller
  * than it looks — only sets that come round again are ever paid for.
+ *
+ * `photo1` is the bump that matters most so far, because it is not only making
+ * an improvement take effect — it is EVICTING BAD PICTURES. The shots written
+ * under `bright3` were checked by a verifier that asked whether the model
+ * matched and nothing else, so any pencil drawings and any pictures carrying
+ * the seller's badges that got through are sitting in the cache right now,
+ * indistinguishable from good ones, and would otherwise be served forever
+ * without the new checks ever running on them.
  */
-const LOOK = 'bright3';
+const LOOK = 'photo1';
 
 /**
  * How much of a shot has to be empty above the model, as a fraction of its
@@ -472,35 +697,43 @@ export async function homeShot(deal, { n = 1, sizeCm = null, force = false } = {
 
   const photo = await fetchImage(source.url);
 
-  // One retry and no more. The skill's own troubleshooting list is a set of
-  // prompt EDITS a person makes after looking at the output, which is not
-  // something this can do in general — so a third attempt would be spending
-  // money on the same coin flip.
+  // Up to three attempts, and every retry changes the prompt in response to
+  // what measurably came back.
   //
-  // WHAT THE SECOND ATTEMPT IS FOR HAS CHANGED, and it now costs real money it
-  // did not cost before. It used to run only when the first came back showing
-  // a different model, which is rare. It now also runs when the first came
-  // back with the model filling the frame, which is not rare at all — it is
-  // most tall subjects — and in that case the prompt is hardened rather than
-  // repeated, because repeating a prompt the model has already ignored is the
-  // coin flip and rewriting it is not.
+  // IT WAS TWO, on the reasoning that the skill's troubleshooting list is a set
+  // of prompt EDITS a person makes after looking at the output, so a third
+  // attempt would be "spending money on the same coin flip". That argument was
+  // right about repeating an unchanged prompt and is the same argument that
+  // justified the second attempt once the retry started HARDENING the prompt
+  // instead of repeating it. There are now two independent things a retry can
+  // harden — the framing and the medium — and a first attempt can fail both at
+  // once, so two attempts could no longer address what came back.
   //
-  // The spend is deliberate and it is bounded at one extra image per set, once,
-  // since the result is cached. It buys the only version of this fix that
-  // produces a good photograph: everything downstream of here can move a
-  // picture around a frame, and none of it can put room into a picture that
-  // has none.
+  // The owner asked for this spend in those words, looking at a deck that went
+  // out as a pencil drawing: a slightly larger image bill is cheaper than a
+  // post that cannot be published. It is bounded at two extra images per set,
+  // once, because the result is cached.
   let lastWhy = null;
   let best = null;
-  for (const attempt of [1, 2]) {
-    // Hardened only when the first attempt failed ON HEADROOM. A retry after a
-    // wrong model is a retry of the same instruction; shouting the framing
-    // rule at it would not make it the right set.
+  // Sticky, not per-attempt. A drawing on attempt one means every later attempt
+  // is told to produce a photograph, including the one that is also being told
+  // to leave room above the model.
+  let insistOnPhoto = false;
+
+  for (let attempt = 1; attempt <= attemptsAllowed(); attempt++) {
     const prompt = stillPrompt({
       nameHe: deal.product,
       sizeCm,
       theme: deal.theme,
+      // Hardened only when a previous attempt failed ON HEADROOM — `best` is
+      // only ever set by a picture that already passed every other check. A
+      // retry after a wrong model is a retry of the same instruction; shouting
+      // the framing rule at it would not make it the right set.
       insist: attempt > 1 && best !== null,
+      // A separate switch for a separate failure, so a drawing is not retried
+      // with a paragraph about framing and a badly framed photograph is not
+      // retried with a paragraph about pencils.
+      insistPhoto: insistOnPhoto,
     });
 
     let made;
@@ -513,12 +746,24 @@ export async function homeShot(deal, { n = 1, sizeCm = null, force = false } = {
 
     const { bytes, mime } = made;
     const base64 = bytes.toString('base64');
-    const verdict = await verifySameModel(source.url, base64, mime);
-    if (!verdict.match) {
+    const verdict = await verifyShot(source.url, base64, mime);
+    if (!verdict.ok) {
       // The reason, not a guess at it. "did not show the same model" was
       // printed here for every failure of any kind, including the one that was
       // actually happening.
       lastWhy = `attempt ${attempt}: ${verdict.why}`;
+      // Both of these are fixed by the same paragraph — it demands a real
+      // photograph AND refuses the listing's artwork — so either one turns it
+      // on. A copied badge is a sign the model is treating the attached
+      // advertisement as the thing to reproduce, which is also how the
+      // drawings happen.
+      if (verdict.photo === false || verdict.clean === false) insistOnPhoto = true;
+      // AND IT IS NOT KEPT AS A FALLBACK, which is the difference between this
+      // and the headroom gate below. A badly framed photograph is worth more
+      // than a catalogue image, because the renderer can reframe it. A drawing
+      // is worth less than one: it cannot be turned into a photograph by
+      // anything downstream, and a slide carrying the seller's own red badge is
+      // the catalogue image with extra steps.
       continue;
     }
 
@@ -564,12 +809,26 @@ function keep(stem, best, source) {
 }
 
 /**
- * A home shot, or the product photo with its provenance told truthfully.
+ * A home shot, or the product photo — but only if the product photo is one.
  *
- * The caller that wants a picture no matter what. The fallback is the whole
- * point of the shape: a deck still builds when generation is unavailable or
- * refuses, and what changes is the word on the approval message rather than
- * anything silent.
+ * The caller that wants a picture if there is an acceptable one. The fallback
+ * is still the point of the shape: a deck should keep building when generation
+ * is unavailable or refuses, and what changes is the word on the approval
+ * message rather than anything silent.
+ *
+ * WHAT CHANGED IS THAT "A PICTURE NO MATTER WHAT" WAS THE BUG. This used to
+ * hand back whatever the marketplace was serving, unconditionally, and the
+ * slide that prompted this was exactly that: generation did not produce
+ * anything usable, so the listing image went on the slide, and the listing
+ * image was a pencil drawing of the set with a red `1500+PCS` badge and an
+ * English caption printed over it. The renderer then blew the square up to fill
+ * a 9:16 frame and the top of the post was a blurred smear of that badge.
+ *
+ * So the fallback is now screened, and a listing that is an advertisement is
+ * not a picture this pipeline has. Throwing is the right shape for that:
+ * buildSlides already drops a deal whose photograph failed and reports why, the
+ * feed has hundreds of others, and a deck that cannot find enough is refused
+ * loudly by toBrickCandidate rather than published thin.
  */
 export async function shotOrProduct(deal, opts = {}) {
   try {
@@ -591,16 +850,28 @@ export async function shotOrProduct(deal, opts = {}) {
     // Inlined here rather than by the renderer because this is where a fetch
     // already lives, and a failure has somewhere sensible to go: the URL, which
     // is what this returned before.
+    let photo;
     try {
-      const photo = await fetchImage(source.url);
-      return {
-        src: `data:${photo.mime};base64,${photo.base64}`,
-        provenance: 'stock',
-        note: `catalogue photo — ${e.message}`,
-      };
+      photo = await fetchImage(source.url);
     } catch {
-      return { src: source.url, provenance: 'stock', note: `catalogue photo — ${e.message}` };
+      // The address, unscreened, because the bytes could not be had to screen.
+      // Last resort and visibly labelled: a URL cannot be measured by the
+      // renderer either, so this is the worst-looking slide the pipeline can
+      // produce and the approval card says so.
+      return { src: source.url, provenance: 'stock', note: `catalogue photo, not checked — ${e.message}` };
     }
+
+    const screen = await screenListing(photo.base64, photo.mime);
+    if (screen.ran && !screen.ok) {
+      // No usable picture for this deal. Not a slide.
+      throw new ShotError(`${e.message}; ${screen.why}`);
+    }
+
+    return {
+      src: `data:${photo.mime};base64,${photo.base64}`,
+      provenance: 'stock',
+      note: `catalogue photo${screen.ran ? '' : `, not checked (${screen.why})`} — ${e.message}`,
+    };
   }
 }
 
@@ -624,4 +895,9 @@ export function cachedShotFor(productId, n = 1) {
   return { src: `data:${hit.mime};base64,${hit.buf.toString('base64')}`, provenance: 'generated', note: 'cached' };
 }
 
-export const __test = { cacheStem, cachedShot, sniffMime, extFor, CACHE_DIR };
+// The two judge prompts are in here so the suite can hold their wording to
+// account offline. That is worth doing for these two specifically: the first
+// version of the medium question was miscalibrated in a way no unit test would
+// normally catch — it read as "was this made by a machine", which is always yes
+// here — and the symptom was every good photograph being thrown away.
+export const __test = { cacheStem, cachedShot, sniffMime, extFor, CACHE_DIR, VERIFY_PROMPT, SCREEN_PROMPT };

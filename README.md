@@ -123,16 +123,35 @@ Three rules, in `src/images/homeShot.js`:
    means `image` was swapped for a render — and the seller's photo wins. A post
    showing one product while the link sells another is what causes refunds and
    affiliate complaints, whatever the caption says.
-2. **Check what came back.** A cheap vision call compares the generated photo
-   against the original and has to agree it is the same build. Any failure — no
-   key, an API error, an unparseable answer — is a "no", never a pass.
-3. **Never substitute silently.** A failure falls back to the catalogue photo
-   with its provenance *changed*, and the approval card prints it. The decision
-   to publish one anyway is made by a person looking at it.
+2. **Check what came back, on three counts.** One cheap vision call asks
+   whether it is the same build, whether it *reads as a photograph* rather than
+   a drawing, and whether it is free of the seller's own artwork. Any failure —
+   no key, an API error, an unparseable answer — is a "no", never a pass. Up to
+   three attempts, and each retry hardens whichever rule the last one broke.
+3. **Never substitute silently, and never substitute something unpublishable.**
+   A failure falls back to the catalogue photo with its provenance *changed*,
+   and the approval card prints it. But a listing image is an advertisement, so
+   it is screened the same way first — and when it fails, the deal gets no
+   slide at all rather than an advertisement with Hebrew type over it.
 
 The approval card also says when a deck carries generated photographs, because
 the post then has to be labelled as AI-generated in the app and nothing here can
 do that for you.
+
+**Why rules 2 and 3 grew.** A deck went out carrying a grey pencil sketch of a
+Star Destroyer with a red `1500+PCS` badge and `Desktop Decoration` printed
+across it. Everything in this file passed it: the listing image on this
+marketplace is *itself* often a drawing with the seller's artwork baked on, the
+check only ever asked "is it the same build", and the fallback handed that
+listing to the renderer untouched. Both halves are now screened for the medium
+and for overlaid graphics, and the generation prompt is told outright that the
+picture it is handed is an advertisement and that none of it is to be copied.
+
+One calibration note, because it is easy to reintroduce: the medium question
+asks the judge to **name** the style — `photo`, `drawing` or `greyscale` —
+rather than answering "is this a photograph?". Every image it sees is generated,
+so the yes/no form is close to asking whether a machine made it, and the first
+version of it rejected two perfectly good restaged photographs.
 
 ## Two taps, and what sits between them
 
@@ -197,7 +216,7 @@ Requires Node 18+ (developed on 24) and no build step.
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env      # then fill it in
-npm test                  # 389 offline checks, no credentials needed
+npm test                  # 416 offline checks, no credentials needed
 npm run brick-lab         # look at the slides, ~15s a round
 npm run brick-once -- --fixture --no-images   # the whole path, publishing nothing
 npm start
@@ -389,10 +408,18 @@ account uses — theirs is looked up by hand, per set, and there is no API for i
 
 **The generated photographs are the least predictable step.** The product-shot
 skill carries a list of failure fixes that a person applies after looking at the
-output, and that is not something this can do: the second attempt is the same
-prompt against a stochastic model, so there is no third. The vision check plus a
-cached, regenerable shot per product is the mitigation, and the fallback chain
-degrades to the catalogue photo and says so.
+output, and that is not something this can do in general. What it can do is
+react to a failure it has *measured*: the retry hardens whichever of the three
+rules the last attempt broke — the framing, the medium, the copied artwork — so
+each of the three attempts is a different prompt rather than the same coin
+flipped again. Past that, the vision check plus a cached, regenerable shot per
+product is the mitigation, and a deal with no acceptable picture is dropped from
+the deck and named in `dropped`.
+
+**It costs money, and the dial is `IMAGE_GEN_ATTEMPTS`.** Three by default, read
+per call so a running bot can be capped without a redeploy. Most sets pay for
+one; nothing after the first is spent unless a check failed, and the result is
+cached per product.
 
 **The freshness rule is only as good as the refresh job.** Everything on a slide
 is as true as `deals.json` was when it was read. If

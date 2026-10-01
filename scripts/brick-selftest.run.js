@@ -37,7 +37,14 @@ import { hashtagsFor, themeTag, captionFor, instagramCaptionFor, dressing } from
 import { brickConfig, coverLine } from '../src/brick/config.js';
 import { themeKeyFor, chooseRecipe, priceHook, PRICE_HOOK_RATIO, MAX_HOOK_WORDS } from '../src/brick/build.js';
 import { brickDeckId, sizesFor, photoSummary, brickRepeats } from '../src/brick/candidate.js';
-import { holdFor, sourceFor, stillPrompt, HEADROOM_MIN } from '../src/images/homeShot.js';
+import {
+  holdFor,
+  sourceFor,
+  stillPrompt,
+  HEADROOM_MIN,
+  attemptsAllowed,
+  __test as shotTest,
+} from '../src/images/homeShot.js';
 import { subjectTopRow, fitPhoto, scrimAlpha, underScrim } from '../src/render/headroom.js';
 import { brickScale, nameClass, coverClass, coverHtml, renderBrickSlideHtml } from '../src/render/brickSlide.js';
 import { SIZES } from '../src/render/sizes.js';
@@ -587,6 +594,82 @@ eq('with nothing else, the feed image is what there is', sourceFor({ image: 'ren
   ok('and says so before anything else, where it carries weight', again.indexOf('BOTTOM HALF') < again.indexOf('Framing:'));
   ok('and warns that the model will look smaller, so it is not corrected back', /SMALLER in the frame/.test(again));
   ok('the ordinary prompt does not shout', !/BOTTOM HALF/.test(p));
+
+  // The deck that went out as a grey pencil drawing of a ship, with the
+  // seller's red "1500+PCS" badge still printed across the middle of it. The
+  // Avoid list named one way of not being a photograph — "3D render look, CGI
+  // look" — and a drawing is a different one that nothing had ever named.
+  ok('the prompt says outright that the output is a photograph', /this is a PHOTOGRAPH/.test(p));
+  ok('and refuses a drawing by name, not only a render', /\bnot a drawing\b/i.test(p) && /pencil sketch/.test(p));
+  ok('and refuses greyscale, which is how the same frame lost its colour', /greyscale/.test(p) && /black and white/.test(p));
+  ok('the whole frame is judged, not only the model', /the model and the whole room around it — is photographed/.test(p));
+
+  // The other half of that slide: the badge was not invented, it was copied
+  // off the listing image the shot was built from. Nothing in the prompt had
+  // ever told the model that the picture it is handed is an advertisement.
+  ok('the prompt warns that the attached picture carries seller artwork', /the seller has printed artwork over it/.test(p));
+  ok('and names the badge that actually shipped', /1500\+PCS/.test(p) && /Desktop Decoration/.test(p));
+  ok('and says none of it is copied', /NONE OF THAT IS PART OF THE MODEL AND NONE OF IT IS COPIED/.test(p));
+  ok('the avoid list carries the listing furniture too', /piece-count badge/.test(p) && /collage/.test(p));
+
+  const insisted = stillPrompt({ nameHe: 'x', sizeCm: 30, theme: 'vehicles', insistPhoto: true });
+  ok('a retry after a drawing shouts the medium', /THE LAST ATTEMPT WAS NOT A PHOTOGRAPH/.test(insisted));
+  ok('before everything else, where it carries weight', insisted.indexOf('OUTPUT A PHOTOGRAPH') < insisted.indexOf('Framing:'));
+  ok('and the ordinary prompt does not', !/THE LAST ATTEMPT WAS NOT A PHOTOGRAPH/.test(p));
+
+  // The two hardenings are independent: a first attempt can come back as a
+  // badly framed drawing, and the retry has to address both.
+  const both = stillPrompt({ nameHe: 'x', sizeCm: 30, theme: 'vehicles', insist: true, insistPhoto: true });
+  ok('both hardenings can be asked for at once', /NOT A PHOTOGRAPH/.test(both) && /BOTTOM HALF/.test(both));
+  ok('and the medium comes first, because a drawing cannot be reframed into a photo', both.indexOf('NOT A PHOTOGRAPH') < both.indexOf('BOTTOM HALF'));
+}
+
+{
+  // The judge, and the miscalibration that cost two good photographs.
+  //
+  // The medium question first asked "is image 2 a PHOTOGRAPH?" and ruled out an
+  // "obvious 3D/CGI render". Every picture it is ever shown is generated, so
+  // that is close to asking whether a machine made it, and the honest answer is
+  // always yes: two correct restaged photographs of a Star Destroyer on a desk
+  // were both judged false, which would have sent every deck in the project to
+  // the catalogue fallback. Asking it to NAME the style instead takes the
+  // loaded word out of the question.
+  const v = shotTest.VERIFY_PROMPT;
+  ok('the medium is asked as a classification, not a yes/no', /Answer with exactly one of these words/.test(v));
+  ok('with the three styles named', /"photo"/.test(v) && /"drawing"/.test(v) && /"greyscale"/.test(v));
+  ok('and the judge is told the picture is generated and that this is fine', /PRODUCED BY AN IMAGE MODEL/.test(v));
+  ok('scoped to image 2, so it cannot undermine image 1 as the reference', /This question is about image 2 only/.test(v));
+  ok(
+    'and the loaded yes/no is gone',
+    !/is image 2 a PHOTOGRAPH/i.test(v),
+    v.match(/is image 2 a PHOTOGRAPH/i)?.[0] || 'clean'
+  );
+  // The other half of the same regression: the identity question started
+  // answering false for a sketch against itself, because image 1 on this
+  // marketplace is often a drawing of the very set image 2 photographs.
+  ok('a sketched reference is still a match', /image 1 is often a sketch or an exploded diagram/.test(v));
+  ok('the seller artwork question ignores what genuinely belongs to the room', /book spine/.test(v));
+
+  // The fallback screen. One image, no identity question — this IS the source.
+  const s = shotTest.SCREEN_PROMPT;
+  ok('the catalogue screen asks the same two questions', /style/.test(s) && /clean/.test(s));
+  ok('and nothing about identity, because there is nothing to compare it to', !/image 2|same build/.test(s));
+  ok('it names the age mark, which is what the bad slide carried', /age mark/.test(s));
+}
+
+{
+  // The spend. Three is the budget and not a target — most sets pay for one.
+  const was = process.env.IMAGE_GEN_ATTEMPTS;
+  delete process.env.IMAGE_GEN_ATTEMPTS;
+  eq('three attempts by default', attemptsAllowed(), 3);
+  process.env.IMAGE_GEN_ATTEMPTS = '1';
+  eq('the bill can be capped without a redeploy', attemptsAllowed(), 1);
+  process.env.IMAGE_GEN_ATTEMPTS = '0';
+  eq('but never to zero, which would be every deck on catalogue images', attemptsAllowed(), 1);
+  process.env.IMAGE_GEN_ATTEMPTS = 'nonsense';
+  eq('and a typo falls back rather than disabling generation', attemptsAllowed(), 1);
+  if (was === undefined) delete process.env.IMAGE_GEN_ATTEMPTS;
+  else process.env.IMAGE_GEN_ATTEMPTS = was;
 }
 
 /* -------------------------------------------------------------------------- */
