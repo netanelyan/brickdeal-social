@@ -79,61 +79,29 @@ export class ShotError extends Error {
 }
 
 /**
- * How the model is held, from its real size.
+ * How the model stands on the shelf.
  *
- * Straight out of the skill's size bands. The hold is what carries scale in a
- * still photograph — a set balanced on a flat palm reads as a trinket whatever
- * its actual dimensions — so getting this wrong makes a large set look cheap,
- * which is the opposite of the post's argument.
+ * THE SHOT IS A COLLECTION SHELF NOW, NOT A HAND OR A DESK. The owner asked for
+ * it in those words — "in shelf, like a collection showcase (clean)" — and it is
+ * also the honest reading of the reference: @lego_from_ali's pictures are his
+ * builds on his own white shelves, and a set on display reads as something a
+ * person built and kept, where a set in a hand reads as something being shown
+ * to you. The hand bands this replaced spent most of their length stopping a
+ * 45cm car balancing on an open palm; a shelf has no failure like that.
+ *
+ * Scale comes from the shelf and the builds beside it, which is how a
+ * collector's shelf shows size anyway: the big set is the one the others look
+ * small next to.
+ *
+ * A bouquet is the one subject that cannot stand on its own, and the source
+ * photo is the only thing that knows whether a plant set has a pot of its own,
+ * so the sentence leaves that to what the model can see.
  */
-export function holdFor({ sizeCm, theme }) {
-  // A HAND IS ONLY ALLOWED TO BE HOLDING SOMETHING.
-  //
-  // Each band now carries its own `contact` sentence. That sentence used to be
-  // one hardcoded line appended to all three — "the palm and fingers make full
-  // flat contact with the underside, which sits solidly and heavily on the
-  // hand" — which contradicted the band it mattered most for: a large set was
-  // asked to rest on a DESK and to sit flat on a PALM in the same breath. The
-  // model split the difference and produced what shipped, a 45cm car balanced
-  // across an open palm, which reads as neither held nor put down.
-  //
-  // An open hand lying next to a model is worse than no hand at all. It is a
-  // hand doing nothing, and the eye reads it as a mistake.
+export function displayFor({ theme }) {
   if (theme === 'flowers') {
-    return {
-      hold: 'The fingers are wrapped around the stems, gripping them, with the blooms held above the hand.',
-      contact: 'The fingers close right around the stems and take their weight.',
-      fraction: 'a third',
-      landmark: 'the base of the blooms',
-    };
+    return 'If the model is a bouquet of loose stems it stands upright in a simple plain vase on the shelf; if it has its own pot or base, it stands on that, directly on the shelf.';
   }
-  if (!sizeCm || sizeCm < 15) {
-    return {
-      hold: "An adult man's hand holds the model, gripped between the fingers and thumb.",
-      contact: 'The fingers are closed on it and clearly carrying it. It is held, not balanced.',
-      fraction: 'most',
-      landmark: 'the far edge of the model',
-    };
-  }
-  if (sizeCm <= 40) {
-    return {
-      hold: "An adult man's hand, palm up, carries the model from underneath, fingers curled up around its near edge.",
-      contact:
-        'The palm makes full contact with the underside and the fingertips curl over the edge, so it is visibly being carried rather than resting on an open flat hand.',
-      fraction: 'one third',
-      landmark: 'a third of the way across it',
-    };
-  }
-  // Too big for one hand to hold convincingly, so nothing holds it. NO HAND IN
-  // THE FRAME AT ALL: scale comes from the ordinary objects around it, which is
-  // how a person photographs something they cannot pick up one-handed anyway.
-  return {
-    hold: 'The model sits on a desk. NO HAND and no part of a person is anywhere in the frame.',
-    contact:
-      'It rests on the desk surface on its own wheels or base, with an everyday object near it — a keyboard, a mug, a phone — giving the scale instead.',
-    fraction: 'a quarter',
-    landmark: 'a quarter of the way across it',
-  };
+  return 'The model stands on the shelf on its own wheels, base or feet, resting flat and solid on the shelf surface, displayed the way a collector displays a finished build.';
 }
 
 /**
@@ -212,6 +180,21 @@ export function holdFor({ sizeCm, theme }) {
  *
  * Both are also CHECKED after the fact now — see `verifyShot`. A rule in a
  * prompt is a request, and these two are exactly the kind that has to be true.
+ *
+ * THE FIFTH IS THE SCENE ITSELF: a collection shelf, not a hand in a room. See
+ * `displayFor` for why. Three things about it are written against the rest of
+ * this file rather than for looks:
+ *
+ *   - NOTHING IS ON THE WALL ABOVE THE MODEL, and no second shelf. The top
+ *     third is where four lines of Hebrew go, and headroom.js measures the
+ *     first thing it finds coming down the frame — a shelf of other sets above
+ *     this one would read as a model with no room over it.
+ *   - The wall is warm light grey, not white. White type on a white wall is the
+ *     hardest case the renderer has (see brick-lab's first column), and a wall
+ *     a few shades down from white still reads as clean.
+ *   - The other builds are cut off at the edges, out of focus and smaller. A
+ *     collection is the point, but the judge in `verifyShot` has to know which
+ *     model is the one being sold, and so does the viewer.
  */
 export function stillPrompt({
   nameHe,
@@ -221,11 +204,10 @@ export function stillPrompt({
   insist = false,
   insistPhoto = false,
 }) {
-  const { hold, contact, fraction, landmark } = holdFor({ sizeCm, theme });
+  const stand = displayFor({ theme });
   const length = sizeCm ? `${Math.round(sizeCm)} cm` : 'about 25 cm';
-  const handed = !hold.includes('NO HAND');
 
-  return `Using the brick-built model in the attached photo, generate a photorealistic vertical 9:16 photo, shot casually on an iPhone in a bright room during the day.
+  return `Using the brick-built model in the attached photo, generate a photorealistic vertical 9:16 photo of it on display on a shelf in a builder's home collection, shot on an iPhone in a bright room during the day.
 ${
   insistPhoto
     ? `
@@ -233,27 +215,19 @@ THE LAST ATTEMPT WAS NOT A PHOTOGRAPH. Read this before anything else.
 
 OUTPUT A PHOTOGRAPH. A real frame off a real phone camera, in full natural colour. NOT a drawing. NOT a pencil sketch. NOT line art, an illustration, a painting, a cartoon, an engraving or a 3D render. NOT greyscale, not black and white, not sepia, not a colour-drained or toned image. Every surface in the frame — the model, the floor, the furniture, the wall — is a photographed surface with its real colour and real texture, not a drawn one.
 
-AND NO GRAPHICS ANYWHERE IN IT. The attached picture is an advertisement and has the seller's artwork printed over it. Not one pixel of that artwork appears in what you produce: no badge, no piece count, no price, no English caption, no banner, no arrow, no star, no border, no panel. The frame you make contains a room and a model and nothing else.
+AND NO GRAPHICS ANYWHERE IN IT. The attached picture is an advertisement and has the seller's artwork printed over it. Not one pixel of that artwork appears in what you produce: no badge, no piece count, no price, no English caption, no banner, no arrow, no star, no border, no panel. The frame you make contains a wall, a shelf and the models on it, and nothing else.
 `
     : ''
 }${
   insist
     ? `
-THE MOST IMPORTANT THING ABOUT THIS PHOTO IS HOW MUCH SPACE IS ABOVE THE MODEL. The whole model sits inside the BOTTOM HALF of the frame. Its highest point — the topmost leaf, petal, flower, tip, aerial, spire, anything that sticks up — is below the halfway line of the frame, and the entire top half of the frame is empty: plain wall, or the far side of the room, out of focus, with nothing in it at all. The photographer stood well back. The model is therefore SMALLER in the frame than it would otherwise be, and that is correct and deliberate. Do not fill the frame with it.
+THE MOST IMPORTANT THING ABOUT THIS PHOTO IS HOW MUCH SPACE IS ABOVE THE MODEL. The whole model sits inside the BOTTOM HALF of the frame. Its highest point — the topmost leaf, petal, flower, tip, aerial, spire, anything that sticks up — is below the halfway line of the frame, and the entire top half of the frame is empty: plain wall, out of focus, with nothing in it at all. The photographer stood well back. The model is therefore SMALLER in the frame than it would otherwise be, and that is correct and deliberate. Do not fill the frame with it.
 `
     : ''
 }
-${hold}${
-    handed
-      ? ' Only the hand and a small part of the wrist are visible, entering the frame from the bottom edge. No forearm, no elbow, no arm filling the frame.'
-      : ''
-  } ${contact}
+Display: ${stand} It is one piece of a collection. Further along the same shelf, cut off by the left and right edges of the frame and softly out of focus, stand parts of one or two other brick-built models — smaller in the frame than this one, plain generic builds with no logos and no lettering, never in front of it and never overlapping it. The model in the middle is unmistakably the one this photo is of.
 
-Scale: the model is ${length} long${
-    handed
-      ? ` and the hand spans only about ${fraction} of its length, fingertips reaching no further than ${landmark}, so it looks big and heavy. The hand and the model are the same distance from the camera, so perspective does not enlarge the hand.`
-      : ', and the objects around it are their real everyday size, so it reads as big.'
-  }
+Scale: the model is ${length} long, and the shelf and the builds beside it are their real size, so it reads as big and substantial rather than a trinket. NO HAND and no part of a person is anywhere in the frame.
 
 Medium: this is a PHOTOGRAPH, in full natural colour. A real camera frame with real grain, real depth of field and real surface texture. It is not a drawing, a pencil sketch, line art, an illustration, a painting, a cartoon or a 3D render, and it is not greyscale, monochrome or colour-drained. Every object in it — the model and the whole room around it — is photographed, not drawn.
 
@@ -261,27 +235,21 @@ The attached picture is a marketplace listing, and the seller has printed artwor
 
 The model matches the attached photo exactly: ${colours}, matte plastic with sharp crisp edges on every brick, clearly visible seams between panels, defined stud edges with small shadows in the gaps.
 
-Framing: the camera is at the model's own height, looking straight at its side, not down at it. The model is the subject, entirely inside the frame and positioned slightly off center. It fills about two thirds of the frame width — or less, whatever it takes to obey the headroom rule below, which always wins: for a tall model, a bouquet or a plant, it will be narrower than that, and that is right. The camera is not perfectly level, tilted a degree or two, the way a person holds a phone.
+Framing: the camera is at the shelf's own height, at most a few degrees above it, looking at the model from the front at a slight three-quarter angle so its front and one side both show — not down onto its top. The model is the subject, entirely inside the frame and positioned slightly off center. It fills about two thirds of the frame width — or less, whatever it takes to obey the headroom rule below, which always wins: for a tall model, a bouquet or a plant, it will be narrower than that, and that is right. The front edge of the shelf runs across the frame below the model, close to level, tilted a degree or two the way a person holds a phone.
 
 Headroom: the whole model sits in the lower ${insist ? 'half' : 'two thirds'} of the frame. The ${
     insist ? 'top half' : 'top third'
-  } is empty room above it — plain wall, or the far side of the room, out of focus — with nothing in it. The highest point of the model, ${
-    handed ? 'held up in the hand, ' : ''
-  }including any leaf, petal, tip or part that sticks up from it, is below that line and comes nowhere near the top edge. The person taking the photo stepped back far enough to leave that space above it, so the model takes up less of the frame than it would in a photo framed tight around it.
+  } is empty space above it — plain wall, out of focus — with nothing in it: no shelf above the model, nothing hanging on the wall. The highest point of the model, including any leaf, petal, tip or part that sticks up from it, is below that line and comes nowhere near the top edge. The person taking the photo stepped back far enough to leave that space above it, so the model takes up less of the frame than it would in a photo framed tight around it.
 
-Background: a real room in daylight, tidy but unplanned, photographed from an angle rather than straight on, so the furniture runs at a slight diagonal and objects are partly cut off by the edges of the frame. Ordinary things a person has in a bright home, a pale wall, a shelf, a desk edge, a chair, arranged by life and not by a photographer. Nothing centered behind the model, nothing symmetrical, nothing that looks placed for the shot.
+Shelf and wall: clean and minimal, a collector's display at home. One simple floating shelf in light natural oak or matte white, with a crisp straight front edge. Behind it a plain matte wall in a soft warm light grey or greige — not stark white — with nothing on it: no frames, no posters, no plants, no books, no boxes, no price tags, no props. Tidy and uncluttered: the only things in the frame are the wall, the shelf, the model and the edges of the builds beside it.
 
-Light: the room is bright, full of soft daylight from a window off to one side and slightly in front of the model. Everything in the frame is clearly lit and easy to read, with open, gentle shadows and no dark corners. The model is still the brightest thing in the photo, lit softly from the front, from the camera side. No window or lamp visible in the frame, no hotspot or glare on the wall, no light source behind the model.
+Light: the room is bright, lit by soft daylight from a window off to one side and slightly in front, falling evenly along the shelf, with a faint contact shadow under the model where it meets the shelf. Everything in the frame is clearly lit and easy to read, with no dark corners. The model is the brightest, clearest thing in the photo, lit softly from the camera side. No window or lamp visible in the frame, no hotspot or glare on the wall, no light source behind the model, no coloured LED light.
 
-Focus: the model and hand are perfectly sharp. The background is clearly out of focus with soft, even blur, objects reading as simple shapes but not melted into abstract color. Natural lens falloff, not a cutout effect.
+Focus: the model is perfectly sharp. The builds beside it and the wall are softly out of focus, reading as simple shapes but not melted into abstract color. Natural lens falloff, not a cutout effect.
 
-Slightly uneven exposure on the bright side, clean shadows, no color grading, no studio lighting. Looks like a real photo someone took at home on a bright afternoon, calm and quiet, not a product advertisement.
+Natural exposure, clean neutral colour, no colour grading, no studio lighting. Looks like a real photo a collector took of their own shelf on a bright afternoon — calm and clean, not a product advertisement and not a studio packshot.
 
-Avoid: drawing, sketch, pencil sketch, pencil drawing, graphite, charcoal, line art, outlines, hatching, cross-hatching, illustration, painting, watercolour, cartoon, comic, anime, engraving, woodcut, blueprint, CAD drawing, concept art, storyboard, greyscale, monochrome, black and white, sepia, desaturated, colour-drained, text overlay, caption, English words, price tag, sticker, badge, piece-count badge, "PCS", banner, coloured banner, arrow, star rating, border, frame around the photo, collage, split frame, multiple views in one image, product listing graphics, advertisement layout, smoothed or melted brick surfaces, rounded soft edges, 3D render look, CGI look, high camera angle, looking down at the model, visible roof or top, small toy scale, model reaching the top edge of the frame, model filling the frame from top to bottom, no space above the model, tight crop, close-up, symmetrical composition, centered background object, staged scene, empty grey wall, studio look, blown-out background, window in frame, lamp in frame, glowing wall, backlight, night, evening, dark room, dim light, low light, moody lighting, underexposed, dark shadows, heavy shadows, dark walls, dark furniture, dark surface under the model, dark or black background, the model sitting in shadow, messy clutter, sharp background, portrait mode cutout, floating model, cropped model, text, watermark, brand names, logos, lettering on the model${
-    handed
-      ? ', oversized hand, hand close to the camera, forearm, arm, elbow, deformed hand, extra fingers, two hands, open flat hand with the model merely resting on it, hand lying beside the model instead of holding it'
-      : ', hand, hands, fingers, thumb, wrist, arm, any part of a person, anybody holding the model'
-  }.`;
+Avoid: drawing, sketch, pencil sketch, pencil drawing, graphite, charcoal, line art, outlines, hatching, cross-hatching, illustration, painting, watercolour, cartoon, comic, anime, engraving, woodcut, blueprint, CAD drawing, concept art, storyboard, greyscale, monochrome, black and white, sepia, desaturated, colour-drained, text overlay, caption, English words, price tag, sticker, badge, piece-count badge, "PCS", banner, coloured banner, arrow, star rating, border, frame around the photo, collage, split frame, multiple views in one image, product listing graphics, advertisement layout, smoothed or melted brick surfaces, rounded soft edges, 3D render look, CGI look, high camera angle, looking down at the model, visible roof or top, small toy scale, model reaching the top edge of the frame, model filling the frame from top to bottom, no space above the model, tight crop, close-up, symmetrical composition, studio backdrop, seamless white background, packshot, glass display case, reflections, shelf above the model, objects on the wall above the model, cluttered shelf, crowded shelf, another model in front of or overlapping the subject, another model larger than the subject, a second model in the middle of the frame, stark white wall, blown-out background, window in frame, lamp in frame, glowing wall, coloured LED strip, backlight, night, evening, dark room, dim light, low light, moody lighting, underexposed, dark shadows, heavy shadows, dark walls, dark shelf, dark or black background, the model sitting in shadow, sharp background, portrait mode cutout, floating model, cropped model, text, watermark, brand names, logos, lettering on the model, hand, hands, fingers, thumb, wrist, arm, any part of a person, anybody holding the model.`;
 }
 
 /**
@@ -370,11 +338,11 @@ async function generate(prompt, photo) {
   return { bytes: Buffer.from(inline.data, 'base64'), mime };
 }
 
-const VERIFY_PROMPT = `Image 1 is a marketplace seller's photo of a brick-building set. Image 2 is a generated photo that is supposed to show the SAME built model, restaged as a photograph in a real room.
+const VERIFY_PROMPT = `Image 1 is a marketplace seller's photo of a brick-building set. Image 2 is a generated photo that is supposed to show the SAME built model, restaged as a photograph on a display shelf at home. Other builds may stand beside it, cut off by the edges of the frame and out of focus — the model image 2 is OF is the sharp one in the middle.
 
 Answer three separate questions about image 2.
 
-1. match — is the model in image 2 the same build as image 1? Judge by the built model itself: shape, colours, main features, figures. Ignore background, lighting, angle, the hand, and photo quality, and ignore the two pictures being in different styles — image 1 is often a sketch or an exploded diagram of the very same build, and that is still a match. A different set from the same franchise, a different scale, or a different vehicle/building of the same kind is NOT a match. If image 2 does not show a built model at all, it is NOT a match.
+1. match — is the main model in image 2 the same build as image 1? Judge by the built model itself: shape, colours, main features, figures. Ignore the other out-of-focus builds on the shelf, the background, lighting, angle, a vase or pot it stands in, and photo quality, and ignore the two pictures being in different styles — image 1 is often a sketch or an exploded diagram of the very same build, and that is still a match. A different set from the same franchise, a different scale, or a different vehicle/building of the same kind is NOT a match. If image 2 does not show a built model at all, it is NOT a match.
 
 2. style — what does image 2 LOOK LIKE? Answer with exactly one of these words:
    "photo" — an ordinary colour photograph of a real room.
@@ -382,7 +350,7 @@ Answer three separate questions about image 2.
    "greyscale" — photograph-like but drained of colour: black and white, monochrome or sepia.
    IMAGE 2 WAS PRODUCED BY AN IMAGE MODEL. That is expected and is not what this question is about, so do NOT answer "drawing" because the picture is AI-generated, or because it looks clean, tidy, bright or well composed. Judge the visual style and nothing else: a generated picture that reads as a normal colour photo of somebody's living room is "photo". Judge the whole frame, not only the model. This question is about image 2 only — the style of image 1 is irrelevant to it.
 
-3. clean — is image 2 free of overlaid graphics? Answer false if any text, number, piece count, price, English caption, badge, sticker, watermark, logo, coloured banner, arrow, star, border or collage panel is laid over the picture or printed across the model — the kind of artwork a marketplace listing carries. Ignore small incidental text that genuinely belongs to the room, such as a book spine on a shelf or the letters on a keyboard.
+3. clean — is image 2 free of overlaid graphics? Answer false if any text, number, piece count, price, English caption, badge, sticker, watermark, logo, coloured banner, arrow, star, border or collage panel is laid over the picture or printed across the model — the kind of artwork a marketplace listing carries. Ignore small incidental text that genuinely belongs to the room, such as a book spine on a shelf or the letters on a keyboard. Also ignore markings that are PART OF THE BUILT MODEL and appear on the same model in image 1 — a printed tile, a character's emblem or initial on a cap or a kart, a number on a race car's door, a plaque on a display base. Those are the set, not the seller's advertising. A piece count, a price, an English caption or a badge is NEVER part of the model, even when image 1 carries it too — image 1 is the advertisement.
 
 Return ONLY a JSON object, no markdown: {"match": true|false, "style": "photo"|"drawing"|"greyscale", "clean": true|false}`;
 
@@ -619,8 +587,12 @@ export async function screenListing(base64, mime = 'image/jpeg') {
  * the seller's badges that got through are sitting in the cache right now,
  * indistinguishable from good ones, and would otherwise be served forever
  * without the new checks ever running on them.
+ *
+ * `shelf1` moves every set from a hand or a desk onto the collection shelf.
+ * Nothing cached under `photo1` is wrong, only in the old scene — but a deck
+ * of five shelf shots and three hand shots is not one post, so they all go.
  */
-const LOOK = 'photo1';
+const LOOK = 'shelf1';
 
 /**
  * How much of a shot has to be empty above the model, as a fraction of its

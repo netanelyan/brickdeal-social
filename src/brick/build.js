@@ -60,51 +60,96 @@ const HOOK_SCHEMA = {
 /**
  * The ceiling on a cover line, in words.
  *
- * Seven. Six was tried first and was half a word too tight: the model reaches
- * for the varied shapes the prompt asks for — an admission, a contrast, a
- * before-and-after — and those land at seven, so five covers in six were being
- * thrown back to the pool and the same eight lines went out forever.
+ * ELEVEN, AND IT WAS SEVEN. Seven was a judgement about reading speed — "ten
+ * words is a paragraph rather than a hook" — and the reference account's own
+ * numbers say otherwise. Its three biggest posts, 29% of everything it has ever
+ * been watched, open on lines of eleven, eight and ten words:
+ *
+ *   בואו תראו כמה כסף אתם יכולים לחסוך אם תזמינו מאלי אקספרס   208.7K
+ *   הסניף הכי זול של [brand] בארץ, הכל ברבע מחיר                 153.8K
+ *   אם אתם אוהבים לקנות [brand] במחירים של הארץ תמשיכו לגלול      146.5K
+ *
+ * Seven would have thrown all three back to the pool. What they spend the extra
+ * words on is the viewer — "אתם", "תמשיכו לגלול" — which is exactly the part a
+ * seven-word line has to cut. The cover lays a long line out over three lines
+ * rather than clamping it; see `coverClass`.
  *
  * It lives here as a constant rather than in the prompt alone so the prompt and
- * the check cannot drift — which they had: the prompt asked for "under nine", nothing counted,
- * and what shipped was ten words wide across a full frame.
+ * the check cannot drift — which they had: the prompt asked for "under nine",
+ * nothing counted, and what shipped was ten words wide across a full frame.
  */
-export const MAX_HOOK_WORDS = 7;
+export const MAX_HOOK_WORDS = 11;
 
-const hookSystem = () => `You write the first slide of a Hebrew TikTok slideshow for a channel that finds cheap compatible building-brick sets on AliExpress.
+/**
+ * Does this line state a number, a ratio or a multiple?
+ *
+ * The covers that do — "89₪ במקום 400₪", "הכל ברבע מהמחיר" — are built from the
+ * deck's own numbers and nothing else, because a cover quoting a figure the
+ * slides do not back is the one failure a language model cannot be relied on
+ * not to produce. So a model-written hook that states one is thrown back to
+ * the pool, however good it reads. "ביוקר", "מחיר מלא" and "הכי זול" carry the
+ * same contrast without a claim anybody would have to check.
+ *
+ * Fraction words are matched as words, with the prefixes Hebrew glues on: ברבע
+ * is a claim, ארבע and רבעון are not.
+ */
+const FRACTION_WORD = /(?:^|[^\p{L}])[ובלמהש]?(?:חצי|שליש|רבע|חמישית|עשירית)(?!\p{L})/u;
+const MULTIPLE = /(?:^|[^\p{L}])פי\s+(?:\d|שתיים|שניים|שלוש|ארבע|חמש|שש|שבע|שמונה|תשע|עשר)/u;
+export const statesNumber = (s) => /[\d%₪]/.test(String(s)) || FRACTION_WORD.test(String(s)) || MULTIPLE.test(String(s));
+
+const hookSystem = () => `You write the first slide of a Hebrew TikTok slideshow for a channel that finds cheap compatible building-brick sets on AliExpress and shows Israeli builders what they cost there.
 
 The cover line is the only thing most viewers will read. It has to stop a scroll.
 
-VOICE: first person, conversational, slightly confrontational, hobbyist talking to hobbyist. A question or a challenge. Never a sale, never a percentage, never an exclamation of how amazing something is.
+WHAT WORKS, MEASURED. The account this channel is modelled on has 102 posts and a median of about 5,000 views. These are its three biggest covers, and they earned 29% of all its views between them. The brand name in the originals is replaced with "סטים", because this channel never writes it:
 
-These are real covers from the account this channel is modelled on. Match their voice and their shapes — but DO NOT REPRODUCE ONE. They are the standard, not a menu, and they are already in rotation as the fallback: handing one back means this post and the next go out under the same cover. Write a new line that would belong in this list.
+  בואו תראו כמה כסף אתם יכולים לחסוך אם תזמינו מאלי אקספרס    208,700 views
+  הסניף הכי זול בארץ, הכל ברבע מחיר                              153,800 views
+  אם אתם אוהבים לקנות סטים במחירים של הארץ תמשיכו לגלול           146,500 views
 
-${brickConfig().covers.lines.map((l) => `  ${l}`).join('\n')}
+(The ratio in the second one is not yours to write: when a deck can back a line like it, code writes it from the deck's own prices. See NO NUMBERS below.)
+
+And a mid-table one, in the same voice:
+
+  ועדיין אתם ממשיכים לשלם ביוקר??                                 14,700 views
+
+And these were its weakest:
+
+  הפסקתי לשלם ביוקר על התחביב שלי        929 views
+  במחיר של סט אחד תקנו 8                 1,033 views
+  מה הזמנתי VS מה קיבלתי                 1,082 views
+
+THE DIFFERENCE IS THE WHOLE BRIEF:
+- The winners talk TO THE VIEWER about THEIR money: אתם, תראו, תמשיכו. The losers talk about me — הפסקתי, הזמנתי, קיבלתי — or do arithmetic at the viewer.
+- The winners name the viewer's pain: paying Israeli prices. "במחירים של הארץ", "ביוקר", "עדיין משלמים".
+- The winners point at where it is cheaper, or tease it. "מאלי אקספרס" makes the claim concrete; "הסניף הכי זול בארץ" is a joke and a riddle at once, and "which branch?" is one of the commonest comments on that account. A question the viewer has to ask is a comment.
+- The winners tell the viewer what to do next: בואו תראו, תמשיכו לגלול.
+- None of them asks the viewer to guess a price. This channel asked for guesses under four posts and got no comments at all.
+
+These lines are already in rotation as the fallback. Do not hand one back — this post and the next would go out under the same cover:
+
+${brickConfig().covers.lines.map((l) => `  ${l.text}`).join('\n')}
 
 HARD RULES:
 - Hebrew only.
-- SEVEN WORDS OR FEWER. Count them. Every example above is four to seven, and the limit is checked in code: a longer line is thrown away and one of the examples is used instead. A cover is read at a glance on a moving screen, and ten words is a paragraph rather than a hook.
-- NEVER name the original brand. Not in Hebrew, not in English, not as part of a longer word. Say "סטים תואמים", "אבני בנייה", "התחביב" or just "סט".
-- DO NOT SAY WHAT THE THING IS. The photograph is already showing it. Naming the category — "סט מכוניות", "סט טכניק", "דגם רכב" — spends half a seven-word line describing the picture underneath it, and leaves no room for the only thing the line is for. Say "סט" or "זה" and move on. Never invent a compound noun for it either: "מכונית אבנים" is not a phrase anybody uses.
-- THE STRONGEST SHAPE ASKS THE VIEWER TO NAME A PRICE. "כמה הייתם משלמים על סט כזה?", "נחשו כמה שילמתי על הסט הזה", "תנחשו את המחיר. לא תאמינו." Prefer it when nothing else is obviously better, and here is why it beats a statement: this is a SLIDESHOW. Somebody who has silently guessed a number has to swipe to find out whether they were right, and the second slide is the answer. A line that merely tells them the price is good sets up nothing — they can agree with it and keep scrolling.
-
-- EVERY LINE MUST CARRY THE CONTRAST. The post is one argument: the same model costs a fraction of what the original does. If your line does not contain the too-much — a price, "מחיר מלא", "פי שבע", "ביוקר", "כמה באמת" — then it is not a hook, it is the first half of one. Asking the viewer to guess the price counts: the gap between what they guess and what the next slide says IS the contrast, which is why that shape works.
+- ${MAX_HOOK_WORDS} WORDS OR FEWER. Count them. The biggest cover above is eleven; most good ones are five to eight. The limit is checked in code and a longer line is thrown away.
+- NEVER name the original brand. Not in Hebrew, not in English, not as part of a longer word. Say "סטים", "סטים תואמים", "אבני בנייה", "התחביב" or just "סט". AliExpress MAY be named — "אלי אקספרס" or "אלי" — it is the shop, not the brand, and naming it is what made the biggest cover concrete.
+- NO NUMBERS. No price, no digits, no percentage, no ratio ("בחצי מחיר", "בשליש", "ברבע מחיר"), no multiple ("פי שלוש"). Covers that state a number are built from this deck's own prices by code; a sentence that states one without them is a claim nobody checked, and it is thrown away. Carry the contrast with words: "ביוקר", "מחיר מלא", "במחירים של הארץ", "הכי זול".
+- DO NOT SAY WHAT THE THING IS. The photograph is already showing it. Naming the category — "סט מכוניות", "סט טכניק", "דגם רכב" — spends the line describing the picture underneath it. Say "סטים", "סט" or "זה" and move on. Never invent a compound noun either: "מכונית אבנים" is not a phrase anybody uses.
+- EVERY LINE CARRIES THE CONTRAST: the viewer is paying too much and does not have to. A line without the too-much is the first half of a hook.
 
   These are NOT hooks, and each fails the same way:
-    "למה אתם משלמים על סט מכוניות"  - paying WHAT? Three words spent naming the picture, nothing left for the point.
+    "למה אתם משלמים על סט מכוניות"  - paying WHAT? Words spent naming the picture, nothing left for the point.
     "הסטים האלה ממש שווים"           - says nothing anybody disagrees with.
     "תראו את הסט הזה"                 - an instruction, not an argument.
 
   The test: could somebody read your line and answer "so what?" If yes, rewrite it.
 
-- VARY THE WORDING INSIDE THAT SHAPE. Asking for a guess is the mechanic; "נחשו כמה שילמתי" is not the only sentence that does it, and four posts in a row opening on the same verb is a template whatever the mechanic underneath. Ask it differently every time: "כמה הייתם משלמים על סט כזה?", "תנחשו את המחיר. לא תאמינו.", "מה המחיר שלו לדעתכם?", "תנו מספר. עכשיו תראו את האמיתי.", "כמה זה נראה לכם?" Name the thing in the picture when it helps — "נחשו כמה עלתה הטירה הזאת" is better than the same line about "סט", because it could only be this post.
-
-- VARY THE SHAPE. Not every cover is a question, and no single pattern is the template — each is one of eleven. Look at the range above: a challenge ("אתם קונים סטים במחיר מלא?"), a first-person admission ("הפסקתי לשלם ביוקר על התחביב שלי"), a flat contrast ("זה אותו דגם. זה לא אותו מחיר."), a before-and-after ("מה הזמנתי VS מה קיבלתי"), a confession ("עשיתי את החישוב ונדהמתי"). These posts go out one after another to the same people; five covers in a row opening with "למה" is a template, and a template is the thing this whole account is trying not to look like.
-- No URLs, no calls to action, no hashtags, no emoji.
+- VARY. These posts go out one after another to the same people. Do not copy a winner word for word, and do not open the way the fallback lines open. Vary the verb and the shape: an invitation (בואו תראו...), a condition (אם אתם...), a jab (ועדיין אתם...), a tease (מצאתי את...), a flat contrast (אותו דגם, לא אותו מחיר). Not every cover is a question.
+- No URLs, no hashtags, no emoji.
 - Plain hyphens, never an em dash.
-- Do not state a specific price or a percentage. The slides carry the numbers; the cover carries the question.
 
-THE EMPHASIS is the one phrase in the line that gets shouted. Hebrew has no capitals, so it is set in a different colour instead. Two to four words, and it must appear in the hook character for character or it will not highlight. Pick the phrase the whole line turns on - what somebody is being asked to stop doing, or the thing they did not expect. Never the whole line: if every word is coloured then no word is shouted.`;
+THE EMPHASIS is the one phrase in the line that gets shouted. Hebrew has no capitals, so it is set in a different colour instead. Two to four words, and it must appear in the hook character for character or it will not highlight. Pick the phrase the whole line turns on — the viewer's pain or where it ends. Never the whole line: if every word is coloured then no word is shouted.`;
 
 /**
  * The cover line, and the deck's own name.
@@ -176,6 +221,10 @@ export async function draftHook(recipe, { rand = Math.random, avoid = [] } = {})
     const words = hook.split(/\s+/).filter(Boolean).length;
     if (words > MAX_HOOK_WORDS) {
       return { ...fallback(), from: `pool (model wrote ${words} words)` };
+    }
+    // A number nothing checked. See `statesNumber`.
+    if (statesNumber(hook)) {
+      return { ...fallback(), from: 'pool (model stated a number)' };
     }
     // The emphasis has to be a substring of the hook or the renderer cannot
     // find it — and a hook whose shout cannot be found is the failure this
@@ -266,6 +315,69 @@ export function priceHook(slide, { rand = Math.random } = {}) {
     title: null,
     from: 'price',
   };
+}
+
+/**
+ * The fractions a whole deck may claim, strongest first.
+ *
+ * Stops at a third. "בחצי מחיר" is true of a great many ordinary sales, and a
+ * cover spent on it is a cover that sounds like every other shop.
+ */
+export const DECK_FRACTIONS = [
+  [5, 'חמישית'],
+  [4, 'רבע'],
+  [3, 'שליש'],
+];
+
+/**
+ * The fraction of its list price that EVERY set in this deck is at or under,
+ * as a word, or null.
+ *
+ * Every slide, not most of them. "הכל ברבע מהמחיר" is a claim about the whole
+ * post, and a viewer who swipes to a set at forty percent has caught the cover
+ * lying. So a slide with no comparison at all disqualifies the deck — there is
+ * nothing to say what fraction it is — and the worst ratio on the deck is the
+ * one that picks the word.
+ */
+export function deckFraction(slides) {
+  const priced = (slides || []).filter((s) => !s?.lines?.every((l) => l.value === ''));
+  if (priced.length < brickConfig().deck.minSlides) return null;
+  let worst = 0;
+  for (const s of priced) {
+    const cmp = s?.deal?.comparison;
+    if (!cmp?.ok) return null;
+    const paid = Number(cmp.paid ?? s.deal.price);
+    const list = Number(cmp.listIls);
+    if (!(paid > 0) || !(list > 0)) return null;
+    worst = Math.max(worst, paid / list);
+  }
+  const hit = DECK_FRACTIONS.find(([n]) => worst <= 1 / n);
+  return hit ? hit[1] : null;
+}
+
+/**
+ * The cover that says what fraction of the price the whole deck is at.
+ *
+ * The reference's second-biggest post — 153.8K views — opened on "הסניף הכי
+ * זול של [brand] בארץ, הכל ברבע מחיר". Half of that line is a joke and half of
+ * it is a number, and the number is the half this pipeline can only write by
+ * hand: so the shapes are in the config with `{fraction}` in them, and the
+ * word is `deckFraction`'s, measured off the slides that will carry it.
+ *
+ * Returns null when the deck cannot back any fraction worth saying, and the
+ * caller tries the single-set price cover next.
+ */
+export function ratioHook(slides, { rand = Math.random } = {}) {
+  const shapes = brickConfig().covers.ratioLines;
+  if (!shapes.length) return null;
+  const fraction = deckFraction(slides);
+  if (!fraction) return null;
+
+  const shape = shapes[Math.floor(rand() * shapes.length)];
+  const fill = (s) => String(s || '').replaceAll('{fraction}', fraction);
+  const hook = assertCopy(fill(shape.text), 'the ratio cover line');
+  const emphasis = shape.emphasis ? assertCopy(fill(shape.emphasis), 'the ratio cover emphasis') : null;
+  return { hook, emphasis: emphasis && hook.includes(emphasis) ? emphasis : null, title: null, from: 'ratio' };
 }
 
 /**
@@ -554,13 +666,20 @@ export async function buildProposed(proposal, { wantImages = true, onProgress = 
   // written to make impossible. Excluded before the coin rather than inside it,
   // because the share is a statement about the decks that CAN lead with a
   // price, and counting a draw that could never land would quietly shrink it.
+  //
+  // THE WHOLE-DECK FRACTION IS TRIED FIRST. "הכל ברבע מהמחיר" is the
+  // reference's own second-biggest shape and a claim about every slide in the
+  // post, where "89₪ במקום 400₪" is a claim about one. A single-set post is not
+  // offered it: "everything" about one set is a strange way to say one price.
   const wantPrice = ready.kind !== 'perPiece' && rand() < brickConfig().covers.priceLedShare;
-  const led = wantPrice ? priceHook(slides[0], { rand }) : null;
+  const led = wantPrice
+    ? (ready.kind !== 'set' && ratioHook(slides, { rand })) || priceHook(slides[0], { rand })
+    : null;
   // Only the hook is taken from it. The title is what the queue and the
   // Instagram caption call this post, it is not on a slide, and "89₪ במקום
   // 400₪" is a useless name for a post about six sets.
   const { hook, emphasis, title, from } = led
-    ? { ...led, title: ready.subject, from: 'price' }
+    ? { ...led, title: ready.subject }
     : await draftHook(ready, { rand });
 
   return {

@@ -469,6 +469,18 @@ body { position:relative; }
   -webkit-line-clamp:2;
   line-height:1.22;
 }
+
+/* A hook too long for two lines at that measure, which since MAX_HOOK_WORDS
+   went to eleven is a hook the cover has to carry rather than refuse. At two
+   thirds of the frame a fifty-character line needs three lines, and the clamp
+   above would cut the third one off mid-sentence — the end of the line, which
+   on "...תמשיכו לגלול" is the instruction. So the measure widens back out and
+   three lines are allowed. */
+.cover.longer {
+  max-width:${Math.round(0.8 * w)}px;
+  -webkit-line-clamp:3;
+  line-height:1.2;
+}
 `;
 }
 
@@ -483,8 +495,14 @@ export const nameClass = (text) => (String(text || '').length > 24 ? ' long' : '
  * short enough to hold the eye on its own and breaking it would leave a stub;
  * above it the single line gets thin and quiet exactly where the post needs to
  * be loudest.
+ *
+ * Past forty-four it is `longer` as well — three lines at a wider measure. See
+ * `.cover.longer`.
  */
-export const coverClass = (text) => (String(text || '').length > 28 ? ' long' : '');
+export const coverClass = (text) => {
+  const n = String(text || '').length;
+  return n > 44 ? ' long longer' : n > 28 ? ' long' : '';
+};
 
 /**
  * A cover line with one phrase set in cream.

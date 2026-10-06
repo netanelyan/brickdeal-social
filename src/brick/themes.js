@@ -8,6 +8,13 @@
 // another in the grid is a bug nobody sees until a viewer follows the post to
 // the site and finds a different set of deals under the same word.
 //
+// Keywords match WORDS, not substrings (see `hasWord`). That started here and
+// went upstream on 2026-10-06, so the copies agree again: the substring match
+// filed a Ford, a Concorde, every חייזר and every מזרקה under flowers, and the
+// feed's own `theme` field carried those mistakes. brickdeal-automation's
+// nightly refresh now re-derives every stored theme from the name, so a change
+// to the keywords reaches the whole feed — make it in all three copies.
+//
 // The feed usually carries `theme` already, so detection here is a fallback for
 // legacy records. `THEME_HE` is the part this repo actually uses on every post:
 // it names the deck on its cover and spends one of the five hashtag slots.
@@ -118,9 +125,49 @@ export function splitName(name) {
   return { series: m[1].trim(), product: m[2].trim() };
 }
 
+// The letters Hebrew glues onto the front of a word: "and", "the", "in", "to",
+// "from", "that", "as". One of them, optionally followed by ה, is still the
+// same word — הוורד, בפרחים, והרכב — and anything else in front is a different
+// word that happens to contain the keyword.
+const PREFIX = /^(?:[והבלמשכ]ה?)?$/;
+
+/**
+ * Does `hay` contain `word` as a word, rather than as letters inside another?
+ *
+ * A bare substring test was what this used, and it filed things wrongly in
+ * exactly the way the live feed shows: 'ורד ' (rose) inside פורד and קונקורד put
+ * a Ford and a Concorde under flowers, and 'רכב' inside מורכב made anything
+ * "complex" a vehicle. So a hit counts only at the start of a word, or behind
+ * one of the prefixes above.
+ *
+ * `whole` also holds the END of the word, for the keywords written with a
+ * trailing space ('זר ', 'ורד '). That space was always meant as "this word and
+ * not a longer one", and was never honoured: fold() trims, so 'זר ' was matched
+ * as 'זר' — inside חזרה, which is how חזרה לעתיד, a DeLorean, was filed under
+ * flowers.
+ */
+function hasWord(hay, word, whole = false) {
+  for (let i = hay.indexOf(word); i !== -1; i = hay.indexOf(word, i + 1)) {
+    let start = i;
+    while (start > 0 && /\p{L}/u.test(hay[start - 1])) start--;
+    const run = hay.slice(start, i);
+    // A prefix in front of a word that opens with ו doubles the ו in full
+    // spelling: ה + ורד is הוורד.
+    const doubled = word[0] === 'ו' && run.endsWith('ו') && PREFIX.test(run.slice(0, -1));
+    if (!PREFIX.test(run) && !doubled) continue;
+    const after = hay[i + word.length];
+    if (whole && after !== undefined && /\p{L}/u.test(after)) continue;
+    return true;
+  }
+  return false;
+}
+
+// Folded once, with the trailing-space intent kept beside each word.
+const FOLDED = THEMES.map(([key, words]) => [key, words.map((w) => ({ word: fold(w), whole: /\s$/.test(w) }))]);
+
 function keywordTheme(hay) {
-  for (const [key, words] of THEMES) {
-    for (const w of words) if (hay.includes(fold(w))) return key;
+  for (const [key, words] of FOLDED) {
+    for (const { word, whole } of words) if (hasWord(hay, word, whole)) return key;
   }
   return undefined;
 }
@@ -148,3 +195,38 @@ export function detectTheme(name) {
 }
 
 export const THEME_KEYS = THEMES.map(([k]) => k);
+
+// Themes that are a licence rather than a kind of thing. A set is Star Wars
+// because of whose ship it is, so the product half of the name often says
+// nothing a keyword can catch — "R2-D2 רובוט", "הליכון AT-AT" — and the series
+// prefix naming the franchise is the claim that matters.
+const FRANCHISES = new Set(['star-wars', 'harry-potter', 'superheroes', 'minecraft', 'pokemon', 'anime', 'ninjago', 'disney']);
+
+/**
+ * May this deal stand on a slide in a deck titled with this theme?
+ *
+ * A stricter question than `detectTheme`, and it has to be. The feed's `theme`
+ * field and its series prefix are written upstream, and both are guesses: the
+ * live feed files a pinball machine as `מכוניות | מכונת פינבול קלאסית` with
+ * theme `vehicles`, a DeLorean under flowers, and a Christmas tree and a tree
+ * house under flowers too. A website filter can live with that. A deck cannot:
+ * one went out titled as five car sets with a pinball machine as its cover,
+ * and a post that says one thing and shows another loses the viewer on the
+ * first frame.
+ *
+ * So the evidence has to be in the PRODUCT half, which describes the thing in
+ * the photograph. For a category theme — vehicles, flowers, technic — the
+ * product name itself has to say so. For a franchise the series naming the
+ * licence is enough, unless the product names a different franchise. A deal
+ * that fails is not mislabelled for anything else; it simply cannot anchor a
+ * theme deck, and every other recipe still takes it.
+ */
+export function fitsTheme(deal, key) {
+  if (!deal || !key) return false;
+  const name = deal.name || [deal.series, deal.product].filter(Boolean).join(' | ');
+  const product = deal.product ?? splitName(name).product;
+  const own = keywordTheme(fold(product));
+  if (own === key) return true;
+  if (!FRANCHISES.has(key)) return false;
+  return detectTheme(name) === key && !(own && FRANCHISES.has(own));
+}

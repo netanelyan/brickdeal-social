@@ -1,5 +1,5 @@
 import { brickConfig } from './config.js';
-import { THEME_HE } from './themes.js';
+import { THEME_HE, fitsTheme } from './themes.js';
 
 // Which deals go in one post, and in what order.
 //
@@ -254,11 +254,16 @@ export function pricePerPiece(
  * so this returns null rather than padding with something off-theme. A deck
  * titled "Harry Potter" carrying two Technic sets has told the viewer something
  * false, which is the lesson the travel side learned the hard way.
+ *
+ * AND THE LABEL ON A DEAL IS NOT ENOUGH TO PUT IT IN ONE. The feed's theme is
+ * an upstream guess, and a deck titled "five car sets" went out opening on a
+ * pinball machine the feed had filed under מכוניות. `fitsTheme` asks the name
+ * of the thing in the photograph instead; see themes.js.
  */
 export function themeRoundup(deals, { theme = null, want = brickConfig().deck.slides } = {}) {
   const byTheme = new Map();
   for (const d of deals) {
-    if (!d.theme) continue;
+    if (!d.theme || !fitsTheme(d, d.theme)) continue;
     if (!byTheme.has(d.theme)) byTheme.set(d.theme, []);
     byTheme.get(d.theme).push(d);
   }

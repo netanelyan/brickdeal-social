@@ -242,10 +242,24 @@ A `"user":null` is the right answer — that is the login page's normal state. I
 > The commands for what is actually there:
 >
 > ```bash
-> pm2 list                 # brickdeal should be `online`
-> pm2 restart brickdeal
-> pm2 logs brickdeal --lines 50
+> pm2 list                 # brickdeal-social should be `online`
+> pm2 restart brickdeal-social
+> pm2 logs brickdeal-social --lines 50
 > pm2 save                 # persist the process list across reboots
+>
+> **The name is `brickdeal-social`, not `brickdeal`.** The box runs four pm2
+> processes, and `brickdeal` is the deals bot from brickdeal-automation —
+> `pm2 restart brickdeal` restarts the wrong one and leaves this unchanged.
+>
+> Updating, as it is actually done:
+>
+> ```bash
+> cd /opt/brickdeal-social
+> git pull --ff-only
+> npm ci
+> npm test
+> pm2 restart brickdeal-social
+> ```
 > ```
 >
 > Note also that pm2 does not read `.env` for you the way `EnvironmentFile`

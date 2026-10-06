@@ -73,6 +73,12 @@ export function brickConfig() {
     .map((l) => String(l).trim())
     .filter(Boolean)
     .map(coverLine);
+  // The whole-deck fraction covers, same posture again: optional, starred, and
+  // filled in later — by ratioHook, with `{fraction}`.
+  const ratioLines = (Array.isArray(raw.covers?.ratioLines) ? raw.covers.ratioLines : [])
+    .map((l) => String(l).trim())
+    .filter(Boolean)
+    .map(coverLine);
 
   const hashtags = raw.hashtags || {};
   const broad = tags(hashtags.broad, 'hashtags.broad');
@@ -87,11 +93,18 @@ export function brickConfig() {
 
   const slides = count(deck.slides, 5);
   const minSlides = count(deck.minSlides, 3);
-  const maxSlides = count(deck.maxSlides, 7);
+  // Eight, because the frame count is the set count plus the cover and the end
+  // card, and Instagram refuses a carousel of more than ten.
+  const maxSlides = count(deck.maxSlides, 8);
   // Caught here rather than at build time, where it would present as "only two
   // slides survived" on a deck that was never allowed to have more.
   if (!(minSlides <= slides && slides <= maxSlides)) {
     throw new Error(`brick-config.json: deck.slides (${slides}) must sit between minSlides (${minSlides}) and maxSlides (${maxSlides})`);
+  }
+  // And never past what Instagram will take. Above eight the carousel is cut to
+  // ten frames at publish time, and what it cuts is the end card.
+  if (slides > 8) {
+    throw new Error(`brick-config.json: deck.slides (${slides}) plus the cover and the end card is more than Instagram's ten`);
   }
 
   cached = {
@@ -151,6 +164,7 @@ export function brickConfig() {
       // falls back to the ordinary line.
       swipePriceHe: String(raw.covers?.swipePriceHe || '').trim(),
       priceLines,
+      ratioLines,
       // How often a post leads with the number instead of asking for a guess.
       //
       // Clamped rather than validated, because the failure it guards against is

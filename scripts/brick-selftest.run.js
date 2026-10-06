@@ -1,10 +1,10 @@
 import { loadEnv } from '../src/env.js';
 loadEnv();
 
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { unusable, normalise, isPlaceholder, priceAgeDays, loadDeals, __reset as resetFeed } from '../src/brick/feed.js';
-import { detectTheme, splitName, THEME_HE, THEME_KEYS } from '../src/brick/themes.js';
+import { detectTheme, splitName, fitsTheme, THEME_HE, THEME_KEYS } from '../src/brick/themes.js';
 import {
   TRADEMARK,
   assertNoTrademark,
@@ -34,11 +34,20 @@ import {
   slideScore,
 } from '../src/brick/recipes.js';
 import { hashtagsFor, themeTag, captionFor, instagramCaptionFor, dressing } from '../src/brick/caption.js';
-import { brickConfig, coverLine } from '../src/brick/config.js';
-import { themeKeyFor, chooseRecipe, priceHook, PRICE_HOOK_RATIO, MAX_HOOK_WORDS } from '../src/brick/build.js';
+import { brickConfig, coverLine, __reset as resetConfig } from '../src/brick/config.js';
+import {
+  themeKeyFor,
+  chooseRecipe,
+  priceHook,
+  PRICE_HOOK_RATIO,
+  MAX_HOOK_WORDS,
+  statesNumber,
+  deckFraction,
+  ratioHook,
+} from '../src/brick/build.js';
 import { brickDeckId, sizesFor, photoSummary, brickRepeats } from '../src/brick/candidate.js';
 import {
-  holdFor,
+  displayFor,
   sourceFor,
   stillPrompt,
   HEADROOM_MIN,
@@ -341,6 +350,25 @@ eq('an unrecognisable name gets no theme rather than a wrong one', detectTheme('
 eq('a name with no pipe has no series', splitName('זר ורדים').series, undefined);
 eq('every theme key has a Hebrew label', THEME_KEYS.filter((k) => !THEME_HE[k]).length, 0);
 
+// Keywords match words, not letters inside other words. All four of these were
+// filed wrongly on the live feed of 2026-10-05.
+eq('a Ford is not a rose', detectTheme('פורד קלאסית רטרו'), undefined);
+eq('Back to the Future is not a bouquet', detectTheme('חזרה לעתיד | מכונית הזמן דלוריאן'), 'vehicles');
+eq('a complex model is not a vehicle', detectTheme('דגם מורכב'), undefined);
+eq('but a prefix is still the same word', detectTheme('והרכב הכחול'), 'vehicles');
+eq('including the doubled vav of full spelling', detectTheme('הוורד האדום'), 'flowers');
+eq('a bouquet is still a bouquet', detectTheme('זר ורדים'), 'flowers');
+
+// May a deal stand in a deck titled with its theme? The live feed files a
+// pinball machine under מכוניות, and a deck titled as car sets opened on it.
+const named = (name, theme) => ({ name, theme, ...splitName(name) });
+ok('a pinball machine the feed filed under cars is not a car', !fitsTheme(named('מכוניות | מכונת פינבול קלאסית', 'vehicles'), 'vehicles'));
+ok('a car the feed filed under cars is', fitsTheme(named('מכוניות | מכונית ספורט קלאסית ירוקה', 'vehicles'), 'vehicles'));
+ok('a Christmas tree is not a flower', !fitsTheme(named('חגים | עץ חג המולד מואר', 'flowers'), 'flowers'));
+ok("a franchise's own series is enough, because its names are proper nouns", fitsTheme(named('מלחמת הכוכבים | הליכון AT-AT', 'star-wars'), 'star-wars'));
+ok('even when the product sounds like a boat', fitsTheme(named('מלחמת הכוכבים | ספינת X-Wing אדומה', 'star-wars'), 'star-wars'));
+ok('but a category needs the product to say it', !fitsTheme(named('ארכיטקטורה | דירת חברים', 'architecture'), 'architecture'));
+
 /* -------------------------------------------------------------------------- */
 group('recipes — which five deals, in which order');
 
@@ -356,7 +384,24 @@ group('recipes — which five deals, in which order');
   const theme = themeRoundup(priced, { want: 5 });
   ok('a theme roundup picks a theme that can actually fill one', Boolean(theme));
   ok('and every slide is that theme', theme.deals.every((d) => d.theme === theme.theme));
+  ok('by its own name, not only by its label', theme.deals.every((d) => fitsTheme(d, theme.theme)));
   eq('a theme with too few deals is refused rather than padded', themeRoundup(priced, { theme: 'dinosaurs', want: 5 }), null);
+  {
+    // The Oct 4 deck: five car sets, with a pinball machine as the cover.
+    const cars = ['מכונית ספורט אדומה', 'מכונית מרוץ קלאסית', 'פורשה 911', 'משאית אש', 'מכונית מרוץ כחולה'].map((p, i) => ({
+      productId: `car${i}`,
+      name: `מכוניות | ${p}`,
+      series: 'מכוניות',
+      product: p,
+      theme: 'vehicles',
+      price: 100 + i,
+      comparison: { ok: false },
+    }));
+    const pinball = { productId: 'pin', name: 'מכוניות | מכונת פינבול רטרו', series: 'מכוניות', product: 'מכונת פינבול רטרו', theme: 'vehicles', price: 50, pieces: 5000, comparison: { ok: true, paid: 50, listIls: 900, saving: 850 } };
+    const deck = themeRoundup([pinball, ...cars], { theme: 'vehicles', want: 5 });
+    ok('a mislabelled set cannot get into a theme deck, however well it scores', deck && !deck.deals.includes(pinball));
+    eq('and the deck fills from the sets that are what it says', deck?.deals.length, 5);
+  }
 
   eq('a savings roundup needs deals that have savings', savingsRoundup(priced, { want: 3 }), null);
   const withSavings = priced.map((d, i) => ({ ...d, comparison: { ok: true, paid: d.price, listIls: d.price * 3, saving: 100 + i * 10 } }));
@@ -445,29 +490,30 @@ group('what goes under the post');
   const tiktok = captionFor(deck, dress);
   const insta = instagramCaptionFor(deck, dress);
   ok('the caption carries the call to the community', tiktok.includes(brickConfig().caption.cta));
-  ok('and an ask for a comment', Boolean(dress.engage) && tiktok.includes(dress.engage));
-  // Both destinations get the one drawn ask. Drawing it per caption would send
-  // the same post out wearing two different faces.
-  ok('the same ask reaches Instagram', instagramCaptionFor(deck, dress).includes(dress.engage));
-  // Order: what it is, then the free thing to do, then the link that takes you
-  // away. A CTA that leaves the post should not be offered first.
-  ok(
-    'the comment ask comes before the link',
-    tiktok.indexOf(dress.engage) < tiktok.indexOf(brickConfig().caption.cta)
-  );
-  ok('and a reason to follow', Boolean(dress.follow) && tiktok.includes(dress.follow));
-  ok('the same reason reaches Instagram', insta.includes(dress.follow));
-  // It is the last thing said before the tags, because it is the only line
-  // about the NEXT post rather than this one.
-  ok(
-    'the reason to follow closes the caption',
-    tiktok.indexOf(dress.follow) > tiktok.indexOf(brickConfig().caption.cta)
-  );
+  ok('and says where the link is', /בביו/.test(brickConfig().caption.cta));
+  // Short since 2026-10-05: four carousels with a comment ask and a reason to
+  // follow got no comments at all, and this account's best posts carry three
+  // words. See _engageComment in brick-config.json.
   eq(
-    'nothing but the separator and the tags comes after it',
-    tiktok.split('\n').slice(-3)[0],
-    dress.follow
+    'with the ask and the follow pools off, it is the hook, the link, the separator and the tags',
+    tiktok.split('\n').length,
+    4
   );
+
+  // The mechanism is kept for the day the pools come back, so its order is
+  // still held to account — with lines passed in, since the config has none.
+  {
+    const ask = 'איזה סט הבא? תגיבו 👇';
+    const why = 'עקבו לעוד סטים כל שבוע';
+    const full = captionFor(deck, { ...dress, engage: ask, follow: why });
+    // Order: what it is, then the free thing to do, then the link that takes
+    // you away. A CTA that leaves the post should not be offered first.
+    ok('an ask for a comment, when there is one, comes before the link', full.indexOf(ask) < full.indexOf(brickConfig().caption.cta));
+    // It is the last thing said before the tags, because it is the only line
+    // about the NEXT post rather than this one.
+    eq('and a reason to follow closes the caption', full.split('\n').slice(-3)[0], why);
+    ok('the same lines reach Instagram', instagramCaptionFor(deck, { ...dress, engage: ask, follow: why }).includes(why));
+  }
   ok('and a separator before the tags', tiktok.includes(brickConfig().caption.separator));
   ok('no URL anywhere in it — the link lives in the bio', !/https?:\/\/|www\.|\.com|\.co\.il/i.test(tiktok));
   ok("Instagram opens with the title, because a carousel has no title field", insta.startsWith(deck.titleHe));
@@ -551,12 +597,59 @@ group('the cover that leads with the price');
 }
 
 /* -------------------------------------------------------------------------- */
+group('the cover that says what fraction the whole deck is at');
+
+{
+  const at = (paid, listIls) => ({
+    lines: [{ label: 'x', value: '1' }],
+    deal: { price: paid, comparison: { ok: true, paid, listIls, saving: listIls - paid } },
+  });
+
+  eq('every set at a fifth or under is a fifth', deckFraction([at(10, 60), at(20, 100), at(30, 200)]), 'חמישית');
+  eq('the WORST set picks the word, not the best', deckFraction([at(10, 100), at(10, 100), at(25, 100)]), 'רבע');
+  eq('a third', deckFraction([at(33, 100), at(10, 100), at(20, 100)]), 'שליש');
+  eq('one set over a third and the deck claims nothing', deckFraction([at(10, 100), at(10, 100), at(40, 100)]), null);
+  eq(
+    'one set with no comparison and the deck claims nothing — "הכל" means every slide',
+    deckFraction([at(10, 100), at(10, 100), { lines: [{ value: '1' }], deal: { price: 9, comparison: { ok: false } } }]),
+    null
+  );
+  eq('too few slides to be a deck claims nothing', deckFraction([at(10, 100), at(10, 100)]), null);
+
+  const led = ratioHook([at(10, 100), at(20, 100), at(24, 100)], { rand: () => 0 });
+  ok('the cover carries the measured word', led && led.hook.includes('רבע'), led?.hook);
+  ok('and shouts it', Boolean(led?.emphasis) && led.hook.includes(led.emphasis));
+  eq('and says where it came from', led?.from, 'ratio');
+  ok(
+    'every configured shape fills in and fits the word limit',
+    brickConfig().covers.ratioLines.every((_, i, all) => {
+      const h = ratioHook([at(10, 100), at(10, 100), at(10, 100)], { rand: () => i / all.length });
+      return h && !h.hook.includes('{') && h.hook.split(/\s+/).length <= MAX_HOOK_WORDS;
+    })
+  );
+  eq('a deck that cannot back one gets none', ratioHook([at(50, 100), at(10, 100), at(10, 100)]), null);
+}
+
+/* -------------------------------------------------------------------------- */
+group('a hook the model wrote may not state a number');
+
+{
+  // Covers that state a number are built from the deck's own prices. One the
+  // model wrote is a claim nobody checked.
+  ok('a price', statesNumber('זה עולה 89₪'));
+  ok('a digit', statesNumber('קניתי 8 סטים'));
+  ok('a percentage', statesNumber('חיסכון של 70%'));
+  ok('a fraction, with its prefix', statesNumber('הכל ברבע מחיר') && statesNumber('בשליש מהמחיר') && statesNumber('בחצי מחיר'));
+  ok('a multiple', statesNumber('פי שלוש יותר זול'));
+  ok('but not a word that merely contains one', !statesNumber('ארבעה סטים חדשים') && !statesNumber('הרבעון הזה') && !statesNumber('ביום שלישי'));
+  ok("and not the reference's winning lines without their numbers", !statesNumber('אם אתם אוהבים לקנות סטים במחירים של הארץ, תמשיכו לגלול'));
+}
+
+/* -------------------------------------------------------------------------- */
 group('the photograph step');
 
-eq('a small model is held in the fingers', holdFor({ sizeCm: 10 }).fraction, 'most');
-eq('a mid-sized one sits on an open palm', holdFor({ sizeCm: 30 }).fraction, 'one third');
-eq('a large one rests on a desk, because a palm makes it read as a trinket', holdFor({ sizeCm: 60 }).fraction, 'a quarter');
-ok('a bouquet is gripped by the stems', /stems/.test(holdFor({ theme: 'flowers' }).hold));
+ok('a model stands on the shelf on its own base', /stands on the shelf/.test(displayFor({ theme: 'vehicles' })));
+ok('a bouquet stands in a vase, because it cannot stand on its own', /vase/.test(displayFor({ theme: 'flowers' })));
 eq(
   'the seller photo wins over the official render — the link sells that one',
   sourceFor({ image: 'render.jpg', sourceImage: 'seller.jpg' }).url,
@@ -567,10 +660,22 @@ eq('with nothing else, the feed image is what there is', sourceFor({ image: 'ren
   const p = stillPrompt({ nameHe: 'x', sizeCm: 30, theme: 'vehicles' });
   ok('the prompt states the real size rather than guessing silently', p.includes('30 cm'));
   ok('and forbids lettering, which would put a trademark somewhere copy.js cannot see', /lettering on the model/.test(p));
-  ok('and asks for a real room rather than a studio', /a real room in daylight/.test(p));
+
+  // The collection shelf. The owner's words: "in shelf, like a collection
+  // showcase (clean)".
+  ok('the model is on display on a shelf', /on display on a shelf/.test(p) && /Shelf and wall:/.test(p));
+  ok('as one piece of a collection, with other builds beside it', /It is one piece of a collection/.test(p));
+  ok('which are out of focus and never cover it', /softly out of focus/.test(p) && /never in front of it and never overlapping it/.test(p));
+  ok('and clean: nothing on the wall', /no frames, no posters, no plants/.test(p));
+  ok('no hand anywhere in the frame', /NO HAND and no part of a person/.test(p) && /anybody holding the model/.test(p));
+  // headroom.js reads the first thing coming down the frame as the model, so a
+  // shelf of other sets above this one would read as a model with no room.
+  ok('and nothing above the model, where the type goes', /no shelf above the model/.test(p) && /shelf above the model,/.test(p));
+  ok('and not a studio packshot', /not a studio packshot/.test(p) && /seamless white background/.test(p));
   // A slide is watched at thumbnail size, where a dark frame is a dark smudge.
   // The prompt used to stage the shot in a dim bedroom at night.
   ok('the room is bright and lit by daylight', /the room is bright/.test(p) && /daylight/.test(p));
+  ok('the wall is a shade down from white, which white type can be read on', /warm light grey/.test(p) && /not stark white/.test(p));
   ok(
     'and nothing asks for the dark any more',
     !/at night|the room is dim|soft shadow/.test(p),
@@ -649,6 +754,13 @@ eq('with nothing else, the feed image is what there is', sourceFor({ image: 'ren
   // marketplace is often a drawing of the very set image 2 photographs.
   ok('a sketched reference is still a match', /image 1 is often a sketch or an exploded diagram/.test(v));
   ok('the seller artwork question ignores what genuinely belongs to the room', /book spine/.test(v));
+  // A Luigi kart failed three attempts on "the seller's text was copied" for
+  // the L on its own cap. Printed parts are the set.
+  ok('and what is printed on the model itself', /PART OF THE BUILT MODEL/.test(v) && /emblem/.test(v));
+  ok('but never a piece count or a badge, even when image 1 carries one', /NEVER part of the model/.test(v));
+  // The shelf puts other builds in the frame. The judge has to know which one
+  // the photograph is of.
+  ok('the judge is told which model on the shelf is the subject', /the sharp one in the middle/.test(v) && /Ignore the other out-of-focus builds/.test(v));
 
   // The fallback screen. One image, no identity question — this IS the source.
   const s = shotTest.SCREEN_PROMPT;
@@ -747,6 +859,13 @@ group('the slide');
 
   eq('a long hook is broken over two lines', coverClass('למה אתה עדיין משלם אלף שקל על מכונית מאבנים?'), ' long');
   eq('a short one is left on one', coverClass('שליש מהמחיר'), '');
+  // Eleven words is allowed now, and the two-line clamp would cut the end off
+  // it — which on this line is the instruction.
+  eq(
+    'an eleven-word hook gets three lines rather than losing its end',
+    coverClass('בואו תראו כמה כסף אתם יכולים לחסוך אם תזמינו מאלי אקספרס'),
+    ' long longer'
+  );
 
   // One number can end with the other. The cream belongs on OUR price, not on
   // the last two digits of the list price.
@@ -947,6 +1066,16 @@ eq('and so is an empty request', themeKeyFor(''), null);
 {
   const deals = globalThis.__deals.map((d) => ({ ...d, comparison: { ok: false } }));
 
+  // These are about how a request is READ, not about how big a deck is, and
+  // the fixture feed was written for five-set decks: it has five Harry Potter
+  // sets, not eight. So this block runs at five, on its own copy of the
+  // config, and puts the real one back afterwards.
+  const realConfig = readFileSync(process.env.BRICK_CONFIG_PATH, 'utf8');
+  const atFive = JSON.parse(realConfig);
+  atFive.deck.slides = 5;
+  writeFileSync(process.env.BRICK_CONFIG_PATH, JSON.stringify(atFive));
+  resetConfig();
+
   ok('a request nothing matches still yields a buildable deck', Boolean(chooseRecipe(deals, 'nonsense')));
   eq('a theme name builds that theme', chooseRecipe(deals, 'harry-potter')?.theme, 'harry-potter');
   eq('a bare number builds a price roundup', chooseRecipe(deals, '100')?.kind, 'price');
@@ -975,6 +1104,9 @@ eq('and so is an empty request', themeKeyFor(''), null);
     'matched on the product half of the feed name, not only the whole string',
     chooseRecipe(deals, 'זר ורדים')?.deals[0]?.product === 'זר ורדים'
   );
+
+  writeFileSync(process.env.BRICK_CONFIG_PATH, realConfig);
+  resetConfig();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -983,15 +1115,14 @@ group('the config refuses to be half-loaded');
 {
   const cfg = brickConfig();
   ok('the caption pool is not empty', cfg.caption.lines.length > 0);
-  ok('and there is something to ask for a comment with', cfg.caption.engage.length > 0);
   // Engagement bait is demoted by both platforms, and we could not honour it
-  // anyway — nothing here replies, DMs or sends a link back.
+  // anyway — nothing here replies, DMs or sends a link back. Held even while
+  // the pool is empty, for the day it is refilled.
   ok(
     'no ask promises a reply or a DM in exchange',
     cfg.caption.engage.every((l) => !/(אשלח|בפרטי|בדי'אם|ד''מ|תקבלו לינק)/.test(l)),
     cfg.caption.engage.find((l) => /(אשלח|בפרטי|תקבלו לינק)/.test(l)) || 'clean'
   );
-  ok('and something to give as a reason to follow', cfg.caption.follow.length > 0);
   // The emoji budget is three — hook, comment ask, cta pin — and the follow
   // line is the one that reads best without one. See the note in the config.
   ok(
@@ -999,7 +1130,7 @@ group('the config refuses to be half-loaded');
     cfg.caption.follow.every((l) => !/\p{Extended_Pictographic}/u.test(l)),
     cfg.caption.follow.find((l) => /\p{Extended_Pictographic}/u.test(l)) || 'clean'
   );
-  ok('the closing frame gives a reason to follow too', cfg.endCard.followHe.length > 0);
+  ok('the closing frame gives a reason to follow', cfg.endCard.followHe.length > 0);
   // A tag or a save is a fine ask and not this one. This line buys a reply in
   // the thread, so every entry has to actually ask for one.
   ok(
@@ -1008,9 +1139,34 @@ group('the config refuses to be half-loaded');
     cfg.caption.engage.find((l) => !/תגיבו/.test(l)) || 'clean'
   );
   ok('the cover pool is not empty', cfg.covers.lines.length > 0);
+  // The fallback covers and the caption lines go out under any deck, so none
+  // of them may state a number the deck has not backed. "אותם דגמים, שליש
+  // מהמחיר" sat in the caption pool under decks at half price.
+  ok(
+    'no fallback cover states a number',
+    cfg.covers.lines.every((l) => !statesNumber(l.text)),
+    cfg.covers.lines.find((l) => statesNumber(l.text))?.text || 'clean'
+  );
+  ok(
+    'and no caption line does',
+    cfg.caption.lines.every((l) => !statesNumber(l)),
+    cfg.caption.lines.find((l) => statesNumber(l)) || 'clean'
+  );
+  ok(
+    'every fallback cover fits the word limit',
+    cfg.covers.lines.every((l) => l.text.split(/\s+/).length <= MAX_HOOK_WORDS),
+    cfg.covers.lines.find((l) => l.text.split(/\s+/).length > MAX_HOOK_WORDS)?.text || 'clean'
+  );
+  // The reference's two weakest covers that this pool used to carry: 929 and
+  // 1,082 views against an account average of 17K.
+  ok(
+    'and the measured flops are not in it',
+    !cfg.covers.lines.some((l) => /הפסקתי לשלם|מה הזמנתי/.test(l.text))
+  );
   ok('there are enough tags to draw the configured number', cfg.hashtags.broad.length >= cfg.hashtags.broadCount);
   ok('and enough niche ones', cfg.hashtags.niche.length >= cfg.hashtags.nicheCount);
   ok('the deck size sits inside its own bounds', cfg.deck.minSlides <= cfg.deck.slides && cfg.deck.slides <= cfg.deck.maxSlides);
+  ok('and a full deck fits an Instagram carousel with its cover and end card', cfg.deck.slides + 2 <= 10);
 }
 
 /* -------------------------------------------------------------------------- */

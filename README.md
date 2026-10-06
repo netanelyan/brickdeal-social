@@ -1,12 +1,12 @@
 # brickdeal-social
 
-Turns the BrickDeal deal feed into Hebrew TikTok slideshows. It picks five sets,
-prices them against the original brand's retail price, photographs them as
-though somebody built them at home, renders the slides, and sends them to one
+Turns the BrickDeal deal feed into Hebrew TikTok slideshows. It picks eight sets,
+prices them against the original brand's retail price, photographs them on a
+collector's display shelf, renders the slides, and sends them to one
 person on Telegram for approval. Nothing publishes without a tap.
 
 ```
-deals.json → pick five → Brickset + FX → hook → photographs → render
+deals.json → pick eight → Brickset + FX → hook → photographs → render
      → Telegram proposal → ✅ → build → Telegram album → ✅ → TikTok + Instagram
 ```
 
@@ -65,7 +65,7 @@ emphasis is marked with `*stars*` in the config and the model is asked for it by
 name; the stars are stripped at load, so one unbalanced marker can never reach a
 slide.
 
-One post is a **roundup**: five slides, five different sets, five chances to
+One post is a **roundup**: eight slides, eight different sets, eight chances to
 hook a viewer, and every swipe is a watch-time signal.
 
 ## Three decisions that are enforced rather than hoped for
@@ -106,6 +106,38 @@ dimmed, corrected or taken down quietly. So `src/brick/feed.js` refuses where th
 site merely warns: a placeholder affiliate link, a price nobody has checked, a
 price last checked more than fourteen days ago.
 
+## What the numbers changed (2026-10-05)
+
+Eighteen posts on @brickdealil set against 102 on the reference account. Each
+change below comes from a measurement, and the measurement is in the config or
+code next to the change so that it can be argued with:
+
+- **Covers talk to the viewer about their money.** The reference's three biggest
+  posts, 29% of all its views, open on "you" and on Israeli prices (`בואו תראו כמה
+  כסף אתם יכולים לחסוך...`, `...הכל ברבע מחיר`, `אם אתם אוהבים לקנות ... במחירים
+  של הארץ תמשיכו לגלול`). Its weakest talk about "me" or do arithmetic, and two of
+  those were in our fallback pool. They are gone, along with the guess-the-price
+  lines: this account asked for a guess under four posts and got no comments.
+  The model is now shown the measured winners and losers, with view counts. Before
+  this change it was shown nothing, because the fallback lines were being printed
+  into its brief as `[object Object]`.
+- **Up to eleven words**, up from seven. All three of the biggest covers are longer
+  than seven words, and a cover past 44 characters gets three lines instead of
+  being clipped.
+- **A model-written hook may not state a number**: no price, digit, ratio or
+  multiple. Covers that state one are built from the deck's own prices. That now
+  includes `הכל ברבע מהמחיר`, the reference's second-biggest shape, which is offered
+  only when *every* slide is at or under that fraction of its list price.
+- **A short caption.** Hook, `כל הקישורים בקהילה בטלגרם, הלינק בביו`, tags. The
+  comment ask and the follow line are off: the four carousels that carried them got
+  no comments. This account's best posts, its videos, carry three words. The
+  reference's comments are mostly people asking where to buy, and that only happens
+  when the link is withheld.
+- **Eight sets a deck, up from five.** The reference posts carousels of mostly 8 to
+  11 frames. Eight plus the cover and end card is Instagram's ceiling of ten, and
+  `config.js` refuses more.
+- **A theme deck takes only sets whose own name is that theme.** See the table below.
+
 ## The photographs
 
 This is the hardest part of the format to automate, and the reason it works.
@@ -115,6 +147,16 @@ daylight, other sets in the background. A marketplace catalogue image will look
 like a catalogue image regardless of the overlay. So the product photo is
 restaged by an image model using the prompt from the `brickdeal-product-shot`
 skill, where every constraint in it was added to fix a real failure.
+
+**The scene is a collection shelf.** The set stands on one clean floating shelf
+against a plain warm-grey wall, with the edges of one or two other builds
+blurred at the sides of the frame. No hand, no desk clutter, nothing on the wall.
+Three parts of that are load-bearing rather than taste: nothing sits above the
+model, because the top third is where the type goes and `headroom.js` would read
+a shelf of sets up there as a model with no room over it; the wall is a few
+shades down from white, because white type on a white wall is the renderer's
+hardest case; and the neighbours are smaller and out of focus, because the judge
+below has to know which model is the one being sold.
 
 Three rules, in `src/images/homeShot.js`:
 
@@ -159,7 +201,7 @@ version of it rejected two perfectly good restaged photographs.
 proposal (free)  →  ✅  →  hook + photographs + render  →  album  →  ✅  →  publish
 ```
 
-The first card is the **proposal**: the recipe, the five sets, and every price
+The first card is the **proposal**: the recipe, the sets, and every price
 claim the deck will make. Everything in it is free — the feed is a file, Brickset
 is cached, the rate is one call a day — so rejecting it costs one message.
 
@@ -171,13 +213,13 @@ Unlike the travel pipeline this grew out of, the proposal is not a plan that the
 build might not keep. Every set on it is already in the feed and already priced,
 so what it names is what the slides will carry.
 
-## Four ways to choose five sets
+## Four ways to choose the sets
 
 `src/brick/recipes.js`, in the order they are tried when nothing is asked for:
 
 | | |
 |---|---|
-| **theme** | one theme's best current deals — the most specific post available, so the best one when it is available at all |
+| **theme** | one theme's best current deals — the most specific post available, so the best one when it is available at all. Only sets whose own name says they are that theme: the feed's label is an upstream guess, and it once put a pinball machine at the front of a deck about cars |
 | **savings** | the largest real savings on the feed, whatever they cost |
 | **perPiece** | the most brick per shekel — `5 סטים עד 8 אגורות לחלק`, the hobby's own yardstick |
 | **price** | everything under a ceiling, walking the ceilings upward so `5 סטים עד 100₪` is the tightest true claim rather than a safe round number |
@@ -216,7 +258,7 @@ Requires Node 18+ (developed on 24) and no build step.
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env      # then fill it in
-npm test                  # 416 offline checks, no credentials needed
+npm test                  # 459 offline checks, no credentials needed
 npm run brick-lab         # look at the slides, ~15s a round
 npm run brick-once -- --fixture --no-images   # the whole path, publishing nothing
 npm start
@@ -369,7 +411,7 @@ one it stepped over, on the card, before you tap.
 | `src/brick/rrp.js` | the comparison price, off Brickset, and every reason not to make one |
 | `src/brick/fx.js` | one exchange rate per deck, with the date it was published on |
 | `src/brick/copy.js` | **the guards** — the trademark, the em dash, the URL, the bidi on a price |
-| `src/brick/recipes.js` | which five deals, and in which order |
+| `src/brick/recipes.js` | which deals, and in which order |
 | `src/brick/build.js` | the two halves: the free proposal, and the expensive build |
 | `src/brick/proposal.js` | the first card — what this post would be, before paying for it |
 | `src/brick/candidate.js` | a built deck wrapped for the approval queue |
