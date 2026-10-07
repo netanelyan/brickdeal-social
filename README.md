@@ -213,9 +213,11 @@ Unlike the travel pipeline this grew out of, the proposal is not a plan that the
 build might not keep. Every set on it is already in the feed and already priced,
 so what it names is what the slides will carry.
 
-## Four ways to choose the sets
+## Five ways to choose the sets
 
-`src/brick/recipes.js`, in the order they are tried when nothing is asked for:
+`src/brick/recipes.js`. The first four are tried in this order when nothing is
+asked for. The fifth, the countdown, has its own section below because it
+cannot be one of them.
 
 | | |
 |---|---|
@@ -223,6 +225,7 @@ so what it names is what the slides will carry.
 | **savings** | the largest real savings on the feed, whatever they cost |
 | **perPiece** | the most brick per shekel — `5 סטים עד 8 אגורות לחלק`, the hobby's own yardstick |
 | **price** | everything under a ceiling, walking the ceilings upward so `5 סטים עד 100₪` is the tightest true claim rather than a safe round number |
+| **countdown** | the sets that save the viewer the most, numbered from #8 down to #1. A third of the scheduled decks, or `/deck דירוג` |
 
 **perPiece is below savings on purpose.** A saving is checked against somebody
 else's published retail price; a per-piece figure is arithmetic on our own two
@@ -248,7 +251,65 @@ knows.
 
 **The order within a deck is not a plain sort.** The strongest slide goes first,
 where it decides whether anybody swipes, and the second-strongest goes *last*,
-where it decides whether anybody follows.
+where it decides whether anybody follows. The countdown is the one exception,
+on purpose.
+
+## The countdown
+
+```
+#3
+טירת הוגוורטס הגדולה 🏰
+בקהילה: 350₪
+מחיר בלגו: 1,613₪
+חיסכון: 1,263₪ 💰
+```
+
+The same slide as every other deck, with its place in the list above the name.
+The sets are the ones that save the viewer the most, the smallest saving comes
+first, and #1, the biggest, is the last set before the end card.
+
+**It spends its best slide last, which every other deck refuses to do.** A
+roundup puts its strongest set where it decides whether anybody swipes. A
+countdown bets the other way: the numeral on every frame is an unfinished
+sentence, and the only way to finish it is to reach #1. Which bet works better
+for this account is a question for the numbers, so the countdown is a share of
+the scheduled decks (`deck.countdownShare`, one in three) and not a
+replacement. After two weeks there are enough of both to compare.
+
+**The ranking can be checked from the frames.** The rank is the saving and
+nothing else: no "best quality", no "most popular", nothing this pipeline
+cannot show its working for. The cream line on every slide *is* the saving, so
+a viewer swiping through watches it grow, and #1 is the biggest number in the
+post. A countdown ranked by judgement would be a claim nobody could check.
+
+**The cover carries #1's photograph, not the first slide's.** It teases #1's
+saving (`מי חוסך לכם הכי הרבה? מקום ראשון חוסך 1,741₪`), and a cover that
+states a number has to show the set the number belongs to. That is the rule
+`priceHook` was written around. On a countdown the first slide is the smallest
+saving in the post, so its picture under that line would be a false claim about
+the set it shows. The end card follows the cover, so the post still opens and
+closes on one frame. The swipe line says `מתחילים ממקום 8 ←`, because the next
+frame is the bottom of the list, not the set on the cover. The cover lines are
+written by hand in `covers.countdownLines` and filled from the slides that were
+built, so no model call is involved. A set whose photograph fails takes its
+place with it, and the ranks close up (#7 to #1) instead of leaving a gap.
+
+**It is the only recipe that has to pay before it can choose.** Every other
+recipe picks from the raw feed and prices afterwards. A countdown ranks by
+saving, and nothing on the feed has a saving until it has been priced. So it
+prices a shortlist first, the biggest boxes with a set number Brickset can look
+up, at three times the deck size, and chooses from what comes back. Brickset
+answers are cached for thirty days, so this is close to free after the first
+few decks. On a cold cache it spends at most one shortlist of `getSets` calls
+per countdown attempt.
+
+`/deck דירוג` asks for one (also `מדורגים`, `טופ`, `ספירה לאחור`, `top`), and
+`/deck דירוג רכבים` asks for a countdown of one theme. A countdown needs at
+least five sets with a saving (`deck.countdownMin`). When the feed cannot fill
+one, a requested deck falls back to its theme, or to whatever the feed can best
+make, and the card says why: `↩️ לא נבנה דירוג: 3 סטים עם חיסכון, צריך 5`. A
+scheduled one that cannot be filled is simply whichever deck the feed would
+have made anyway.
 
 ## Running it
 
@@ -258,7 +319,7 @@ Requires Node 18+ (developed on 24) and no build step.
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env      # then fill it in
-npm test                  # 459 offline checks, no credentials needed
+npm test                  # 536 offline checks, no credentials needed
 npm run brick-lab         # look at the slides, ~15s a round
 npm run brick-once -- --fixture --no-images   # the whole path, publishing nothing
 npm start
@@ -374,7 +435,7 @@ exist.
 ## Commands
 
 `/deck` build one now · `/deck harry-potter`, `/deck 100`, `/deck 8 אגורות`,
-`/deck בונסאי` name it · `/site` where the panel is · `/status` · `/health` every destination
+`/deck דירוג`, `/deck דירוג רכבים`, `/deck בונסאי` name it · `/site` where the panel is · `/status` · `/health` every destination
 separately, with its last error · `/usage` tokens and cost · `/igquota` ·
 `/tiktok` connection, tokens, granted scopes · `/tiktok_connect` · `/pending` ·
 `/queue` what is waiting, numbered · `/next` publish the next · `/post 3`
@@ -471,6 +532,13 @@ signal it gives.
 
 **The trademark rule costs discovery, deliberately.** `#לגו` is what this
 audience searches and the reference spends a slot on it. See `copy.allowTrademark`.
+
+**A countdown's numeral costs headroom.** `#3` adds about 110px above the name,
+and `render/headroom.js` moves the photograph down to clear it. On 9:16 that is
+always enough. On the 4:5 Instagram crop of a photograph with no room above the
+model, the fit's levers run out a little sooner than on an ordinary slide, and
+the price lines overlap a little more of the set. `overlay.rankPct` trades the
+numeral's size against that.
 
 ## Security
 

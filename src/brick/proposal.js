@@ -28,10 +28,21 @@ const money = (n) => `${Math.round(Number(n) || 0).toLocaleString('en-US')}₪`;
  */
 export function proposalMessage(p) {
   const lines = [];
-  const kindHe = { theme: 'לפי נושא', price: 'לפי מחיר', savings: 'הנחות', perPiece: 'מחיר לחלק', set: 'סט בודד' };
+  const kindHe = {
+    theme: 'לפי נושא',
+    price: 'לפי מחיר',
+    savings: 'הנחות',
+    perPiece: 'מחיר לחלק',
+    set: 'סט בודד',
+    countdown: 'דירוג',
+  };
 
   lines.push(`💡 הצעה למצגת · ${kindHe[p.recipe] || p.recipe}`);
   lines.push(`🏷️ ${p.subject}${p.theme && THEME_HE[p.theme] ? '' : ''}`);
+  // Why this is not what was asked for. Above the sets, because it changes how
+  // the rest of the card reads: a theme deck answering "/deck דירוג" looks
+  // like the bot misheard unless it says it could not fill the countdown.
+  if (p.fallback) lines.push(`↩️ ${p.fallback}`);
   lines.push('');
 
   // WHAT THE SLIDES WILL SAY, which on a per-piece deck is not the comparison.
@@ -39,17 +50,24 @@ export function proposalMessage(p) {
   // nothing else — see perPieceLines — so a card counting how many of its sets
   // got a list price would be describing a different post.
   const perPiece = p.recipe === 'perPiece';
+  const countdown = p.recipe === 'countdown';
   const withComparison = p.deals.filter((d) => d.comparison?.ok);
   lines.push(
     perPiece
       ? `📦 ${p.deals.length} סטים · מחיר לחלק על כל שקופית`
-      : `📦 ${p.deals.length} סטים · ${withComparison.length} עם השוואת מחיר`
+      : countdown
+        ? `📦 ${p.deals.length} סטים · מדורגים לפי החיסכון, מקום ראשון אחרון`
+        : `📦 ${p.deals.length} סטים · ${withComparison.length} עם השוואת מחיר`
   );
   lines.push('');
 
-  for (const d of p.deals) {
+  for (const [i, d] of p.deals.entries()) {
     const c = d.comparison;
-    lines.push(`   ${emojiFor(d)} ${d.product}`);
+    // The place each set would hold if every photograph comes back. The build
+    // counts the ranks again off the slides that survive, so a set dropped
+    // there moves the ones above it down a place rather than leaving a gap.
+    const place = countdown ? `#${p.deals.length - i} ` : '';
+    lines.push(`   ${place}${emojiFor(d)} ${d.product}`);
     if (perPiece) {
       lines.push(
         `      ${money(d.price)} · ${Number(d.pieces || 0).toLocaleString('en-US')} חלקים · ` +
@@ -103,6 +121,11 @@ export function proposalWarning(p) {
   // heard of, which is half of what that recipe is for.
   if (p.recipe === 'perPiece') {
     return p.deals.length < brickConfig().deck.slides ? `${p.deals.length} סטים בלבד — פחות מהרגיל` : null;
+  }
+  // Nor is a countdown, which cannot hold a set without one. A short one is
+  // worth a word, since "top five" is a smaller post than the usual eight.
+  if (p.recipe === 'countdown') {
+    return p.deals.length < brickConfig().deck.slides ? `דירוג של ${p.deals.length} סטים בלבד — פחות מהרגיל` : null;
   }
 
   const withComparison = p.deals.filter((d) => d.comparison?.ok).length;

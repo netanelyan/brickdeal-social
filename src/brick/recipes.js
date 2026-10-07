@@ -1,5 +1,6 @@
 import { brickConfig } from './config.js';
 import { THEME_HE, fitsTheme } from './themes.js';
+import { setNumber } from './rrp.js';
 
 // Which deals go in one post, and in what order.
 //
@@ -16,6 +17,10 @@ import { THEME_HE, fitsTheme } from './themes.js';
 // single-set post needs nothing but one good deal. `available` below puts them
 // in the order they are worth watching, which is also the order a requested
 // deck falls through when it comes up short.
+//
+// A fifth, the countdown, is not in `available` because it cannot be: it ranks
+// by saving, and nothing on the feed has a saving until it has been priced.
+// See `countdownRoundup`.
 
 /** The saving a deal will be able to show, in shekels, or 0 if none. */
 const savingOf = (d) => (d.comparison?.ok ? d.comparison.saving : 0);
@@ -313,6 +318,97 @@ export function singleSet(deal, { want = brickConfig().deck.slides } = {}) {
   if (slides.length < brickConfig().deck.minSlides) return null;
 
   return { kind: 'set', subject: deal.product, deals: [deal], slides };
+}
+
+/**
+ * Which deals are worth pricing before a countdown is chosen.
+ *
+ * The countdown ranks by saving, and a saving needs a Brickset lookup and a
+ * rate, so pricing has to come BEFORE selection here, unlike every other
+ * recipe. Pricing the whole feed for one post would spend the key's daily
+ * getSets quota on a single deck, so a shortlist is priced instead. The cache
+ * keeps a set's price for thirty days, so after the first few decks most of
+ * this costs nothing.
+ *
+ * Only deals with a set number Brickset can look up, because the rest are
+ * guaranteed to come back with no comparison and would only spend the slots.
+ *
+ * BIGGEST BOX FIRST. Nothing is priced yet, so the saving cannot be the sort
+ * key, and the piece count is the best guess at it available: a list price
+ * grows with the box far more reliably than with anything else on the record,
+ * and the saving is mostly the list price. Getting the guess slightly wrong
+ * costs a slot on the shortlist, not a wrong number on a slide.
+ */
+export function countdownShortlist(deals, { size = brickConfig().deck.slides * 3 } = {}) {
+  return deals
+    .filter((d) => setNumber(d.setId))
+    .sort((a, b) => (Number(b.pieces) || 0) - (Number(a.pieces) || 0) || a.price - b.price)
+    .slice(0, Math.max(0, size));
+}
+
+/**
+ * Bigger saving first, then the deeper discount, then the bigger box.
+ *
+ * The two tie-breaks are for the order a viewer can check. Equal savings are
+ * rare in shekels but not impossible, and when they happen the set at the
+ * smaller fraction of its list price is the better deal by the measure the
+ * hook is about.
+ */
+const bySaving = (a, b) =>
+  savingOf(b) - savingOf(a) ||
+  b.comparison.saving / b.comparison.listIls - a.comparison.saving / a.comparison.listIls ||
+  (Number(b.pieces) || 0) - (Number(a.pieces) || 0);
+
+/**
+ * The sets that save the viewer the most, counted down from the smallest
+ * saving to the biggest. #1 is the last set before the end card.
+ *
+ * THE ONE ROUNDUP THAT SPENDS ITS BEST SLIDE LAST, ON PURPOSE. Every other
+ * recipe puts its strongest slide first, where it decides whether anybody
+ * swipes (see orderSlides). A countdown makes the opposite bet: the numeral on
+ * every frame is an unfinished sentence, and the only way to finish it is to
+ * reach #1. The swipe is bought by the open loop rather than by the first set.
+ * Which bet wins for this account is a question for the numbers, which is why
+ * this ships as a share of posts rather than as a replacement.
+ *
+ * THE ORDER IS CHECKABLE FROM THE FRAMES. The rank is the saving and nothing
+ * else: no "best quality", no "most popular", nothing this pipeline cannot
+ * show its working for. The cream line on every slide is the saving, so a
+ * viewer swiping through watches that number grow, and #1 is literally the
+ * biggest number in the post. A ranking by judgement would be a claim nobody
+ * could check. This one checks itself.
+ *
+ * EVERY SLIDE NEEDS A COMPARISON, so a set Brickset has never heard of cannot
+ * be in one, however good a deal it is. That is the per-piece deck's job.
+ *
+ * Fewer than `want` is still a countdown, down to `min`. A countdown of five is
+ * a familiar format and a countdown of three is not one. Below `min` this
+ * returns null and the caller builds something else.
+ */
+export function countdownRoundup(
+  deals,
+  { want = brickConfig().deck.slides, min = brickConfig().deck.countdownMin, theme = null } = {}
+) {
+  const ranked = deals
+    .filter((d) => savingOf(d) > 0 && d.comparison.listIls > 0)
+    .filter((d) => !theme || (d.theme === theme && fitsTheme(d, theme)))
+    .sort(bySaving)
+    .slice(0, want);
+  if (ranked.length < Math.max(1, min)) return null;
+
+  const label = theme ? THEME_HE[theme] || theme : null;
+  return {
+    kind: 'countdown',
+    theme: theme || null,
+    // No count in it. The subject is fixed when the proposal is made, and a
+    // photograph that fails at build time takes a slide with it, so "8" here
+    // would be wrong on the post that lost one. The cover counts the slides it
+    // actually has.
+    subject: label ? `${label}: הסטים שהכי חוסכים לכם, מדורגים` : 'הסטים שהכי חוסכים לכם, מדורגים',
+    // Display order: the smallest saving first, #1 last. Reversed here, once,
+    // so nothing downstream has to know that this deck reads backwards.
+    deals: ranked.reverse(),
+  };
 }
 
 /**

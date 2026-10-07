@@ -6,7 +6,17 @@ import { rateToIls } from './fx.js';
 import { brickConfig } from './config.js';
 import { slideLines, perPieceLines, assertCopy, CopyError, shekels } from './copy.js';
 import { emojiFor } from './emoji.js';
-import { available, priceRoundup, themeRoundup, pricePerPiece, singleSet, oneListingPerSet, agorotPerPiece } from './recipes.js';
+import {
+  available,
+  priceRoundup,
+  themeRoundup,
+  pricePerPiece,
+  singleSet,
+  oneListingPerSet,
+  agorotPerPiece,
+  countdownRoundup,
+  countdownShortlist,
+} from './recipes.js';
 import { THEME_HE } from './themes.js';
 import { shotOrProduct } from '../images/homeShot.js';
 import { hasPublished, wasProposed, noteProposed } from '../store.js';
@@ -381,6 +391,102 @@ export function ratioHook(slides, { rand = Math.random } = {}) {
 }
 
 /**
+ * The slide a countdown's cover is about: #1.
+ *
+ * Found by its rank rather than by its position, so that nothing here depends
+ * on the deck having been built in display order, which it always is today.
+ */
+export const topOfCountdown = (slides) => (slides || []).find((s) => s?.rank === 1) || null;
+
+/**
+ * The cover of a countdown deck, teasing #1's saving.
+ *
+ * Built from the slides like ratioHook and priceHook, and for the same reason:
+ * the cover states a number, and a number on the cover is only allowed to be
+ * one a slide underneath repeats. Here it is #1's saving, which that slide
+ * prints in cream, and the count, which is the number of slides that were
+ * actually built rather than the number the proposal asked for.
+ *
+ * `avoid` is the lines already used on this deck, so a redrawn cover is a
+ * different one. Returns null when there is no #1 with a saving, no shape is
+ * configured, or every shape has been used. The caller then writes an ordinary
+ * hook, and the swipe line still says it is a countdown.
+ */
+export function countdownHook(slides, { rand = Math.random, avoid = [] } = {}) {
+  const top = topOfCountdown(slides);
+  const cmp = top?.deal?.comparison;
+  if (!cmp?.ok || !(Number(cmp.saving) > 0)) return null;
+
+  const fill = (s) =>
+    String(s || '')
+      .replaceAll('{count}', String(slides.length))
+      .replaceAll('{top}', shekels(cmp.saving));
+  const shapes = brickConfig().covers.countdownLines.filter((l) => !avoid.includes(fill(l.text)));
+  if (!shapes.length) return null;
+
+  const shape = shapes[Math.floor(rand() * shapes.length)];
+  const hook = assertCopy(fill(shape.text), 'the countdown cover line');
+  const emphasis = shape.emphasis ? assertCopy(fill(shape.emphasis), 'the countdown cover emphasis') : null;
+  return { hook, emphasis: emphasis && hook.includes(emphasis) ? emphasis : null, title: null, from: 'countdown' };
+}
+
+/**
+ * Whether a request asks for a countdown, and of which theme, or null.
+ *
+ * The words are the ones that get typed: דירוג, מדורגים, ספירה לאחור, טופ, and
+ * the English. What is left once they are taken out is read as a theme, so
+ * `/deck דירוג רכבים` is a countdown of car sets. Anything else left over is
+ * ignored rather than guessed at: "טופ 5" is not a request for sets under 5₪,
+ * and a stray number must not be matched against set names either.
+ *
+ * טופ is matched as a whole word. Inside another word it is a coincidence —
+ * לפטופ is a laptop.
+ *
+ * THE PREFIX GOES WITH THE WORD. Hebrew glues ה, ב, ל and the rest straight
+ * on, so "הדירוג" has to be taken out whole: left behind, the lone ה is a
+ * one-letter "theme" that themeKeyFor's partial match finds inside הארי פוטר.
+ * For the same reason nothing shorter than two letters is read as a theme.
+ */
+const COUNTDOWN_ASK = /[ובלהמש]?(?:דירוג|מדורג(?:ים|ות|ת)?)|ספירה לאחור|(?:^|\s)טופ(?=\s|\d|$)|countdown|\branking\b|\btop\b/giu;
+
+export function countdownRequest(request) {
+  const want = String(request || '').trim();
+  if (!want || !want.match(COUNTDOWN_ASK)) return null;
+  const rest = want
+    .replace(COUNTDOWN_ASK, ' ')
+    .replace(/[^\p{L}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return { theme: rest.length >= 2 ? themeKeyFor(rest) : null };
+}
+
+/**
+ * A countdown, if the feed can fill one, with the prices it was chosen by.
+ *
+ * The only recipe that pays before it knows whether it can be built: a saving
+ * needs a lookup, so a shortlist is priced first and the countdown chosen from
+ * what came back. Everything the lookup costs is cached for thirty days, so
+ * this is cheap after the first few decks, and the quota a cold cache spends is
+ * bounded by the shortlist rather than by the size of the feed.
+ *
+ * Returns `{ recipe, rates }` or `{ recipe: null, why }`. The rates are only
+ * the currencies the chosen sets were converted from, because the approval card
+ * prints every rate on the deck, and a rate that no slide used is a line asking
+ * to be checked against nothing.
+ */
+export async function planCountdown(pool, { theme = null } = {}) {
+  const candidates = theme ? pool.filter((d) => d.theme === theme) : pool;
+  const priced = await priceDeals(countdownShortlist(candidates));
+  const recipe = countdownRoundup(priced.deals, { theme });
+  if (!recipe) {
+    const found = priced.deals.filter((d) => d.comparison?.ok).length;
+    return { recipe: null, why: `${found} סטים עם חיסכון, צריך ${brickConfig().deck.countdownMin}` };
+  }
+  const used = new Set(recipe.deals.map((d) => d.comparison?.source?.currency).filter(Boolean));
+  return { recipe, rates: Object.fromEntries(Object.entries(priced.rates).filter(([c]) => used.has(c))) };
+}
+
+/**
  * The comparison for every deal in one go, at one rate.
  *
  * One rate per deck, fetched once, and that is the reason this is a batch
@@ -453,10 +559,20 @@ export async function buildSlides(recipe, { wantImages = true, onProgress = null
   const specs =
     recipe.slides ||
     recipe.deals.map((deal) => ({ deal, showPrices: true, perPiece: recipe.kind === 'perPiece' }));
+  const countdown = recipe.kind === 'countdown';
 
   for (const [i, spec] of specs.entries()) {
     const { deal } = spec;
     onProgress?.(`${i + 1}/${specs.length} ${deal.product}`);
+
+    // A countdown is ranked by saving, so a set with no saving has no place in
+    // it. The recipe cannot pick one, but this is also reachable from a
+    // hand-built recipe, and checking before the photograph means a set that
+    // would be dropped anyway is never paid for.
+    if (countdown && !(deal.comparison?.ok && deal.comparison.saving > 0)) {
+      dropped.push({ id: deal.productId, why: 'a countdown ranks by saving, and this set has none' });
+      continue;
+    }
 
     let image = null;
     if (wantImages) {
@@ -500,6 +616,12 @@ export async function buildSlides(recipe, { wantImages = true, onProgress = null
       emoji: spec.fact ? spec.fact.emoji : emojiFor(deal),
       lines,
       image,
+      // Which cached photograph this slide carries. The shot cache is keyed on
+      // the position a deal was built at, and a deal dropped earlier in the
+      // loop shifts every later slide's index without shifting its shot, so a
+      // slide's own index is not enough to find its photograph again. Re-drawing
+      // a cover needs exactly that.
+      shot: i + 1,
       // Carried so the approval message can show what a slide is claiming and
       // where the number came from, without re-deriving any of it.
       deal: {
@@ -520,6 +642,13 @@ export async function buildSlides(recipe, { wantImages = true, onProgress = null
       },
     });
   }
+
+  // The ranks, counted off the slides that survived rather than the deals that
+  // were proposed. A set that lost its photograph takes its slide with it, and
+  // ranks assigned before that would leave a countdown with a gap in it: #8,
+  // #7, #5. Counted here, the list is always whole and #1 is always the last
+  // set, which is the biggest saving left on the deck.
+  if (countdown) slides.forEach((s, i) => (s.rank = slides.length - i));
 
   return { slides, dropped };
 }
@@ -543,7 +672,7 @@ export async function buildSlides(recipe, { wantImages = true, onProgress = null
  * name, a price, or nothing. Nothing is the common case and means "whatever
  * this feed can best make right now".
  */
-export async function proposeDeck(request = null, { onProgress = null } = {}) {
+export async function proposeDeck(request = null, { onProgress = null, rand = Math.random } = {}) {
   const { deals, dropped: feedDropped, total } = await loadDeals();
 
   // Never the same set twice in a fortnight.
@@ -580,7 +709,32 @@ export async function proposeDeck(request = null, { onProgress = null } = {}) {
   // remember to.
   const pool = oneListingPerSet(enough);
 
-  const recipe = chooseRecipe(pool, request);
+  // A COUNTDOWN IS TRIED FIRST, when one was asked for and on a share of the
+  // decks the schedule offers. First because it is the only recipe that has to
+  // price before it can choose (see planCountdown), and so the only one that
+  // cannot simply be another entry in `available`.
+  //
+  // The coin is drawn only when nothing was asked for. A request is honoured
+  // as it reads: `/deck 100` is a price deck every time, and a deck the owner
+  // named should not turn into a countdown one time in three.
+  const asked = countdownRequest(request);
+  const tryCountdown = asked !== null || (!request && rand() < brickConfig().deck.countdownShare);
+  let planned = null;
+  let fallback = null;
+  if (tryCountdown) {
+    onProgress?.('pricing a countdown shortlist');
+    planned = await planCountdown(pool, { theme: asked?.theme || null });
+    // Said on the card only when somebody asked. A scheduled coin that could
+    // not be filled is not news; a request that was not honoured is, because
+    // otherwise `/deck דירוג` silently comes back as a theme deck.
+    if (!planned.recipe && asked) fallback = `לא נבנה דירוג: ${planned.why}`;
+  }
+
+  // A countdown request that could not be filled falls through to its theme if
+  // it named one, and to whatever the feed can best make if it did not. Never
+  // to the raw request: "טופ 5" read as a set name finds whichever set has a 5
+  // in its title.
+  const recipe = planned?.recipe || chooseRecipe(pool, asked ? asked.theme : request);
   if (!recipe) {
     const err = new Error(
       `nothing to build from: ${deals.length} usable deals out of ${total} on the feed` +
@@ -590,8 +744,16 @@ export async function proposeDeck(request = null, { onProgress = null } = {}) {
     throw err;
   }
 
-  onProgress?.('pricing');
-  const priced = await priceDeals(recipe.deals);
+  // A countdown was chosen BY its prices, so it already has them, at the rate
+  // the shortlist was converted at. Pricing it again would be a second set of
+  // lookups for numbers already on the deals.
+  let priced;
+  if (planned?.recipe) {
+    priced = { deals: recipe.deals, rates: planned.rates };
+  } else {
+    onProgress?.('pricing');
+    priced = await priceDeals(recipe.deals);
+  }
   const withPrices = { ...recipe, deals: priced.deals };
   // A single-set recipe carries its own slide list built from the UNPRICED
   // deal, so it has to be rebuilt once the comparison exists — otherwise the
@@ -614,6 +776,10 @@ export async function proposeDeck(request = null, { onProgress = null } = {}) {
     slideSpecs: ready.slides || null,
     rates: priced.rates,
     feedDropped,
+    // Why this is not the deck that was asked for, or null. Only a countdown
+    // can be asked for and not built while the request itself parsed, so it is
+    // the only thing that writes here.
+    fallback,
     proposedAt: new Date().toISOString(),
   };
 }
@@ -671,10 +837,19 @@ export async function buildProposed(proposal, { wantImages = true, onProgress = 
   // reference's own second-biggest shape and a claim about every slide in the
   // post, where "89₪ במקום 400₪" is a claim about one. A single-set post is not
   // offered it: "everything" about one set is a strange way to say one price.
-  const wantPrice = ready.kind !== 'perPiece' && rand() < brickConfig().covers.priceLedShare;
-  const led = wantPrice
-    ? (ready.kind !== 'set' && ratioHook(slides, { rand })) || priceHook(slides[0], { rand })
-    : null;
+  //
+  // A COUNTDOWN IS NOT IN THE DRAW EITHER, and for a different reason from the
+  // per-piece deck: it has a numbered cover of its own. Its cover teases #1's
+  // saving over #1's photograph (see countdownHook and coverSlide), and a
+  // price-led cover would quote the FIRST slide, which on a countdown is the
+  // smallest saving in the post, over a picture of a different set.
+  const countdown = ready.kind === 'countdown';
+  const wantPrice = !countdown && ready.kind !== 'perPiece' && rand() < brickConfig().covers.priceLedShare;
+  const led = countdown
+    ? countdownHook(slides, { rand })
+    : wantPrice
+      ? (ready.kind !== 'set' && ratioHook(slides, { rand })) || priceHook(slides[0], { rand })
+      : null;
   // Only the hook is taken from it. The title is what the queue and the
   // Instagram caption call this post, it is not on a slide, and "89₪ במקום
   // 400₪" is a useless name for a post about six sets.

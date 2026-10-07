@@ -32,6 +32,8 @@ import {
   singleSet,
   orderSlides,
   slideScore,
+  countdownRoundup,
+  countdownShortlist,
 } from '../src/brick/recipes.js';
 import { hashtagsFor, themeTag, captionFor, instagramCaptionFor, dressing } from '../src/brick/caption.js';
 import { brickConfig, coverLine, __reset as resetConfig } from '../src/brick/config.js';
@@ -44,8 +46,15 @@ import {
   statesNumber,
   deckFraction,
   ratioHook,
+  countdownRequest,
+  countdownHook,
+  topOfCountdown,
+  buildSlides,
+  buildProposed,
 } from '../src/brick/build.js';
-import { brickDeckId, sizesFor, photoSummary, brickRepeats } from '../src/brick/candidate.js';
+import { brickDeckId, sizesFor, photoSummary, brickRepeats, brickApprovalMessage } from '../src/brick/candidate.js';
+import { proposalMessage, proposalWarning } from '../src/brick/proposal.js';
+import { coverSlide } from '../src/render/brickDeck.js';
 import {
   displayFor,
   sourceFor,
@@ -464,6 +473,209 @@ group('recipes — which five deals, in which order');
   ok('its first slide carries the prices', one.slides[0].showPrices === true);
   ok('and the rest carry one fact each, not the same price five times', one.slides.slice(1).every((s) => s.fact));
   eq('a deal the feed knows nothing about cannot fill one', singleSet({ productId: 'x', price: 10 }, { want: 5 }), null);
+}
+
+/* -------------------------------------------------------------------------- */
+group('the countdown — #8 to #1, ranked by what each set saves');
+
+{
+  const source = { amount: 100, currency: 'EUR', region: 'DE', rate: 3.4, rateDate: '2026-10-05' };
+  // A priced deal with this saving. The list price defaults to twice the
+  // saving, so every one is at half price and the tie-break is held still.
+  const cd = (id, saving, { listIls = saving * 2, pieces = 1000, theme = null, name = `סט ${id}`, setId = '10294' } = {}) => ({
+    productId: id,
+    name,
+    product: name,
+    setId,
+    pieces,
+    theme,
+    price: listIls - saving,
+    comparison: { ok: true, paid: listIls - saving, listIls, saving, source },
+  });
+  const none = (id, over = {}) => ({ ...cd(id, 100, over), comparison: { ok: false, why: 'no such set on Brickset' } });
+
+  // ---- the shortlist that gets priced before anything is chosen -----------
+  {
+    const list = countdownShortlist(
+      [
+        { productId: 'moc', setId: null, pieces: 9000, price: 1 },
+        { productId: 'small', setId: '10294', pieces: 300, price: 50 },
+        { productId: 'big', setId: '75192', pieces: 7500, price: 900 },
+        { productId: 'mid', setId: '42083', pieces: 3600, price: 400 },
+      ],
+      { size: 2 }
+    );
+    ok('only sets Brickset can look up are worth pricing', !list.some((d) => d.productId === 'moc'));
+    eq('biggest box first, as the best guess at the biggest saving', list[0]?.productId, 'big');
+    eq('and the list stops at its size, which is what bounds the key quota', list.length, 2);
+  }
+
+  // ---- choosing and ordering ------------------------------------------------
+  const savings = [120, 640, 300, 1210, 455, 90, 880, 205, 60];
+  const feed = [...savings.map((s, i) => cd(`s${i}`, s)), none('n1'), none('n2')];
+  {
+    const deck = countdownRoundup(feed, { want: 8, min: 5 });
+    ok('a feed with eight savings makes a countdown', Boolean(deck));
+    eq('and it is its own kind', deck?.kind, 'countdown');
+    eq('eight places', deck?.deals.length, 8);
+    ok('a set with no saving has no place in one', deck.deals.every((d) => d.comparison?.ok));
+    ok('the smallest saving on the feed is the one left out', !deck.deals.some((d) => d.comparison.saving === 60));
+    ok(
+      'read in display order, the saving only ever grows',
+      deck.deals.every((d, i) => i === 0 || d.comparison.saving > deck.deals[i - 1].comparison.saving),
+      deck.deals.map((d) => d.comparison.saving).join(' < ')
+    );
+    eq('so #1, the last set, is the biggest saving in the post', deck.deals.at(-1).comparison.saving, 1210);
+    ok('the subject carries no count a dropped photograph could falsify', !/\d/.test(deck.subject), deck.subject);
+  }
+  eq(
+    'four savings is not a countdown',
+    countdownRoundup([cd('a', 10), cd('b', 20), cd('c', 30), cd('d', 40), none('e')], { want: 8, min: 5 }),
+    null
+  );
+  ok('five is', Boolean(countdownRoundup(savings.slice(0, 5).map((s, i) => cd(`f${i}`, s)), { want: 8, min: 5 })));
+  {
+    const deeper = cd('deep', 300, { listIls: 400 });
+    const shallower = cd('shallow', 300, { listIls: 3000 });
+    const deck = countdownRoundup([shallower, deeper, ...[10, 20, 30].map((s, i) => cd(`t${i}`, s))], { want: 8, min: 5 });
+    eq('a tie on the saving goes to the deeper discount', deck.deals.at(-1).productId, 'deep');
+  }
+  {
+    // Split the way normalise() splits a feed name, so the series prefix does
+    // not count as the set's own name. That is the whole point of the check.
+    const car = (id, s, name) => ({ ...cd(id, s, { theme: 'vehicles', name: `מכוניות | ${name}` }), series: 'מכוניות', product: name });
+    const cars = [car('c1', 100, 'מכונית ספורט אדומה'), car('c2', 200, 'מכונית מרוץ'), car('c3', 300, 'משאית אש'), car('c4', 400, 'פורשה 911'), car('c5', 500, 'מכונית שרירים')];
+    const pinball = car('pin', 5000, 'מכונת פינבול רטרו');
+    const deck = countdownRoundup([pinball, ...cars, cd('x', 9000)], { theme: 'vehicles', want: 8, min: 5 });
+    ok('a theme countdown takes only that theme', deck?.deals.every((d) => d.theme === 'vehicles'));
+    ok('by the set\'s own name, so the pinball machine cannot be #1', deck && !deck.deals.includes(pinball));
+    ok('and says which theme it is', deck?.subject.includes(THEME_HE.vehicles), deck?.subject);
+  }
+
+  // ---- reading a request ----------------------------------------------------
+  ok('/deck דירוג asks for one', countdownRequest('דירוג') !== null);
+  eq('with no theme', countdownRequest('דירוג')?.theme, null);
+  ok('and so do the other ways of saying it', ['מדורגים', 'טופ 5', 'ספירה לאחור', 'top', 'countdown'].every((r) => countdownRequest(r)));
+  eq('the rest of the request is read as a theme', countdownRequest('דירוג הארי פוטר')?.theme, 'harry-potter');
+  eq('around punctuation too', countdownRequest('דירוג: חלל!')?.theme, 'space');
+  eq('a prefix goes out with the word, not into the theme', countdownRequest('הדירוג')?.theme, null);
+  eq('and a number is not a theme', countdownRequest('טופ 5')?.theme, null);
+  eq('a laptop is not a top-five', countdownRequest('לפטופ'), null);
+  eq('nor is a stop', countdownRequest('stop'), null);
+  eq('a price is not a countdown', countdownRequest('100'), null);
+  eq('and nothing asked for is nothing', countdownRequest(null), null);
+
+  // ---- the build: ranks counted off what survived ---------------------------
+  const ranked = countdownRoundup(feed, { want: 8, min: 5 });
+  {
+    const { slides } = await buildSlides(ranked, { wantImages: false });
+    eq('every set gets a slide', slides.length, 8);
+    eq('the first slide is #8', slides[0].rank, 8);
+    eq('and the last is #1', slides.at(-1).rank, 1);
+    eq('#1 is the biggest saving', topOfCountdown(slides)?.deal.comparison.saving, 1210);
+    ok('every slide knows which cached photograph it carries', slides.every((s, i) => s.shot === i + 1));
+  }
+  {
+    // The same recipe with one set that lost its comparison on the way. It is
+    // dropped, and the list closes up rather than skipping a number.
+    const broken = { ...ranked, deals: ranked.deals.map((d, i) => (i === 3 ? { ...d, comparison: { ok: false, why: 'gone' } } : d)) };
+    const { slides, dropped } = await buildSlides(broken, { wantImages: false });
+    eq('a set with no saving is dropped from a countdown', dropped.length, 1);
+    eq('and the ranks close up behind it', slides.map((s) => s.rank).join(','), '7,6,5,4,3,2,1');
+    ok('the slide after the gap keeps the shot it was built with', slides[3].shot === 5);
+  }
+  {
+    const deck = await buildProposed(
+      { recipe: 'countdown', subject: ranked.subject, deals: ranked.deals, rates: {} },
+      { wantImages: false, rand: () => 0 }
+    );
+    eq('a countdown draws its own cover', deck.hookFrom, 'countdown');
+    ok('which quotes #1\'s saving, the number the #1 slide prints', deck.hookHe.includes('1,210₪'), deck.hookHe);
+    ok('and shouts it', Boolean(deck.emphasisHe) && deck.hookHe.includes(deck.emphasisHe) && deck.emphasisHe.includes('1,210₪'));
+    eq('the post is still called by its subject', deck.titleHe, ranked.subject);
+  }
+
+  // ---- the cover --------------------------------------------------------------
+  {
+    const { slides } = await buildSlides(ranked, { wantImages: false });
+    const shapes = brickConfig().covers.countdownLines;
+    ok('there are countdown covers to draw from', shapes.length > 0);
+    const all = shapes.map((_, i) => countdownHook(slides, { rand: () => i / shapes.length }));
+    ok('every shape fills in', all.every((h) => h && !/\{(count|top)\}/.test(h.hook + (h.emphasis || ''))));
+    ok(
+      'and fits the cover, the same limit a written hook has',
+      all.every((h) => h.hook.split(/\s+/).filter(Boolean).length <= MAX_HOOK_WORDS),
+      all.map((h) => `${h.hook.split(/\s+/).length}: ${h.hook}`).find((s) => Number(s.split(':')[0]) > MAX_HOOK_WORDS) || 'clean'
+    );
+    ok('every one says the number is a SAVING, not a price', all.every((h) => /חוסך/.test(h.hook)));
+    ok('every one quotes #1, the biggest saving', all.every((h) => h.hook.includes('1,210₪')));
+    ok('none of them names the brand', all.every((h) => !TRADEMARK.test(h.hook)));
+    ok('each shouts a phrase inside its own line', all.every((h) => h.emphasis && h.hook.includes(h.emphasis)));
+
+    const first = countdownHook(slides, { rand: () => 0 });
+    const next = countdownHook(slides, { rand: () => 0, avoid: [first.hook] });
+    ok('a redrawn cover is a different line', next && next.hook !== first.hook);
+    eq(
+      'and when every line has been used there is none, so the caller writes one',
+      countdownHook(slides, { avoid: all.map((h) => h.hook) }),
+      null
+    );
+    eq('a deck with no #1 gets no countdown cover', countdownHook(slides.map((s) => ({ ...s, rank: undefined }))), null);
+  }
+
+  // ---- which photograph the cover carries -------------------------------------
+  {
+    const slides = [{ productId: 'a', rank: 3 }, { productId: 'b', rank: 2 }, { productId: 'c', rank: 1 }];
+    eq('a countdown\'s cover carries #1, the set its line is about', coverSlide({ recipe: 'countdown', slides })?.productId, 'c');
+    eq('every other deck\'s carries the first slide', coverSlide({ recipe: 'theme', slides })?.productId, 'a');
+    eq(
+      'and a countdown with no #1 falls back to the first, as every deck did before',
+      coverSlide({ recipe: 'countdown', slides: slides.map(({ productId }) => ({ productId })) })?.productId,
+      'a'
+    );
+  }
+
+  // ---- the frame ------------------------------------------------------------
+  {
+    const lines = slideLines({ ok: true, paid: 349, listIls: 1559, saving: 1210 }, { price: 349 });
+    const html = renderBrickSlideHtml({ nameHe: 'טירה', emoji: '🏰', rank: 3, lines, image: null }, { size: 'tiktok' });
+    ok('a countdown slide carries its place', html.includes('<div class="rank">#3</div>'));
+    ok('above the name', html.indexOf('class="rank"') < html.indexOf('class="name'));
+    ok('and keeps the whole price block under it', (html.match(/class="line/g) || []).length === 3);
+    ok('an ordinary slide has no place', !renderBrickSlideHtml({ nameHe: 'טירה', lines, image: null }).includes('<div class="rank">'));
+    ok('nor does a rank that is not a positive whole number', ![0, -1, 2.5, '3'].some((rank) => renderBrickSlideHtml({ nameHe: 'טירה', rank, lines, image: null }).includes('<div class="rank">')));
+
+    const swipe = brickConfig().covers.swipeCountdownHe.replaceAll('{count}', '8');
+    const cover = renderBrickSlideHtml({ hookHe: 'x', countdown: 8, image: null }, { cover: true });
+    ok('a countdown cover says where the list starts', cover.includes(swipe), swipe);
+    ok('and not the ordinary swipe line', !cover.includes(brickConfig().covers.swipeHe));
+    ok('an ordinary cover keeps it', renderBrickSlideHtml({ hookHe: 'x', image: null }, { cover: true }).includes(brickConfig().covers.swipeHe));
+  }
+
+  // ---- the two cards and the caption ------------------------------------------
+  {
+    const proposal = { recipe: 'countdown', subject: ranked.subject, deals: ranked.deals, rates: {} };
+    const card = proposalMessage(proposal);
+    ok('the proposal names the format', card.includes('דירוג'));
+    ok('and gives every set its place', card.includes('#8 ') && card.includes('#1 '));
+    ok('#1 is the last set on the card, as on the post', card.lastIndexOf('#1 ') > card.lastIndexOf('#2 '));
+    eq('a full countdown is not thin', proposalWarning(proposal), null);
+    ok('a short one says so', /5 סטים/.test(proposalWarning({ ...proposal, deals: ranked.deals.slice(3) }) || ''));
+    ok(
+      'a countdown asked for and not built says why, above the sets',
+      proposalMessage({ ...proposal, recipe: 'theme', fallback: 'לא נבנה דירוג: 3 סטים עם חיסכון, צריך 5' }).includes('↩️ לא נבנה דירוג')
+    );
+
+    const { slides } = await buildSlides(ranked, { wantImages: false });
+    const approval = brickApprovalMessage({ deck: { subject: ranked.subject, hookHe: 'x', recipe: 'countdown', slides, dropped: [] } });
+    ok('the approval card carries each place, which is a claim like the prices', approval.includes('#8 ') && approval.includes('#1 '));
+
+    const deck = { recipe: 'countdown', slides: [] };
+    const opener = captionFor(deck, { ...dressing(deck, { rand: () => 0 }) }).split('\n')[0];
+    ok('a countdown\'s caption opens on a countdown line', brickConfig().caption.countdownLines.includes(opener), opener);
+    const plain = captionFor({ recipe: 'theme', slides: [] }, dressing({ recipe: 'theme', slides: [] }, { rand: () => 0 })).split('\n')[0];
+    ok('and an ordinary deck\'s does not', brickConfig().caption.lines.includes(plain), plain);
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1167,6 +1379,32 @@ group('the config refuses to be half-loaded');
   ok('and enough niche ones', cfg.hashtags.niche.length >= cfg.hashtags.nicheCount);
   ok('the deck size sits inside its own bounds', cfg.deck.minSlides <= cfg.deck.slides && cfg.deck.slides <= cfg.deck.maxSlides);
   ok('and a full deck fits an Instagram carousel with its cover and end card', cfg.deck.slides + 2 <= 10);
+  ok('a countdown is offered on a share of scheduled decks, not none and not all', cfg.deck.countdownShare > 0 && cfg.deck.countdownShare < 1);
+  ok('and is never shorter than a deck may be, nor longer', cfg.deck.minSlides <= cfg.deck.countdownMin && cfg.deck.countdownMin <= cfg.deck.slides);
+  ok('the countdown captions state no number either', cfg.caption.countdownLines.every((l) => !statesNumber(l)), cfg.caption.countdownLines.find((l) => statesNumber(l)) || 'clean');
+  ok('its swipe line says where the list starts', cfg.covers.swipeCountdownHe.includes('{count}'));
+  {
+    // A hand-edited file is where these go wrong, so both are clamped rather
+    // than refused: 3.3 read literally would make every post a countdown, and a
+    // minimum above the deck size would make none of them one.
+    const real = readFileSync(process.env.BRICK_CONFIG_PATH, 'utf8');
+    const typo = JSON.parse(real);
+    typo.deck.countdownShare = 3.3;
+    typo.deck.countdownMin = 40;
+    writeFileSync(process.env.BRICK_CONFIG_PATH, JSON.stringify(typo));
+    resetConfig();
+    eq('a share typed as 3.3 is held at every post, not read as more', brickConfig().deck.countdownShare, 1);
+    eq('a minimum past the deck size is held at the deck size', brickConfig().deck.countdownMin, brickConfig().deck.slides);
+    delete typo.deck.countdownShare;
+    delete typo.covers.countdownLines;
+    delete typo.covers.swipeCountdownHe;
+    delete typo.caption.countdownLines;
+    writeFileSync(process.env.BRICK_CONFIG_PATH, JSON.stringify(typo));
+    resetConfig();
+    ok('a config from before countdowns existed still loads', brickConfig().covers.countdownLines.length === 0 && brickConfig().caption.countdownLines.length === 0);
+    writeFileSync(process.env.BRICK_CONFIG_PATH, real);
+    resetConfig();
+  }
 }
 
 /* -------------------------------------------------------------------------- */

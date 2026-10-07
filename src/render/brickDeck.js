@@ -28,6 +28,24 @@ export const slideStem = (deckId, size, index) =>
   `brick-${deckId}-${size}-${String(index).padStart(2, '0')}`;
 
 /**
+ * The slide whose photograph the cover and the end card carry.
+ *
+ * The first, on every deck but one. A countdown's cover states #1's saving,
+ * and a cover that states a number has to show the set the number belongs to,
+ * the rule priceHook in build.js was written around. On a countdown the first
+ * slide is the smallest saving in the post, so its picture under "#1 saves you
+ * 1,210₪" would be the cover making a false claim about the set it shows.
+ *
+ * Found by rank, not position, and falling back to the first slide, so a deck
+ * with no #1 renders the way every deck did before there were countdowns.
+ */
+export const coverSlide = (deck) =>
+  (deck?.recipe === 'countdown' && deck.slides?.find((s) => s?.rank === 1)) || deck?.slides?.[0] || null;
+
+/** How many places a countdown's cover announces, or 0 when it is not one. */
+const countdownLength = (deck) => (deck?.recipe === 'countdown' ? deck.slides?.length || 0 : 0);
+
+/**
  * One size of one deck.
  *
  * The cover comes first and carries the hook. It takes the FIRST slide's
@@ -40,6 +58,9 @@ export const slideStem = (deckId, size, index) =>
  * showing a set that is then never mentioned is worse than a repeat — it is the
  * post promising six and delivering five. Reusing slide one's shot costs one
  * generated image less per deck and is what the reference does.
+ *
+ * A countdown reuses #1's shot instead, which is still a set the post shows.
+ * See `coverSlide`.
  */
 export async function renderBrickDeckSize(deck, { size = 'tiktok', outDir = cardOutputDir() } = {}) {
   if (!SIZES[size]) throw new Error(`unknown deck size: ${size}`);
@@ -58,18 +79,22 @@ export async function renderBrickDeckSize(deck, { size = 'tiktok', outDir = card
   // bookend rather than an error precisely because the treatment is different:
   // the end card washes the picture out and puts the type in front of it.
   const endCard = brickConfig().endCard;
+  // #1's photograph on a countdown, the first slide's on everything else. The
+  // end card follows the cover so the post still opens and closes on one frame.
+  const coverImage = coverSlide(deck)?.image;
   const items = [
     {
       hookHe: deck.hookHe,
       emphasisHe: deck.emphasisHe,
-      image: deck.slides[0]?.image,
-      // Which of the two covers this is, carried as a fact about the slide
-      // rather than re-derived in the renderer. It decides the swipe line.
+      image: coverImage,
+      // Which of the covers this is, carried as a fact about the slide rather
+      // than re-derived in the renderer. It decides the swipe line.
       priceLed: deck.hookFrom === 'price',
+      countdown: countdownLength(deck),
       cover: true,
     },
     ...deck.slides,
-    ...(endCard.askHe ? [{ image: deck.slides[0]?.image, end: true }] : []),
+    ...(endCard.askHe ? [{ image: coverImage, end: true }] : []),
   ];
 
   const out = [];
@@ -128,7 +153,13 @@ export async function renderBrickCover(deck, { size = 'tiktok', outDir = cardOut
   if (!SIZES[size]) throw new Error(`unknown deck size: ${size}`);
   const { w, h } = SIZES[size];
   const html = renderBrickSlideHtml(
-    { hookHe: deck.hookHe, emphasisHe: deck.emphasisHe, image, priceLed: deck.hookFrom === 'price' },
+    {
+      hookHe: deck.hookHe,
+      emphasisHe: deck.emphasisHe,
+      image,
+      priceLed: deck.hookFrom === 'price',
+      countdown: countdownLength(deck),
+    },
     { size, cover: true }
   );
   const rendered = await renderToJpeg(html, {

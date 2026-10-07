@@ -659,10 +659,11 @@ bot.command('igquota', async (ctx) => {
 /**
  * Build a slideshow.
  *
- * `/deck` lets the feed choose what to make; `/deck harry-potter`, `/deck 100`
- * or `/deck בונסאי` names it. A request that parses is honoured and one that
- * does not is interpreted rather than refused - a thin result falls through to
- * whatever the feed can best make rather than answering with a complaint.
+ * `/deck` lets the feed choose what to make; `/deck harry-potter`, `/deck 100`,
+ * `/deck דירוג` or `/deck בונסאי` names it. A request that parses is honoured
+ * and one that does not is interpreted rather than refused - a thin result
+ * falls through to whatever the feed can best make rather than answering with
+ * a complaint.
  */
 bot.command('deck', async (ctx) => {
   const result = ops.proposeDeck({ request: argOf(ctx, 'deck'), actor: actorOf(ctx) });
@@ -787,6 +788,7 @@ bot.command('help', (ctx) =>
       '/deck harry-potter — מצגת על נושא מסוים',
       '/deck 100 — מצגת של סטים עד 100 ₪',
       '/deck אגורות — מצגת לפי מחיר לחלק (או "/deck 8 אגורות")',
+      '/deck דירוג — הסטים שהכי חוסכים, ממקום 8 עד מקום 1 (או "/deck דירוג רכבים")',
       '/deck בונסאי — מצגת על סט מסוים',
       '',
       '/site — כתובת אתר הניהול ומצב החשבונות',

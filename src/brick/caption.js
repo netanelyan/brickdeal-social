@@ -74,9 +74,16 @@ export function hashtagsFor(deck, { rand = Math.random } = {}) {
   return [...broad, ...niche];
 }
 
-/** The line that opens a post, drawn from the pool. */
-export const captionHook = ({ rand = Math.random } = {}) => {
-  const lines = brickConfig().caption.lines;
+/**
+ * The line that opens a post, drawn from the pool.
+ *
+ * A countdown draws from its own pool when there is one. The ordinary lines
+ * are true of a countdown too, but none of them says that the post is one, and
+ * the caption is the second thing read after the cover.
+ */
+export const captionHook = ({ rand = Math.random, deck = null } = {}) => {
+  const cfg = brickConfig().caption;
+  const lines = deck?.recipe === 'countdown' && cfg.countdownLines.length ? cfg.countdownLines : cfg.lines;
   return lines[Math.floor(rand() * lines.length)];
 };
 
@@ -95,7 +102,7 @@ export const captionHook = ({ rand = Math.random } = {}) => {
  * was still getting it wrong.
  */
 export const dressing = (deck, { rand = Math.random } = {}) => ({
-  hook: captionHook({ rand }),
+  hook: captionHook({ rand, deck }),
   // Drawn here with the others for the reason the others are: a deck going to
   // two places must carry the SAME caption to both. Drawing it inside
   // captionFor would give Instagram one ask and TikTok another — one post

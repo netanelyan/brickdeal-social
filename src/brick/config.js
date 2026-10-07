@@ -79,6 +79,16 @@ export function brickConfig() {
     .map((l) => String(l).trim())
     .filter(Boolean)
     .map(coverLine);
+  // And the countdown's, filled in by countdownHook with `{count}` and `{top}`.
+  const countdownLines = (Array.isArray(raw.covers?.countdownLines) ? raw.covers.countdownLines : [])
+    .map((l) => String(l).trim())
+    .filter(Boolean)
+    .map(coverLine);
+  // The countdown's caption openers. Optional like engage: empty means a
+  // countdown draws from the ordinary pool, which is true of it too.
+  const countdownCaptionLines = Array.isArray(raw.caption?.countdownLines)
+    ? raw.caption.countdownLines.map((l) => String(l).trim()).filter(Boolean)
+    : [];
 
   const hashtags = raw.hashtags || {};
   const broad = tags(hashtags.broad, 'hashtags.broad');
@@ -135,6 +145,8 @@ export function brickConfig() {
       namePct: num(ov.namePct, 0.041),
       linePct: num(ov.linePct, 0.031),
       coverPct: num(ov.coverPct, 0.035),
+      // The numeral on a countdown slide. See the note in the config.
+      rankPct: num(ov.rankPct, 0.1),
       weight: num(ov.weight, 700),
       strokePct: num(ov.strokePct, 0.0018),
       shadow: String(ov.shadow || '0 2px 10px rgba(0,0,0,0.42)'),
@@ -163,8 +175,12 @@ export function brickConfig() {
       // which is the thing a price-led cover has just finished saying. Empty
       // falls back to the ordinary line.
       swipePriceHe: String(raw.covers?.swipePriceHe || '').trim(),
+      // The swipe line for a countdown, with `{count}` in it. Empty falls back
+      // to the ordinary line, same as swipePriceHe.
+      swipeCountdownHe: String(raw.covers?.swipeCountdownHe || '').trim(),
       priceLines,
       ratioLines,
+      countdownLines,
       // How often a post leads with the number instead of asking for a guess.
       //
       // Clamped rather than validated, because the failure it guards against is
@@ -175,6 +191,7 @@ export function brickConfig() {
     },
     caption: {
       lines: captionLines,
+      countdownLines: countdownCaptionLines,
       engage: engageLines,
       follow: followLines,
       cta: String(raw.caption?.cta || '').trim(),
@@ -197,6 +214,16 @@ export function brickConfig() {
       // recipe rather than on the feed because it is a rule about what this one
       // deck may claim, not about what may be sold.
       minPieces: count(deck.minPieces, 200),
+      // How often a scheduled deck is a countdown. Clamped, not validated, for
+      // the reason priceLedShare is: a typo of 3.3 read literally would make
+      // every scheduled post a countdown and nobody would notice for a week.
+      countdownShare: Math.min(1, Math.max(0, num(deck.countdownShare, 0.33))),
+      // Clamped into the deck's own bounds rather than refused. A countdown
+      // shorter than minSlides would be refused at render time anyway, and one
+      // longer than the deck can never fill. Throwing would take the pipeline
+      // down over one optional shape, which is the posture this file avoids
+      // for everything added after the first version.
+      countdownMin: Math.min(slides, Math.max(minSlides, count(deck.countdownMin, 5))),
     },
   };
 

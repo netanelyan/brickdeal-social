@@ -137,7 +137,7 @@ async function buildOne(request, n) {
         : c?.ok
           ? `${money(c.paid)} vs ${money(c.listIls)} (${c.source.region} ${c.source.amount} ${c.source.currency}) saves ${money(c.saving)}`
           : `${money(s.deal.price)} · no comparison — ${c?.why || 'unknown'}`;
-    console.log(`    ${s.emoji} ${s.nameHe}`);
+    console.log(`    ${s.rank ? `#${s.rank} ` : ''}${s.emoji} ${s.nameHe}`);
     console.log(`       ${claim}`);
     console.log(`       photo: ${s.image?.provenance || 'none'}${s.image?.note ? ` (${s.image.note})` : ''}`);
   }

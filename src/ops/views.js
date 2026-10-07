@@ -105,6 +105,8 @@ export function stagedView({ key, cand }) {
       n: i + 1,
       name: s.nameHe,
       emoji: s.emoji || null,
+      // A countdown's place, as printed on the slide. Null on every other deck.
+      rank: s.rank ?? null,
       productId: s.productId || null,
       price: s.deal?.price ?? null,
       setId: s.deal?.setId ?? null,
@@ -146,6 +148,7 @@ export function proposalView(key, held) {
     agorotCeiling: p.agorotCeiling || null,
     text: proposalMessage(p),
     warning: proposalWarning(p),
+    fallback: p.fallback || null,
     rates: p.rates || {},
     feedDropped: p.feedDropped || [],
     proposedAt: held.proposedAt || null,

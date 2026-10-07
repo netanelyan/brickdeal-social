@@ -121,13 +121,23 @@
       "type was Rubik, would be served by Chromium's synthetic bold, and a",
       "smeared outline on an algorithmically fattened glyph is worse than the",
       "real 600. Raising this means bundling a heavier Arimo, not editing the",
-      "number."
+      "number.",
+      "",
+      "`rankPct` IS THE NUMERAL ON A COUNTDOWN SLIDE, '#3' above the name. It",
+      "is the largest type on the frame, because it is the one thing on a",
+      "countdown that has to be read at thumbnail size: it says which part of",
+      "the list this is before a word of the name is. Digits are set in TikTok",
+      "Sans, which has a real heavy weight, so the numeral can be bolder than",
+      "the Hebrew without anything being synthesised. Every pixel it adds pushes",
+      "the name and the prices down, and render/headroom.js moves the",
+      "photograph down to match, so this trades against the size of the set."
     ],
     "sizeBasis": "width",
     "align": "center",
     "namePct": 0.05,
     "linePct": 0.038,
     "coverPct": 0.052,
+    "rankPct": 0.1,
     "weight": 600,
     "strokePct": 0.0018,
     "shadow": "0 2px 10px rgba(0,0,0,0.42)",
@@ -244,6 +254,40 @@
       "למה לשלם מחיר מלא? *הכל ב{fraction} מהמחיר*",
       "*ב{fraction} מהמחיר*, ואתם עדיין קונים בארץ?"
     ],
+    "_countdownComment": [
+      "The cover of a countdown deck, which teases #1.",
+      "",
+      "{top} IS #1's SAVING, filled by countdownHook in src/brick/build.js from",
+      "the same number the #1 slide prints in cream. {count} is how many sets",
+      "the countdown has. Both are counted off the slides that were built, not",
+      "off the proposal, so a set that lost its photograph cannot leave the",
+      "cover promising eight.",
+      "",
+      "THE COVER CARRIES #1's OWN PHOTOGRAPH, and it has to. A cover that states",
+      "a number shows the set the number belongs to, the rule priceHook was",
+      "written around: 'saves you 1,210₪' over a picture of a different set is",
+      "a claim about that set, and a false one. So the loop this cover opens is",
+      "not 'what is #1', which the picture answers, but 'what are the other",
+      "seven', and the swipe line says where they start.",
+      "",
+      "Every line says SAVES (חוסך). 'מקום ראשון: 1,210₪' on its own reads as",
+      "a price, and a price that low on a set that big is a claim the post does",
+      "not make.",
+      "",
+      "Same voice as the lines above, because it is what measured: the viewer,",
+      "their money, Israeli prices. Stars mark the emphasis; put them on the",
+      "phrase with the number. Every line must stay within MAX_HOOK_WORDS once",
+      "{top} is filled in, and the suite checks that. Set this to [] and a",
+      "countdown takes a written hook instead."
+    ],
+    "countdownLines": [
+      "{count} הסטים שהכי חוסכים לכם. *מקום ראשון חוסך {top}*",
+      "מי חוסך לכם הכי הרבה? *מקום ראשון חוסך {top}*",
+      "עדיין משלמים מחיר מלא? *מקום ראשון חוסך לכם {top}*",
+      "קונים סטים במחירים של הארץ? *מקום ראשון חוסך לכם {top}*",
+      "תגללו עד מקום ראשון. *הוא חוסך לכם {top}*",
+      "מהחיסכון הקטן לגדול. *מקום ראשון חוסך {top}*"
+    ],
     "_swipeComment": [
       "The line under the hook that asks for the swipe.",
       "",
@@ -277,10 +321,17 @@
       "brand, and a price-led cover has just printed that number - offering to",
       "reveal it underneath is the post arguing with its own first slide. So",
       "that cover offers the only thing it has not shown yet: the rest of the",
-      "sets. Leave it empty and price-led covers use the ordinary line."
+      "sets. Leave it empty and price-led covers use the ordinary line.",
+      "",
+      "`swipeCountdownHe` IS A COUNTDOWN COVER'S, and {count} is the number of",
+      "sets in it. The next frame is the bottom of the list, not #1, and a",
+      "viewer who expects the set on the cover is surprised by a smaller one",
+      "unless the line has told them where the countdown starts. Leave it empty",
+      "and a countdown uses the ordinary line."
     ],
     "swipeHe": "תראו כמה זה עולה בלגו ←",
-    "swipePriceHe": "ויש עוד. תראו ←"
+    "swipePriceHe": "ויש עוד. תראו ←",
+    "swipeCountdownHe": "מתחילים ממקום {count} ←"
   },
 
   "caption": {
@@ -308,6 +359,25 @@
       "ועדיין אתם משלמים מחיר מלא? 💵",
       "המחירים האלה לא הגיוניים, ובכל זאת הם אמיתיים 🧐",
       "סטים שכולם רוצים, במחירים שאף אחד לא מצפה להם"
+    ],
+    "_countdownLinesComment": [
+      "The opening line under a countdown deck, used instead of `lines`.",
+      "",
+      "Every line above is true under a countdown, but none of them says it is",
+      "one, and the caption is the second thing a viewer reads. Same voice and",
+      "the same one-emoji budget as `lines`. No question in any of them: the",
+      "comment asks were measured and got nothing (see `_engageComment`), and a",
+      "countdown produces its own arguments about who should be #1 without",
+      "being asked to. Set this to [] and a countdown draws from `lines`.",
+      "",
+      "None of them repeats the deck's own title, which is 'הסטים שהכי חוסכים",
+      "לכם, מדורגים'. Instagram's caption opens with the title, and a line under",
+      "it saying the same thing again reads as a mistake."
+    ],
+    "countdownLines": [
+      "מהחיסכון הקטן לגדול. תגללו עד מקום ראשון 👀",
+      "כל סט כאן חוסך לכם יותר מהקודם. תגללו עד הסוף 💸",
+      "תגללו עד הסוף, מקום ראשון חוסך לכם הכי הרבה 👇"
     ],
     "_ctaComment": [
       "The reference mentions its Telegram community under 94 of 102 posts, and",
@@ -489,13 +559,29 @@
       "`minPieces` is the floor under the per-piece deck. Price per piece is an",
       "average over the box, and a small set of large elements averages low",
       "while being a worse buy than the figure suggests - the standard caveat on",
-      "the metric, and the reason the deck refuses to be anchored by one."
+      "the metric, and the reason the deck refuses to be anchored by one.",
+      "",
+      "`countdownShare` is how often a deck the SCHEDULE offers is a countdown",
+      "(#8 to #1, ranked by saving). One in three, so that after two weeks there",
+      "are enough of both shapes to compare their views, which is what the",
+      "share is for. A countdown needs prices before it can choose its sets, so",
+      "one that lands on the coin prices a shortlist first (see",
+      "countdownShortlist in src/brick/recipes.js), and when the feed cannot",
+      "fill one the post is whatever the feed would have made anyway. A deck",
+      "asked for with /deck דירוג is a countdown whatever this says. 0 turns",
+      "the scheduled ones off.",
+      "",
+      "`countdownMin` is the shortest list that still counts down. Five: a top",
+      "five is a format people know, and a top three is three slides with",
+      "numbers on them."
     ],
     "slides": 8,
     "minSlides": 3,
     "maxSlides": 8,
     "priceCeilings": [50, 100, 150, 200],
     "agorotCeilings": [5, 8, 10, 15, 20],
-    "minPieces": 200
+    "minPieces": 200,
+    "countdownShare": 0.33,
+    "countdownMin": 5
   }
 }

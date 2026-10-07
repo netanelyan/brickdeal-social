@@ -915,7 +915,7 @@ function stagedCard(s) {
         el(
           'td',
           {},
-          el('div', {}, sl.emoji ? `${sl.emoji} ` : '', sl.name),
+          el('div', {}, sl.rank ? `#${sl.rank} ` : '', sl.emoji ? `${sl.emoji} ` : '', sl.name),
           c?.ok && c.source
             ? el('div', {
                 class: 'src mono',

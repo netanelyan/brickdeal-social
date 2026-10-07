@@ -122,7 +122,10 @@ export function brickApprovalMessage(cand) {
   lines.push(`📑 ${deck.slides.length + 1} שקופיות (שער + ${deck.slides.length} סטים):`);
   for (const [i, s] of deck.slides.entries()) {
     const c = s.deal?.comparison;
-    lines.push(`   ${i + 2}. ${s.emoji} ${s.nameHe}`);
+    // A countdown's place, as the slide prints it. It is a claim like the
+    // prices are, that this set saves more than every set before it, so it is
+    // on the card the owner approves rather than only on the frame.
+    lines.push(`   ${i + 2}. ${s.rank ? `#${s.rank} ` : ''}${s.emoji} ${s.nameHe}`);
     // The claim this slide is actually making. On a per-piece deck that is the
     // arithmetic on the frame and not the comparison, which the slide does not
     // print — and the entire purpose of this message is that what it lists and

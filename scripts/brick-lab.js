@@ -6,10 +6,12 @@ import path from 'node:path';
 import { renderToJpeg, closeBrowser } from '../src/render/index.js';
 import { renderBrickSlideHtml } from '../src/render/brickSlide.js';
 import { SIZES } from '../src/render/sizes.js';
-import { slideLines, perPieceLines } from '../src/brick/copy.js';
+import { renderBrickDeckSize } from '../src/render/brickDeck.js';
+import { slideLines, perPieceLines, shekels } from '../src/brick/copy.js';
 import { agorotPerPiece } from '../src/brick/recipes.js';
+import { brickConfig } from '../src/brick/config.js';
 import { writeContactSheet } from './lib/contact-sheet.js';
-import { ROOMS } from './lib/rooms.js';
+import { ROOMS, roomFor } from './lib/rooms.js';
 
 // Look at the slides.
 //
@@ -90,6 +92,64 @@ const SLIDES = [
 
 const COVER = { hookHe: 'איך אנשים עדיין משלמים מחיר מלא?', emphasisHe: 'מחיר מלא' };
 
+// A countdown, as a whole deck rather than slide by slide, because what it adds
+// is only visible in a row: the numeral counting down across the frames, the
+// saving under it growing, a cover carrying #1's picture rather than the first
+// slide's, and an end card that follows the cover. Rendered through the real
+// deck renderer for exactly that reason.
+//
+// The cover line is the first configured shape, filled in here rather than by
+// countdownHook. That lives in build.js, and importing build.js imports the
+// store, which rewrites data/store.json on load. This script touches nothing.
+//
+// Smallest saving first, as the recipe hands them over. The names repeat the
+// cases above that break: Latin inside Hebrew, two words, past two lines. With
+// a numeral on top, a two-line name is the tallest block the format produces.
+const COUNTDOWN = [
+  ['מכונית ספורט כחולה ולבנה', '🏎️', 59, 412],
+  ['מרוצי קארט על מסלול', '🏎️', 245, 618],
+  ['קסדת מרוצים F1', '🏎️', 74, 583],
+  ['סחלב', '🌸', 57, 686],
+  ['רכבת קיטור קלאסית', '🚂', 89, 790],
+  ['מסדרונות הטירה והספרייה הגדולה של בית הספר לקוסמים', '🏰', 210, 1099],
+  ['טירת הוגוורטס הגדולה', '🏰', 349, 1559],
+  ['מגדל אייפל', '🏛️', 420, 2402],
+];
+
+async function countdownDeck() {
+  const slides = COUNTDOWN.map(([nameHe, emoji, paid, listIls], i) => {
+    const comparison = { ok: true, paid, listIls, saving: listIls - paid };
+    return {
+      productId: `lab-${i}`,
+      nameHe,
+      emoji,
+      rank: COUNTDOWN.length - i,
+      lines: slideLines(comparison, { price: paid }),
+      image: { src: roomFor(i).src },
+      deal: { price: paid, comparison },
+    };
+  });
+  const [shape] = brickConfig().covers.countdownLines;
+  const top = slides.at(-1).deal.comparison.saving;
+  const fill = (s) => String(s || '').replaceAll('{count}', String(slides.length)).replaceAll('{top}', shekels(top));
+  const deck = {
+    id: 'lab-countdown',
+    recipe: 'countdown',
+    hookHe: fill(shape?.text || 'דירוג'),
+    emphasisHe: shape?.emphasis ? fill(shape.emphasis) : null,
+    hookFrom: 'countdown',
+    slides,
+  };
+  const rendered = await renderBrickDeckSize(deck, { size: 'tiktok', outDir: OUT });
+  return {
+    titleHe: 'דירוג — ממקום 8 עד מקום ראשון',
+    style: 'countdown',
+    size: 'tiktok',
+    note: `"${deck.hookHe}" · cover and end card carry #1's picture`,
+    slides: rendered.map((s) => ({ ...s, spot: null })),
+  };
+}
+
 async function main() {
   mkdirSync(OUT, { recursive: true });
   const decks = [];
@@ -126,10 +186,12 @@ async function main() {
     });
   }
 
+  decks.push(await countdownDeck());
+
   const sheet = path.join(OUT, 'index.html');
   writeContactSheet(decks, OUT, { title: 'brick lab — the reference look, over three backgrounds' });
   await closeBrowser();
-  console.log(`\n  ${decks.length * (SLIDES.length + 1)} slides\n  ${sheet}\n`);
+  console.log(`\n  ${decks.reduce((n, d) => n + d.slides.length, 0)} slides\n  ${sheet}\n`);
 }
 
 main().catch(async (e) => {

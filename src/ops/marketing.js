@@ -4,10 +4,10 @@ import { emit } from './bus.js';
 import * as jobs from './jobs.js';
 import { telegram as surface } from './surface.js';
 import { publishNext } from './publish.js';
-import { proposeDeck as planDeck, buildProposed, draftHook } from '../brick/build.js';
+import { proposeDeck as planDeck, buildProposed, draftHook, countdownHook } from '../brick/build.js';
 import { toBrickCandidate, brickApprovalMessage } from '../brick/candidate.js';
 import { proposalMessage, proposalWarning } from '../brick/proposal.js';
-import { renderBrickCover, renderBrickSlideAt } from '../render/brickDeck.js';
+import { renderBrickCover, renderBrickSlideAt, coverSlide } from '../render/brickDeck.js';
 import { cachedShotFor, shotOrProduct } from '../images/homeShot.js';
 import { creatorInfo, defaultPrivacy, nextPrivacy, privacyHe, describeError as describeTikTokError } from '../publish/tiktok.js';
 import { targetsForKind, targetsHe, liveTargets } from '../publish/targets.js';
@@ -256,8 +256,12 @@ export function newCover(key, { actor = null } = {}) {
       // during the build. Checked BEFORE the model call: if the shot is gone
       // there is nothing to draw on, and finding that out after paying for a line
       // would be the wrong order.
-      const first = deck.slides?.[0];
-      const image = first?.productId ? cachedShotFor(first.productId, 1) : null;
+      //
+      // Whichever slide the cover carries (#1 on a countdown), under the shot
+      // number it was built with. A deck staged before slides recorded one was
+      // built when the cover was always the first shot, so 1 is right for it.
+      const hero = coverSlide(deck);
+      const image = hero?.productId ? cachedShotFor(hero.productId, hero.shot ?? 1) : null;
       if (!image) {
         const msg = '⚠️ התמונה של השקופית הראשונה כבר לא במטמון — צריך לבנות מחדש';
         await say(msg);
@@ -271,21 +275,28 @@ export function newCover(key, { actor = null } = {}) {
       // answer: same recipe in, same sentence out.
       deck.pastHooks = [...new Set([...(deck.pastHooks || []), deck.hookHe].filter(Boolean))];
 
-      const drawn = await draftHook(
-        {
-          kind: deck.recipe,
-          subject: deck.subject,
-          theme: deck.theme || null,
-          ceiling: deck.ceiling || null,
-          agorotCeiling: deck.agorotCeiling || null,
-          deals: (deck.slides || []).map((s) => ({
-            product: s.nameHe,
-            price: s.deal?.price,
-            comparison: s.deal?.comparison,
-          })),
-        },
-        { avoid: deck.pastHooks }
-      );
+      // A countdown redraws as a countdown: another of its numbered lines, the
+      // used ones excluded, and costing no model call at all. Only when every
+      // shape has been on this deck does it fall back to a written hook, whose
+      // swipe line still says where the countdown starts.
+      const numbered = deck.recipe === 'countdown' ? countdownHook(deck.slides, { avoid: deck.pastHooks }) : null;
+      const drawn =
+        numbered ||
+        (await draftHook(
+          {
+            kind: deck.recipe,
+            subject: deck.subject,
+            theme: deck.theme || null,
+            ceiling: deck.ceiling || null,
+            agorotCeiling: deck.agorotCeiling || null,
+            deals: (deck.slides || []).map((s) => ({
+              product: s.nameHe,
+              price: s.deal?.price,
+              comparison: s.deal?.comparison,
+            })),
+          },
+          { avoid: deck.pastHooks }
+        ));
 
       if (drawn.hook === deck.hookHe || deck.pastHooks.includes(drawn.hook)) {
         const msg = `🔁 יצא אותו שער — נסה שוב\n\n"${drawn.hook}"`;

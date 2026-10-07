@@ -60,6 +60,9 @@ const SCRIM = { want: 3, floor: 0.12, ceiling: 0.55 };
 //     equal size - what it costs us, what it lists for, the difference. A
 //     per-piece deck fills those three with its own argument instead (price,
 //     pieces, agorot each) and the frame is identical; see copy.js.
+//   - on a countdown, one more line above the name: its place in the list,
+//     "#3", larger than anything else on the frame. The four lines under it
+//     are unchanged, so a countdown slide is an ordinary slide with a number.
 //   - one phrase in cream rather than white, because Hebrew has no capitals and
 //     a shout has to be carried by colour. One phrase and not the line: if
 //     every word is cream then no word is shouted.
@@ -89,6 +92,7 @@ export function brickScale({ w, h }) {
     name: px(ov.namePct),
     line: px(ov.linePct),
     cover: px(ov.coverPct),
+    rank: px(ov.rankPct),
     // Measured off the frame rather than off the type. The name and the price
     // lines are within a quarter of each other, so one width reads consistently
     // across both - and at 2px the risk the travel file worried about (a stroke
@@ -351,6 +355,35 @@ body { position:relative; }
 }
 .name.long { font-size:${Math.round(scale.name * 0.86)}px; }
 
+/* The place in a countdown, above the name: "#3".
+
+   The loudest type on the frame, because it is what a countdown is. It has to
+   say which part of the list this is at thumbnail size, before the name is
+   legible, and it is the reason a viewer on #6 swipes rather than leaves.
+
+   Type and nothing else. No disc, no chip, no medal behind it: the anatomy at
+   the top of this file rules those out for the whole format, and a number in
+   a circle is the first thing a template reaches for.
+
+   Set in TikTok Sans at 800, which the bundled file really has. Every glyph in
+   it is a digit or a "#", so none of it falls through to Arimo, whose 600 is
+   the ceiling for the Hebrew. The numeral is bolder than the name for the
+   same reason it is bigger.
+
+   Left to right on its own, so "#3" cannot become "3#" by bidi in a right to
+   left block. Tight leading, because the line box of a 108px numeral is
+   mostly air and that air would sit between the rank and the name it
+   belongs to. */
+.rank {
+  font-size:${scale.rank}px;
+  font-weight:800;
+  line-height:1;
+  direction:ltr;
+  unicode-bidi:isolate;
+  letter-spacing:-0.01em;
+  margin-bottom:${Math.round(scale.line * 0.3)}px;
+}
+
 .line { font-size:${scale.line}px; }
 
 /* Hebrew has no capitals, so the shout is carried by colour. One phrase on a
@@ -591,8 +624,17 @@ export function renderBrickSlideHtml(slide, { size = 'tiktok', cover = false, en
     // what the set costs at the original brand, and that cover has just printed
     // that number — offering to reveal it underneath is the post arguing with
     // its own first slide.
+    //
+    // And a countdown's says where the list starts. The next frame is the
+    // bottom of the list, not the set on the cover, and without being told a
+    // viewer who swipes for the castle and gets a go-kart has been misled.
     const covers = brickConfig().covers;
-    const swipe = (slide.priceLed && covers.swipePriceHe) || covers.swipeHe;
+    const swipe =
+      (slide.countdown > 0 && covers.swipeCountdownHe
+        ? covers.swipeCountdownHe.replaceAll('{count}', String(slide.countdown))
+        : '') ||
+      (slide.priceLed && covers.swipePriceHe) ||
+      covers.swipeHe;
     body =
       `<div class="cover${coverClass(slide.hookHe)}">${coverHtml(slide.hookHe, slide.emphasisHe)}</div>` +
       (swipe ? `<div class="swipe">${escapeHtml(swipe)}</div>` : '');
@@ -620,7 +662,10 @@ export function renderBrickSlideHtml(slide, { size = 'tiktok', cover = false, en
         );
       })
       .join('');
-    body = `<div class="name${nameClass(slide.nameHe)}">${name}</div>${lines}`;
+    // A countdown's place, above the name. Only a positive whole number: a
+    // rank of 0 or "#NaN" across a photograph is worse than no rank at all.
+    const rank = Number.isInteger(slide.rank) && slide.rank > 0 ? `<div class="rank">#${slide.rank}</div>` : '';
+    body = `${rank}<div class="name${nameClass(slide.nameHe)}">${name}</div>${lines}`;
   }
 
   return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><style>${css(
