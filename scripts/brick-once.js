@@ -10,6 +10,10 @@ import { closeBrowser } from '../src/render/index.js';
 import { writeContactSheet } from './lib/contact-sheet.js';
 import { roomFor } from './lib/rooms.js';
 import { sampleDeals } from './fixtures/deals.js';
+import { gates, modelScore, contactSheet, decide, scoreLine, SUBSCORES } from '../src/brick/score.js';
+import { tiktokRoute, routeHe } from '../src/brick/candidate.js';
+import { publishZernio } from '../src/publish/zernio.js';
+import { brickConfig } from '../src/brick/config.js';
 
 // The whole path, printed, publishing nothing.
 //
@@ -19,6 +23,12 @@ import { sampleDeals } from './fixtures/deals.js';
 //   npm run brick-once -- --fixture       a generated feed, no network
 //   npm run brick-once -- --rooms         stand-in photographs, no image calls
 //   npm run brick-once -- --no-images     no photographs at all
+//   npm run brick-once -- --no-score      skip the scorer's model call
+//
+// Every deck is scored as auto mode would score it, and the request TikTok
+// would get through Zernio is printed, sent to a fake client that records it
+// and answers like Zernio. Nothing reaches Zernio or TikTok, with or without
+// a ZERNIO_API_KEY.
 //
 // Writes to out/brick/ instead of to Telegram, with a contact sheet. Touches
 // neither the store nor any destination, so it is safe to run on the VPS.
@@ -36,6 +46,7 @@ const argv = process.argv.slice(2);
 const useRooms = argv.includes('--rooms');
 const noImages = argv.includes('--no-images') || useRooms;
 const useFixture = argv.includes('--fixture');
+const noScore = argv.includes('--no-score');
 
 // Several requests build several decks onto one sheet. A deck is only really
 // judgeable next to another one — whether five slides read as a series, whether
@@ -163,6 +174,21 @@ async function buildOne(request, n) {
   console.log('\n  rendering');
   const slides = await renderBrickDeckSize(deck, { size: 'tiktok', outDir: OUT });
 
+  // The deck as auto mode would hand it to the scorer and the publisher.
+  const cand = {
+    kind: 'deck',
+    id: deck.id,
+    headline: deck.titleHe,
+    deck: { ...deck, tiktok: slides, preview: slides },
+    tiktokCaption: captionFor(deck, dress),
+    instagramCaption: instagramCaptionFor(deck, dress),
+    publishTargets: ['tiktok'],
+  };
+  cand.tiktokRoute = tiktokRoute(deck.slides);
+  cand.tiktokDraft = cand.tiktokRoute.path === 'draft';
+  await scoreOne(cand);
+  await zernioOne(cand);
+
   return {
     titleHe: deck.titleHe,
     style: deck.recipe,
@@ -170,6 +196,88 @@ async function buildOne(request, n) {
     note: `${deck.subject} · "${deck.hookHe}"`,
     slides: slides.map((s) => ({ ...s, spot: null })),
   };
+}
+
+/**
+ * The scorer, as auto mode runs it, with the reasons printed.
+ *
+ * Stage B normally runs only for a deck that passed stage A. Here it runs
+ * either way, because this is where the judge's answer gets looked at; when
+ * stage A failed, the line says production would have stopped there.
+ */
+async function scoreOne(cand) {
+  console.log('\n  score');
+  const a = gates(cand);
+  if (a.ok) console.log('    stage A: every gate passed');
+  else {
+    console.log(`    stage A: ${a.failures.length} gate(s) failed — auto mode stops here and rebuilds or drops`);
+    for (const f of a.failures) console.log(`      ✗ ${f.gate}: ${f.why}   [fix: ${f.fix}]`);
+  }
+
+  let result;
+  if (noScore) {
+    console.log('    stage B: skipped (--no-score)');
+    result = { stage: 'A', pass: false, gates: a.failures, total: null };
+  } else {
+    const sheet = await contactSheet(cand, { outDir: OUT });
+    console.log(`    contact sheet: ${sheet.file}`);
+    const b = await modelScore(cand, { sheet: sheet.base64 });
+    const label = a.ok ? 'stage B' : 'stage B (shown for the dry run only; production would not reach it)';
+    if (!b.ok) {
+      console.log(`    ${label}: FAILED CLOSED — ${b.error}`);
+    } else {
+      console.log(`    ${label}: ${b.total}/100 from ${b.model} · threshold ${brickConfig().score.threshold}`);
+      console.log(`      ${SUBSCORES.map((k) => `${k} ${b.sub[k]}`).join(' · ')} · weakest: ${b.weakest}`);
+      if (b.notes) console.log(`      judge: ${b.notes}`);
+    }
+    result = a.ok
+      ? b.ok
+        ? { stage: 'B', pass: b.total >= brickConfig().score.threshold, total: b.total, sub: b.sub, weakest: b.weakest, threshold: brickConfig().score.threshold, gates: [] }
+        : { stage: 'B', pass: false, total: null, error: b.error, gates: [], threshold: brickConfig().score.threshold }
+      : { stage: 'A', pass: false, gates: a.failures, total: null, threshold: brickConfig().score.threshold, why: a.failures.map((f) => f.why).join('; ') };
+  }
+  const next = decide(result, { attempt: 1 });
+  console.log(
+    `    decision: ${{ publish: 'PUBLISH', cover: 'rebuild once with a new cover', recipe: 'rebuild once with different sets', drop: 'DROP' }[next]}` +
+      (result.total == null ? '' : ` (${scoreLine(result)})`)
+  );
+  console.log(`    tiktok route: ${cand.tiktokRoute.path} — ${routeHe(cand.tiktokRoute)}`);
+}
+
+/** What Zernio would be sent, through a fake client that records it. */
+async function zernioOne(cand) {
+  console.log('\n  Zernio (mock client — nothing is sent anywhere)');
+  // The fake answers creator-info as an account allowing every level, and the
+  // post as published. The checks in publishZernio still run against it.
+  const sent = [];
+  const mock = {
+    creatorInfo: async () => ({
+      creator: { nickname: '(mock account)', canPostMore: true },
+      privacyLevels: ['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'].map((value) => ({ value })),
+      postingLimits: { interactionSettings: { allow_comment: { enabled: true } } },
+      commercialContentTypes: [{ value: 'none' }],
+    }),
+    createPost: async (body, { idempotencyKey }) => {
+      sent.push({ body, idempotencyKey });
+      return { status: 201, json: { post: { _id: 'mock-post-1', status: 'published', platforms: [{ platform: 'tiktok', status: 'published', platformPostUrl: null }] } } };
+    },
+  };
+  // publishZernio refuses without these. Placeholders are enough for a client
+  // that never leaves this process.
+  process.env.ZERNIO_API_KEY ||= 'mock-key';
+  process.env.ZERNIO_TIKTOK_ACCOUNT_ID ||= 'mock-account';
+  try {
+    const out = await publishZernio(cand, { client: mock });
+    const { body, idempotencyKey } = sent[0];
+    console.log(`    POST ${process.env.ZERNIO_API_BASE || 'https://zernio.com/api/v1'}/posts`);
+    console.log('    Authorization: Bearer <ZERNIO_API_KEY>');
+    console.log(`    Idempotency-Key: ${idempotencyKey}`);
+    console.log(indent(JSON.stringify(body, null, 2)));
+    console.log(`    -> mock answered: zernio ${out.postId} · ${out.status}${out.draft ? ' · inbox draft' : ''}`);
+    for (const n of out.notes || []) console.log(`    note: ${n}`);
+  } catch (e) {
+    console.log(`    publishZernio refused before sending: ${e.message}`);
+  }
 }
 
 main().catch(async (e) => {

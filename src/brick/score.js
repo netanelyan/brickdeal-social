@@ -201,7 +201,7 @@ slide1: frame 2, the first set, which decides whether anybody swipes. A set peop
 
 photos: every frame. Each photograph must read as a real photograph of a real build: not a drawing, not a 3D render, not a marketplace advertisement with badges, prices or English text on it. The set must be the clear subject, and the Hebrew type must be readable over it on every frame. One bad frame pulls this down hard.
 
-savings: from the price table. How big are the savings, and how believable? 70 to 90 percent off a set people know is the format's whole argument. Small savings, a set with no comparison, or a list price implausibly high for what the set is score low.
+savings: from the price table. How big are the savings, and how believable? 70 to 90 percent off a set people know is the format's whole argument. Small savings, a set with no comparison, or a list price implausibly high for what the set is score low. A per-piece deck (recipe: perPiece) argues the price of one piece instead and never shows a list price, by design: judge how low and believable the price per piece is, and do not mark it down for the missing comparison.
 
 variety: are the sets different from each other in theme, shape, colour and price, or is it the same kind of thing again and again?
 

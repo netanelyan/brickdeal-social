@@ -2,13 +2,18 @@
 
 Turns the BrickDeal deal feed into Hebrew TikTok slideshows. It picks eight sets,
 prices them against the original brand's retail price, photographs them on a
-collector's display shelf, renders the slides, and sends them to one
-person on Telegram for approval. Nothing publishes without a tap.
+collector's display shelf, renders the slides, scores the result, and posts it
+to TikTok through Zernio, or drops it. Nobody taps anything. Telegram gets one
+line per post, and `/pause` stops everything.
 
 ```
 deals.json → pick eight → Brickset + FX → hook → photographs → render
-     → Telegram proposal → ✅ → build → Telegram album → ✅ → TikTok + Instagram
+     → score (hard gates, then one model call) → queue → TikTok via Zernio + Instagram
+                         └─ below the bar: rebuild once, then drop
 ```
+
+The old flow, a proposal card and an approval card with a tap on each, is still
+here behind `approval.mode: "manual"` in `brick-config.json`.
 
 <p align="center">
   <img src="assets/samples/slide-cover.jpg" width="240" alt="Cover slide: איך אנשים עדיין משלמים מחיר מלא?">
@@ -176,9 +181,10 @@ Three rules, in `src/images/homeShot.js`:
    it is screened the same way first — and when it fails, the deal gets no
    slide at all rather than an advertisement with Hebrew type over it.
 
-The approval card also says when a deck carries generated photographs, because
-the post then has to be labelled as AI-generated in the app and nothing here can
-do that for you.
+A deck that carries generated photographs has to be labelled as AI-generated on
+TikTok, and the API cannot do it for a photo post. So such a deck goes to the
+TikTok inbox as a draft, and Telegram says to add the label and post it. See
+*How a deck reaches TikTok*.
 
 **Why rules 2 and 3 grew.** A deck went out carrying a grey pencil sketch of a
 Star Destroyer with a red `1500+PCS` badge and `Desktop Decoration` printed
@@ -195,11 +201,14 @@ rather than answering "is this a photograph?". Every image it sees is generated,
 so the yes/no form is close to asking whether a machine made it, and the first
 version of it rejected two perfectly good restaged photographs.
 
-## Two taps, and what sits between them
+## Manual mode: two taps, and what sits between them
 
 ```
 proposal (free)  →  ✅  →  hook + photographs + render  →  album  →  ✅  →  publish
 ```
+
+This is `approval.mode: "manual"`. Auto mode, the default, replaces both taps
+with the scorer; see *How a deck reaches TikTok*.
 
 The first card is the **proposal**: the recipe, the sets, and every price
 claim the deck will make. Everything in it is free — the feed is a file, Brickset
@@ -319,7 +328,7 @@ Requires Node 18+ (developed on 24) and no build step.
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env      # then fill it in
-npm test                  # 536 offline checks, no credentials needed
+npm test                  # 685 offline checks, no credentials needed
 npm run brick-lab         # look at the slides, ~15s a round
 npm run brick-once -- --fixture --no-images   # the whole path, publishing nothing
 npm start
@@ -338,38 +347,120 @@ of it happens at render time. Two scripts exist to look at them:
   network, no keys. **The white-wall column is the one to look at** — it is where
   a fine outline gives out first.
 - **`brick-once`** is the whole pipeline — feed, Brickset, FX, cover,
-  photographs, render — written to `out/brick/` with a contact sheet, every price
-  claim printed with its source, and nothing written to the store. `--fixture`
-  generates a feed with today's dates so it works offline; `--no-images` skips
-  the expensive step.
+  photographs, render, score — written to `out/brick/` with a contact sheet and
+  every price claim printed with its source. It ends with the exact request
+  Zernio would be sent, handed to a fake client that records it, so nothing
+  reaches Zernio or TikTok. `--fixture` generates a feed with today's dates so it
+  works offline; `--no-images` skips the expensive step (and so fails the photo
+  gate, which the output says); `--no-score` skips the judge's model call.
 
-TikTok is connected once with `npm run tiktok-token`.
+TikTok is connected in Zernio's dashboard; `.env` takes `ZERNIO_API_KEY` and
+`ZERNIO_TIKTOK_ACCOUNT_ID`.
 
-## Why TikTok posts are drafts
+## How a deck reaches TikTok
 
-TikTok's photo API has no field for a sound. `auto_add_music` is a boolean — on,
-and TikTok picks a track you never see; off, and the post is silent, which costs
-reach. There is no `music_id` and no endpoint exposes an account's saved sounds,
-so "use one of my sounds" cannot be built at either end. Sound is also the one
-thing that cannot be changed after publishing.
+### Through Zernio
 
-So `post_mode: MEDIA_UPLOAD` delivers the slides to the account's TikTok
-**inbox** — not the Drafts folder on the profile, which is the first place
-anyone looks and the one place it will not be — and you finish it in the app:
-sound, cover, caption, then post.
+TikTok's own Content Posting API was the first way in, and it could not do the
+job unattended. Before TikTok audits an app it may post only as private; it has
+no field for choosing a sound; and so every deck went to the creator's inbox to
+be finished by hand. Zernio posts through an app that has passed the audit, so
+`src/publish/zernio.js` sends one request:
 
-Three of TikTok's rules stop applying in that mode, none of them by choice: no
-privacy level to resolve, no unaudited-client restriction, and no daily cap,
-because all three govern posts the *client* makes and here it makes none.
+```
+POST https://zernio.com/api/v1/posts
+  content         the cover hook, as TikTok's 90-character title
+  mediaItems      the ten 9:16 slides, as public URLs Zernio fetches
+  tiktokSettings  media_type photo, photo_cover_index 0, privacy_level,
+                  auto_add_music, allow_comment, description (caption + tags),
+                  commercialContentType, content_preview_confirmed,
+                  express_consent_given
+```
 
-The cost is that it is not unattended. A deck waits in your inbox until you open
-TikTok, and nothing here can tell whether you ever did — so the notification
-says `📥 טיקטוק: נשלח לטיוטות — עוד לא באוויר`, because "posted" is the one
-wrong thing to say about a post that still needs you.
+The exact body is in `scripts/fixtures/zernio-request.json`, and the suite holds
+the code to it. Before every post it asks Zernio's creator-info which privacy
+levels the account allows, and a post whose configured level is not among them
+is refused, loudly, rather than sent at a different level.
 
-**Scopes are per mode, not per media type.** `video.publish` is direct posting;
-`video.upload` is the inbox. Asking for the wrong one fails at `init` with
-`scope_not_authorized`, and a token cannot gain a scope by refreshing.
+**The sound is TikTok's choice, not ours.** `musicSoundInfo`, Zernio's way to
+name a track, is for video posts only. A photo carousel gets `auto_add_music`
+and nothing more, so there is no list of sounds here to rotate.
+
+**A commercial disclosure silences it.** With `commercialContentType` set to
+anything but `none`, TikTok allows only its Commercial Music Library, and
+auto-added music attaches nothing. The bot says so at boot and on the panel and
+changes neither setting.
+
+**A deck with a generated photograph goes to the inbox.** TikTok requires such
+a post to be labelled as AI-generated, and Zernio rejects that label on a direct
+photo post. So the deck goes out as a draft (`tiktokSettings.draft`), lands in
+the TikTok inbox (not the Drafts folder on the profile), and Telegram says
+`📥 טיקטוק: טיוטה בתיבה — לסמן "AI" ולפרסם באפליקציה`. Only a deck made entirely
+of screened seller or catalogue photos is posted by itself. `tiktok.aiPhotos:
+"skip"` keeps such decks off TikTok instead; nothing posts them unlabelled. While
+image generation is on, most decks have generated photographs, so most TikTok
+posts will be drafts. That is the cost of the rule.
+
+Zernio's failures map onto the four kinds `src/ops/publish.js` already had: a
+daily cap or a busy TikTok waits, a bad card is abandoned, a bad key or a
+privacy level the account lacks stands TikTok down until it is fixed, and
+anything else is retried. After a timeout the retry reuses the request's
+idempotency key, so a post Zernio did make comes back instead of being made
+twice. Instagram still goes through the Graph API, unchanged.
+
+### The scorer
+
+In auto mode (`approval.mode: "auto"`, the default) nobody taps. A deck is
+proposed, built, and handed to `src/brick/score.js`, and it has to pass two
+stages.
+
+**Stage A is hard gates.** Any failure drops the deck. Each one calls a rule
+that already exists rather than writing it again: every price passes feed.js's
+freshness rule at the moment of scoring; every photograph passed homeShot's
+vision check (a catalogue photo that nothing screened does not count); nothing a
+model or the feed wrote carries the trademark; there are eight sets, a cover
+and an end card; and the cover is within the word limit.
+
+**Stage B is one model call.** The judge sees every frame of the deck as one
+numbered contact sheet, next to the price table it was built from, and the
+measured covers with their view counts. It returns five scores from 0 to 100:
+the hook, the first set, the photographs and their legibility, the savings, and
+the variety of the sets. The total is their weighted average, computed in code
+(`score.weights`). An answer that is not clean JSON, or an API error, is a
+failed deck, never a pass.
+
+At or above `score.threshold` (70) the deck is queued. Below it, it is rebuilt
+once (a new cover when the cover is its weakest part or the only gate it
+failed, different sets otherwise) and dropped if it still falls short, with one
+line in Telegram saying why. Every score, the rebuilt ones included, is kept on
+the deck.
+
+**Then the drip posts it, never sooner than `POST_INTERVAL_MINUTES` after the
+last post**, whatever made that one. `DECKS_PER_DAY` still caps how many decks
+the schedule starts, and the count is in the store, so a restart does not reset
+it.
+
+### Does the score mean anything?
+
+Nothing about the scorer is known to be right. It was written from the reference
+account's numbers, and the only test that counts is whether the decks it rates
+higher get more views. So once a day the bot asks Zernio's analytics for the
+views on every scored post, and `/score` and the panel's ציונים tab show score
+against views for the last 30 posts, with the rank correlation. After 20
+measured posts, a correlation that chance alone could produce reads, in so many
+words, "the score does not predict views".
+
+Once 10 posts have views, the hook writer and the judge stop being shown the
+reference account's covers and are shown this account's own top and bottom
+three by real views instead.
+
+### The kill switch
+
+`/pause` (or the panel's button) stops everything that happens without a
+person: the schedule starts no deck, the drip posts nothing, and `/next` and
+`/post` are refused. It is kept in the store, so a restart does not lift it.
+`/deck` still builds when the owner asks, and what it makes waits in the queue.
+`/resume` lifts it.
 
 ## Two ways in, one set of actions
 
@@ -377,14 +468,14 @@ Telegram is where this started and it is unchanged. There is now also a website,
 for the things a chat is bad at and for the fact that one person's phone is not
 a team.
 
-**Both drive the same functions.** Every action — propose, build, approve,
-reject, a new cover, a new photograph, publish, retry — is one function in
-`src/ops/marketing.js`, and `bot.js` and `src/web/server.js` are two callers of
-it. That is the whole design, and it is not tidiness: approving a deck decides
-whether TikTok gets a draft now or a queue slot later, refunds the day's quota
-on a rejection, and settles the card so it cannot be tapped twice. A browser
-button that reimplemented three of those four would look like it worked for
-weeks.
+**Both drive the same functions.** Every action — propose, build, score,
+approve, reject, a new cover, a new photograph, publish, retry, pause — is one
+function in `src/ops/marketing.js`, and `bot.js` and `src/web/server.js` are two
+callers of it. That is the whole design, and it is not tidiness: approving a deck
+queues it owing exactly the destinations it was built for, refunds the day's
+quota on a rejection, and settles the card so it cannot be tapped twice. A
+browser button that reimplemented two of those three would look like it worked
+for weeks.
 
 So the two surfaces cannot drift, and neither is ever showing something the
 other has already changed: approve in the browser and the Telegram card strikes
@@ -435,11 +526,13 @@ exist.
 ## Commands
 
 `/deck` build one now · `/deck harry-potter`, `/deck 100`, `/deck 8 אגורות`,
-`/deck דירוג`, `/deck דירוג רכבים`, `/deck בונסאי` name it · `/site` where the panel is · `/status` · `/health` every destination
-separately, with its last error · `/usage` tokens and cost · `/igquota` ·
-`/tiktok` connection, tokens, granted scopes · `/tiktok_connect` · `/pending` ·
-`/queue` what is waiting, numbered · `/next` publish the next · `/post 3`
-publish that one out of turn · `/held` `/retry` `/clear_held` `/resend`
+`/deck דירוג`, `/deck דירוג רכבים`, `/deck בונסאי` name it · `/pause` `/resume`
+the kill switch · `/score` score against views · `/site` where the panel is ·
+`/status` · `/health` every destination separately, with its last error ·
+`/usage` tokens and cost · `/igquota` · `/tiktok` the Zernio account, its privacy
+levels and the daily cap · `/pending` · `/queue` what is waiting, numbered ·
+`/next` publish the next · `/post 3` publish that one out of turn · `/held`
+`/retry` `/clear_held` `/resend`
 
 **The bot talks like a CLI.** A command prints what you asked for; the daemon
 does not chatter. Messages that arrive unasked are one line, and the detail
@@ -464,7 +557,7 @@ one it stepped over, on the card, before you tap.
 | `src/ops/jobs.js` | work that takes minutes, watchable from either surface |
 | `src/ops/bus.js` | what just happened, so the other surface stops showing something untrue |
 | `src/ops/settings.js` | the schedule, and editing the copy rules without being able to break them |
-| `src/web/server.js` | the panel's HTTP surface, and TikTok's browser connect on the same port |
+| `src/web/server.js` | the panel's HTTP surface |
 | `src/web/auth.js` | accounts, scrypt passwords, signed sessions, roles |
 | `src/web/ui/` | the page itself: no framework, no build step, no outside origin |
 | `brick-config.json` | the editorial dials: price labels, caption pool, cover hooks, hashtags, type |
@@ -475,6 +568,9 @@ one it stepped over, on the card, before you tap.
 | `src/brick/recipes.js` | which deals, and in which order |
 | `src/brick/build.js` | the two halves: the free proposal, and the expensive build |
 | `src/brick/proposal.js` | the first card — what this post would be, before paying for it |
+| `src/brick/score.js` | **whether a deck is posted in auto mode** — the hard gates, the judge, the rebuild decision |
+| `src/brick/benchmarks.js` | the covers with known views that the hook writer and the judge are shown |
+| `src/ops/scoreboard.js` | whether the score predicts views, for `/score` and the panel |
 | `src/brick/candidate.js` | a built deck wrapped for the approval queue |
 | `src/brick/caption.js` | the caption and the five hashtags, drawn once for both platforms |
 | `src/brick/emoji.js` | the one emoji beside a set's name — a fixed map, not a free choice |
@@ -482,7 +578,7 @@ one it stepped over, on the card, before you tap.
 | `src/images/homeShot.js` | the generated photograph, and the check that it is the right set |
 | `src/render/brickSlide.js` | the slide: the frame, the block, the outline, the watermark |
 | `src/render/brickDeck.js` | a deck to JPEGs, at both sizes |
-| `src/publish/` | Instagram Graph API, TikTok Content Posting API, publish targets |
+| `src/publish/` | Instagram Graph API, TikTok through Zernio, publish targets |
 | `src/store.js` | one JSON file: dedupe, proposals, staging, queue, publish log, accounts, audit |
 
 **Why the website is in the same process.** `src/store.js` holds the whole of
@@ -491,8 +587,7 @@ panel would not corrupt that file — the save is tmp-plus-rename — but it wou
 silently roll back every change the bot had made since it loaded. Approve a deck
 in the browser and the next thing the bot writes puts it back in the queue.
 There is therefore one process, one copy of that document, and one event loop
-touching it. `src/oauthServer.js` already had to reason this through for the
-TikTok token and says so at length.
+touching it.
 
 ## Honest caveats
 
@@ -529,6 +624,14 @@ is as true as `deals.json` was when it was read. If
 `brickdeal-automation`'s nightly price re-check dies, this stops producing decks
 after fourteen days — which is the intended behaviour and is also the only
 signal it gives.
+
+**The scorer is a model, and a narrow one.** Stage B is one call judging
+pictures and numbers against a rubric, and it will be confidently wrong some of
+the time. Only decks that passed are ever posted and measured, so every score
+the correlation sees is in the top of the range, which makes a real relationship
+harder to see. `/score` will say when twenty posts are not enough to tell it
+from chance. Until it says otherwise, treat the threshold as a quality floor
+rather than a predictor.
 
 **The trademark rule costs discovery, deliberately.** `#לגו` is what this
 audience searches and the reference spends a slot on it. See `copy.allowTrademark`.
