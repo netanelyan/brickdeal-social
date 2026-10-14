@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { record as recordUsage } from '../usage.js';
 import { brickConfig } from './config.js';
 import { unusable } from './feed.js';
@@ -286,7 +286,23 @@ export async function contactSheet(cand, { outDir = SHEET_DIR() } = {}) {
     figcaption { color:#eee; font:bold 16px sans-serif; text-align:center; height:18px; }
   </style></head><body><div class="grid">${cells}</div></body></html>`;
   const out = await renderToJpeg(html, { stem: `sheet-${cand.id || 'deck'}`, width, height, outDir, face: null });
+  pruneSheets(outDir);
   return { file: out.file, base64: readFileSync(out.file).toString('base64') };
+}
+
+// A sheet is a few hundred kilobytes, one per scored deck. A month of them is
+// enough to look back at what a deck was judged on; older ones go.
+const SHEET_KEEP_MS = 30 * 86_400_000;
+function pruneSheets(dir) {
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!/^sheet-.*\.jpg$/.test(name)) continue;
+      const file = join(dir, name);
+      if (Date.now() - statSync(file).mtimeMs > SHEET_KEEP_MS) rmSync(file, { force: true });
+    }
+  } catch {
+    /* a sweep that fails costs disk, not a deck */
+  }
 }
 
 /**

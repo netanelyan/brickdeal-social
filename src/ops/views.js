@@ -229,6 +229,19 @@ export const health = () => {
   }));
 };
 
+/**
+ * A config value, or a fallback when the file does not parse. The dashboard
+ * must still load with a broken config, because the panel is where it gets
+ * fixed.
+ */
+const configOr = (read, fallback) => {
+  try {
+    return read(brickConfig());
+  } catch {
+    return fallback;
+  }
+};
+
 /** Tokens, scopes and caps — everything knowable without calling an API. */
 export const connections = () => ({
   instagram: instagramConfigured()
@@ -243,11 +256,11 @@ export const connections = () => ({
     ? {
         configured: true,
         via: 'zernio',
-        privacy: brickConfig().tiktok.privacy,
-        privacyHe: privacyHe(brickConfig().tiktok.privacy),
-        autoAddMusic: brickConfig().tiktok.autoAddMusic,
-        commercialContentType: brickConfig().tiktok.commercialContentType,
-        aiPhotos: brickConfig().tiktok.aiPhotos,
+        privacy: configOr((c) => c.tiktok.privacy, null),
+        privacyHe: configOr((c) => privacyHe(c.tiktok.privacy), '?'),
+        autoAddMusic: configOr((c) => c.tiktok.autoAddMusic, null),
+        commercialContentType: configOr((c) => c.tiktok.commercialContentType, null),
+        aiPhotos: configOr((c) => c.tiktok.aiPhotos, null),
         dailyCap: TIKTOK_DAILY_CAP(),
         usedInLast24h: store.tiktokPostsInLast24h(),
         capFreesAt: store.tiktokCapFreesAt(),
@@ -263,7 +276,7 @@ export function overview() {
   const dayKey = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
   return {
     now: Date.now(),
-    mode: brickConfig().approval.mode,
+    mode: configOr((c) => c.approval.mode, null),
     paused: store.pausedState(),
     counts: {
       staged: store.stagingSize(),
@@ -327,6 +340,6 @@ export function scores({ limit = 30 } = {}) {
     dropped: all.filter((r) => r.path === 'dropped').length,
     drafts: all.filter((r) => r.path === 'draft').length,
     lastSyncAt: all.reduce((t, r) => Math.max(t, r.viewsAt || 0), 0) || null,
-    threshold: brickConfig().score.threshold,
+    threshold: configOr((c) => c.score.threshold, null),
   };
 }
