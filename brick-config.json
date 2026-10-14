@@ -585,6 +585,42 @@
     "countdownMin": 5
   },
 
+  "approval": {
+    "_comment": [
+      "Who decides what is posted.",
+      "",
+      "'auto': nobody taps. A deck is proposed, built, scored, and either",
+      "queued for the drip or dropped, and Telegram gets one line for each",
+      "post. /pause stops all of it until /resume.",
+      "",
+      "'manual': the old flow. The proposal card and the approval card come",
+      "back, nothing is scored, and nothing publishes without a tap. A switch",
+      "saved from the panel's settings page takes effect at the next deck; an",
+      "edit to this file by hand takes effect at the next restart."
+    ],
+    "mode": "auto"
+  },
+
+  "score": {
+    "_comment": [
+      "The bar a deck has to clear to be posted in auto mode (src/brick/score.js).",
+      "",
+      "Two stages. Stage A is hard rules, and any failure drops the deck: every",
+      "price fresh by feed.js's rule, every photograph passed by a vision check,",
+      "no trademark, eight sets plus a cover and an end card, and a cover within",
+      "the word limit. Stage B is one model call that looks at the whole deck",
+      "and its price table and scores five parts from 0 to 100. The total is",
+      "their weighted average, worked out here rather than by the model.",
+      "",
+      "Below `threshold` the deck is rebuilt once, with a new cover when the",
+      "cover is its weakest part and with different sets otherwise, and dropped",
+      "if it still falls short. Every score is kept, so /score can show whether",
+      "it predicts views at all."
+    ],
+    "threshold": 70,
+    "weights": { "hook": 0.3, "slide1": 0.2, "photos": 0.2, "savings": 0.2, "variety": 0.1 }
+  },
+
   "tiktok": {
     "_comment": [
       "How a deck goes out on TikTok, through Zernio (src/publish/zernio.js).",

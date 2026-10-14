@@ -137,6 +137,9 @@ export async function renderToJpeg(
     // Naming the face rather than guessing it keeps the check exactly as strict
     // as it was. What it must never become is "some font loaded", which is the
     // `document.fonts.check()` mistake documented below in a different costume.
+    //
+    // null skips the guard, for a page that draws no text worth guarding: the
+    // scorer's contact sheet is slides already rendered, laid out as images.
     face = 'Heebo',
   } = {}
 ) {
@@ -166,7 +169,7 @@ export async function renderToJpeg(
     // replacing it. The two checks below test the thing we actually care about:
     // that our own @font-face rule loaded, and that it is what's being drawn.
     await page.evaluate(() => document.fonts.ready);
-    const font = await page.evaluate(async (want) => {
+    const font = !face ? null : await page.evaluate(async (want) => {
       const face = [...document.fonts].find((f) => f.family.replace(/['"]/g, '') === want);
 
       // Width comparison against a family that cannot exist. If Heebo failed,
@@ -215,14 +218,14 @@ export async function renderToJpeg(
       };
     }, face);
 
-    if (font.status !== 'loaded' || !font.distinct) {
+    if (font && (font.status !== 'loaded' || !font.distinct)) {
       throw new Error(
         `${face} did not load (@font-face status: ${font.status}, distinct from fallback: ${font.distinct}) — ` +
           'refusing to render, because the Hebrew would come out as tofu boxes'
       );
     }
 
-    const broken = font.others.filter((f) => f.status === 'error');
+    const broken = font ? font.others.filter((f) => f.status === 'error') : [];
     if (broken.length) {
       throw new Error(
         `these faces are not valid fonts: ${broken.map((f) => f.family).join(', ')} — ` +

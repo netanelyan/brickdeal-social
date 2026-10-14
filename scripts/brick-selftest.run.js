@@ -1832,6 +1832,133 @@ group('TikTok through Zernio — the request, and what each answer means');
 }
 
 /* -------------------------------------------------------------------------- */
+group('the scorer — hard gates first, then one strict model call');
+
+{
+  const sc = await import('../src/brick/score.js');
+  const now = Date.now();
+  const names = ['טירה גדולה', 'מכונית מרוץ', 'רכבת קיטור', 'ספינת פיראטים', 'זר ורדים', 'מסוק הצלה', 'בית עץ', 'דינוזאור'];
+  const slide = (i, over = {}) => ({
+    productId: `p${i}`,
+    nameHe: names[i],
+    lines: [],
+    image: { provenance: 'generated', checked: true },
+    deal: {
+      price: 100 + i,
+      link: 'https://s.click.aliexpress.com/e/_real',
+      image: 'https://example.invalid/a.jpg',
+      priceCheckedAt: new Date(now - DAY).toISOString(),
+      comparison: { ok: true, paid: 100 + i, listIls: 500, saving: 400 - i, source: { region: 'DE', amount: 120, currency: 'EUR' } },
+    },
+    ...over,
+  });
+  const good = (over = {}) => {
+    const slides = names.map((_, i) => slide(i));
+    return {
+      id: 'scored1',
+      tiktokCaption: 'כיתוב קצר\n#fyp',
+      instagramCaption: 'כותרת\n\nכיתוב קצר',
+      deck: {
+        recipe: 'savings',
+        hookHe: 'אם אתם אוהבים לקנות סטים במחירים של הארץ, תמשיכו לגלול',
+        emphasisHe: 'במחירים של הארץ',
+        titleHe: 'החיסכון הגדול',
+        slides,
+        tiktok: [{ cover: true }, ...slides.map(() => ({})), { end: true }],
+        ...over,
+      },
+    };
+  };
+
+  ok('a well-made deck passes every gate', sc.gates(good(), { now }).ok, JSON.stringify(sc.gates(good(), { now }).failures));
+
+  const stale = good();
+  stale.deck.slides[3] = slide(3, { deal: { ...slide(3).deal, priceCheckedAt: new Date(now - 30 * DAY).toISOString() } });
+  const staleGates = sc.gates(stale, { now });
+  eq('a price feed.js would refuse fails the freshness gate', staleGates.failures[0]?.gate, 'freshness');
+  eq('and is fixed with different sets', staleGates.failures[0]?.fix, 'recipe');
+
+  const unchecked = good();
+  unchecked.deck.slides[0] = slide(0, { image: { provenance: 'stock', checked: false } });
+  eq('a catalogue photo nothing screened fails the photo gate', sc.gates(unchecked, { now }).failures[0]?.gate, 'photo');
+  const bare = good();
+  bare.deck.slides[1] = slide(1, { image: null });
+  ok('and so does a slide with no photograph', sc.gates(bare, { now }).failures.some((f) => f.gate === 'photo'));
+
+  const branded = good({ hookHe: 'סטים של לגו במחיר של אלי' });
+  const brandGates = sc.gates(branded, { now });
+  eq('the trademark in the cover fails the copy gate', brandGates.failures[0]?.gate, 'copy');
+  eq('and is fixed with a new cover', brandGates.failures[0]?.fix, 'cover');
+
+  const seven = good();
+  seven.deck.slides = seven.deck.slides.slice(0, 7);
+  seven.deck.tiktok = [{ cover: true }, ...seven.deck.slides.map(() => ({})), { end: true }];
+  ok('seven sets fail the frames gate', sc.gates(seven, { now }).failures.some((f) => f.gate === 'frames'));
+  const noEnd = good();
+  noEnd.deck.tiktok = noEnd.deck.tiktok.slice(0, -1);
+  ok('so does a deck with no end card', sc.gates(noEnd, { now }).failures.some((f) => f.gate === 'frames'));
+
+  const wordy = good({ hookHe: 'אחת שתיים שלוש ארבע חמש שש שבע שמונה תשע עשר אחת-עשרה שתים-עשרה' });
+  const wordyGates = sc.gates(wordy, { now });
+  ok('a cover past the word limit fails', wordyGates.failures.some((f) => f.gate === 'cover' && f.fix === 'cover'));
+
+  // Strict parsing. Anything but a clean object of five numbers is a failure.
+  const clean = { hook: 80, slide1: 70, photos: 75, savings: 90, variety: 60, notes: 'fine' };
+  const parsed = sc.parseScore(JSON.stringify(clean));
+  ok('a clean answer parses', parsed.ok);
+  eq('the total is the weighted average, worked out here', parsed.total, Math.round(0.3 * 80 + 0.2 * 70 + 0.2 * 75 + 0.2 * 90 + 0.1 * 60));
+  eq('and the weakest part is named', parsed.weakest, 'variety');
+  ok('prose is a failure', !sc.parseScore('I would give it an 80.').ok);
+  ok('a fenced block is a failure', !sc.parseScore('```json\n' + JSON.stringify(clean) + '\n```').ok);
+  ok('a missing part is a failure', !sc.parseScore(JSON.stringify({ ...clean, variety: undefined })).ok);
+  ok('a number written as a string is a failure', !sc.parseScore(JSON.stringify({ ...clean, hook: '80' })).ok);
+  ok('a part above 100 is a failure', !sc.parseScore(JSON.stringify({ ...clean, savings: 140 })).ok);
+  ok('a JSON array is a failure', !sc.parseScore('[80,70,75,90,60]').ok);
+  ok('nothing at all is a failure', !sc.parseScore('').ok);
+
+  // The model call fails closed, every way it can.
+  const answer = (text, extra = {}) => {
+    const reply = { content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: {}, model: 'claude-opus-5-5', ...extra };
+    return { calls: 0, messages: { create: async function () { return reply; } }, beta: { messages: { create: async () => reply } } };
+  };
+  const sheet = 'AAAA';
+  ok('a clean answer scores', (await sc.modelScore(good(), { api: answer(JSON.stringify(clean)), sheet })).ok);
+  ok('an unparseable answer fails', !(await sc.modelScore(good(), { api: answer('eighty'), sheet })).ok);
+  ok('a refusal fails', !(await sc.modelScore(good(), { api: answer('', { stop_reason: 'refusal' }), sheet })).ok);
+  const broken = { messages: { create: async () => { throw new Error('529 overloaded'); } }, beta: { messages: { create: async () => { throw new Error('529 overloaded'); } } } };
+  const apiFail = await sc.modelScore(good(), { api: broken, sheet });
+  ok('an API error fails, and says so', !apiFail.ok && /overloaded/.test(apiFail.error));
+
+  // A deck that fails a gate never reaches the model.
+  let asked = 0;
+  const counting = { messages: { create: async () => (asked++, answer(JSON.stringify(clean)).messages.create()) }, beta: { messages: { create: async () => (asked++, answer(JSON.stringify(clean)).messages.create()) } } };
+  const stopped = await sc.scoreDeck(unchecked, { now, api: counting, sheet });
+  ok('a gate failure stops at stage A', stopped.stage === 'A' && !stopped.pass);
+  eq('without a model call', asked, 0);
+
+  const high = await sc.scoreDeck(good(), { now, api: answer(JSON.stringify({ ...clean, hook: 75, slide1: 75, photos: 75, savings: 75, variety: 75 })), sheet });
+  ok('75 against a threshold of 70 passes', high.pass && high.total === 75);
+  const low = await sc.scoreDeck(good(), { now, api: answer(JSON.stringify({ ...clean, hook: 40, slide1: 70, photos: 70, savings: 70, variety: 70 })), sheet });
+  ok('below the threshold does not', !low.pass && low.total < 70);
+  eq('and knows its weakest part', low.weakest, 'hook');
+  const failedJudge = await sc.scoreDeck(good(), { now, api: broken, sheet });
+  ok('a judge that cannot answer is a failed deck, never a pass', !failedJudge.pass && failedJudge.total === null);
+
+  // Rebuild once, then drop.
+  eq('a pass is published', sc.decide(high), 'publish');
+  eq('a weak cover gets a new cover', sc.decide(low, { attempt: 1 }), 'cover');
+  eq('a weak anything else gets different sets', sc.decide({ ...low, weakest: 'savings' }, { attempt: 1 }), 'recipe');
+  eq('a cover-only gate failure gets a new cover', sc.decide({ stage: 'A', pass: false, gates: [{ fix: 'cover' }] }), 'cover');
+  eq('any other gate failure gets different sets', sc.decide({ stage: 'A', pass: false, gates: [{ fix: 'cover' }, { fix: 'recipe' }] }), 'recipe');
+  eq('a judge error gets the cheapest rebuild', sc.decide(failedJudge, { attempt: 1 }), 'cover');
+  eq('the second failure is dropped', sc.decide(low, { attempt: 2 }), 'drop');
+
+  ok('the judge is shown the measured covers with their views', sc.scoreSystem().includes('208,700 views'));
+  ok('and the losers', sc.scoreSystem().includes('929 views'));
+  ok('the price table carries every frame', sc.priceTable(good()).split('\n').filter((l) => l.startsWith('frame ')).length === 8);
+}
+
+/* -------------------------------------------------------------------------- */
 group('a generated photograph sends the deck to the inbox, not the feed');
 
 {

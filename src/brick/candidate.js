@@ -251,7 +251,9 @@ export async function toBrickCandidate(
   // The provenance survives, because that is what the approval message prints
   // and what the owner is deciding about.
   deck.slides = deck.slides.map((s) =>
-    s.image ? { ...s, image: { provenance: s.image.provenance, note: s.image.note || null } } : s
+    s.image
+      ? { ...s, image: { provenance: s.image.provenance, checked: s.image.checked === true, note: s.image.note || null } }
+      : s
   );
 
   const cand = {

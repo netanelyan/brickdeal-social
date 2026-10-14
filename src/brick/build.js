@@ -20,6 +20,7 @@ import {
 import { THEME_HE } from './themes.js';
 import { shotOrProduct } from '../images/homeShot.js';
 import { hasPublished, wasProposed, noteProposed } from '../store.js';
+import { benchmarks, benchmarkLines } from './benchmarks.js';
 
 // Feed to deck.
 //
@@ -107,27 +108,44 @@ const FRACTION_WORD = /(?:^|[^\p{L}])[ובלמהש]?(?:חצי|שליש|רבע|ח
 const MULTIPLE = /(?:^|[^\p{L}])פי\s+(?:\d|שתיים|שניים|שלוש|ארבע|חמש|שש|שבע|שמונה|תשע|עשר)/u;
 export const statesNumber = (s) => /[\d%₪]/.test(String(s)) || FRACTION_WORD.test(String(s)) || MULTIPLE.test(String(s));
 
-const hookSystem = () => `You write the first slide of a Hebrew TikTok slideshow for a channel that finds cheap compatible building-brick sets on AliExpress and shows Israeli builders what they cost there.
+/**
+ * The measured covers, as the hook prompt states them.
+ *
+ * The reference account's until this account has enough measured posts of its
+ * own, and then its own top and bottom three by real views. See
+ * src/brick/benchmarks.js. The lessons under it were drawn from the reference
+ * list and stay: they are about the viewer, not about that account.
+ */
+export function measuredBlock(b = benchmarks()) {
+  if (b.source === 'own') {
+    return `WHAT WORKS, MEASURED ON THIS CHANNEL. These are this channel's own posts, ${b.n} of them measured. Its three most-watched covers:
 
-The cover line is the only thing most viewers will read. It has to stop a scroll.
+${benchmarkLines(b.winners)}
 
-WHAT WORKS, MEASURED. The account this channel is modelled on has 102 posts and a median of about 5,000 views. These are its three biggest covers, and they earned 29% of all its views between them. The brand name in the originals is replaced with "סטים", because this channel never writes it:
+And its three least-watched:
 
-  בואו תראו כמה כסף אתם יכולים לחסוך אם תזמינו מאלי אקספרס    208,700 views
-  הסניף הכי זול בארץ, הכל ברבע מחיר                              153,800 views
-  אם אתם אוהבים לקנות סטים במחירים של הארץ תמשיכו לגלול           146,500 views
+${benchmarkLines(b.losers)}`;
+  }
+  return `WHAT WORKS, MEASURED. The account this channel is modelled on has 102 posts and a median of about 5,000 views. These are its three biggest covers, and they earned 29% of all its views between them. The brand name in the originals is replaced with "סטים", because this channel never writes it:
+
+${benchmarkLines(b.winners)}
 
 (The ratio in the second one is not yours to write: when a deck can back a line like it, code writes it from the deck's own prices. See NO NUMBERS below.)
 
 And a mid-table one, in the same voice:
 
-  ועדיין אתם ממשיכים לשלם ביוקר??                                 14,700 views
+${benchmarkLines(b.middle)}
 
 And these were its weakest:
 
-  הפסקתי לשלם ביוקר על התחביב שלי        929 views
-  במחיר של סט אחד תקנו 8                 1,033 views
-  מה הזמנתי VS מה קיבלתי                 1,082 views
+${benchmarkLines(b.losers)}`;
+}
+
+const hookSystem = (b) => `You write the first slide of a Hebrew TikTok slideshow for a channel that finds cheap compatible building-brick sets on AliExpress and shows Israeli builders what they cost there.
+
+The cover line is the only thing most viewers will read. It has to stop a scroll.
+
+${measuredBlock(b)}
 
 THE DIFFERENCE IS THE WHOLE BRIEF:
 - The winners talk TO THE VIEWER about THEIR money: אתם, תראו, תמשיכו. The losers talk about me — הפסקתי, הזמנתי, קיבלתי — or do arithmetic at the viewer.
@@ -639,6 +657,10 @@ export async function buildSlides(recipe, { wantImages = true, onProgress = null
         // only fail with "the deal has no photograph to build from".
         image: deal.image || null,
         sourceImage: deal.sourceImage || null,
+        // When the price was last checked, carried so the scorer can hold the
+        // slide to feed.js's freshness rule at the moment it would publish,
+        // not only at the moment the feed was read.
+        priceCheckedAt: deal.priceCheckedAt || null,
       },
     });
   }

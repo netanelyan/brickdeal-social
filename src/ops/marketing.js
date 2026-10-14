@@ -366,7 +366,10 @@ export function newPhoto(key, n, { actor = null } = {}) {
       const image = await shotOrProduct(deal, { n: at + 1, sizeCm: slide.deal?.sizeCm ?? null, force: true });
 
       const deck = cand.deck;
-      deck.slides[at] = { ...slide, image: { provenance: image.provenance, note: image.note || null } };
+      deck.slides[at] = {
+        ...slide,
+        image: { provenance: image.provenance, checked: image.checked === true, note: image.note || null },
+      };
 
       progress('מצייר את השקופית...');
       for (const size of ['tiktok', 'instagram']) {

@@ -658,8 +658,10 @@ export async function homeShot(deal, { n = 1, sizeCm = null, force = false } = {
   const stem = cacheStem(deal.productId, n);
   if (!force) {
     const hit = cachedShot(stem);
+    // A shot is only ever written to the cache after it passed verifyShot,
+    // so a cached one has been checked.
     if (hit) {
-      return { src: `data:${hit.mime};base64,${hit.buf.toString('base64')}`, provenance: 'generated', note: 'cached' };
+      return { src: `data:${hit.mime};base64,${hit.buf.toString('base64')}`, provenance: 'generated', checked: true, note: 'cached' };
     }
   }
 
@@ -773,6 +775,9 @@ function keep(stem, best, source) {
   return {
     src: `data:${best.mime};base64,${best.base64}`,
     provenance: 'generated',
+    // Only a picture that passed all three questions in verifyShot is ever
+    // kept, so this is the vision check's verdict rather than a hope.
+    checked: true,
     note:
       `from the ${source.kind}` +
       (best.attempt > 1 ? `, on the second attempt` : '') +
@@ -830,7 +835,7 @@ export async function shotOrProduct(deal, opts = {}) {
       // Last resort and visibly labelled: a URL cannot be measured by the
       // renderer either, so this is the worst-looking slide the pipeline can
       // produce and the approval card says so.
-      return { src: source.url, provenance: 'stock', note: `catalogue photo, not checked — ${e.message}` };
+      return { src: source.url, provenance: 'stock', checked: false, note: `catalogue photo, not checked — ${e.message}` };
     }
 
     const screen = await screenListing(photo.base64, photo.mime);
@@ -842,6 +847,10 @@ export async function shotOrProduct(deal, opts = {}) {
     return {
       src: `data:${photo.mime};base64,${photo.base64}`,
       provenance: 'stock',
+      // Whether screenListing actually looked at it. A screen that could not
+      // run lets the picture through so the deck can still be built, and this
+      // is what stops the scorer treating that as a pass. See score.js.
+      checked: screen.ran,
       note: `catalogue photo${screen.ran ? '' : `, not checked (${screen.why})`} — ${e.message}`,
     };
   }
@@ -864,7 +873,7 @@ export async function shotOrProduct(deal, opts = {}) {
 export function cachedShotFor(productId, n = 1) {
   const hit = cachedShot(cacheStem(productId, n));
   if (!hit) return null;
-  return { src: `data:${hit.mime};base64,${hit.buf.toString('base64')}`, provenance: 'generated', note: 'cached' };
+  return { src: `data:${hit.mime};base64,${hit.buf.toString('base64')}`, provenance: 'generated', checked: true, note: 'cached' };
 }
 
 // The two judge prompts are in here so the suite can hold their wording to
