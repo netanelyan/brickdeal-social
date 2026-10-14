@@ -630,13 +630,21 @@ function boardView() {
       c.tiktok.configured
         ? el('span', { class: 'tag', text: `${c.tiktok.usedInLast24h}/${c.tiktok.dailyCap} ב-24ש׳` })
         : null,
-      c.tiktok.tokenHoursLeft != null ? el('span', { class: 'tag', text: `טוקן: ${c.tiktok.tokenHoursLeft} ש׳` }) : null,
+      c.tiktok.configured ? el('span', { class: 'tag', text: `דרך Zernio · ${c.tiktok.privacyHe}` }) : null,
+      c.tiktok.configured
+        ? el('span', { class: `tag ${c.tiktok.autoAddMusic ? 'ok' : 'warn'}`, text: c.tiktok.autoAddMusic ? 'עם סאונד' : 'בלי סאונד' })
+        : null,
       el('span', { class: `tag ${c.images ? 'ok' : 'warn'}`, text: c.images ? 'תמונות: בינה מלאכותית' : 'תמונות: קטלוג בלבד' })
     )
   );
-  if (c.tiktok.configured && c.tiktok.missingScopes?.length) {
+  // TikTok attaches no auto-added sound to a post that discloses commercial
+  // content. Said here as well as at boot, because it is a silent failure.
+  if (c.tiktok.configured && c.tiktok.autoAddMusic && c.tiktok.commercialContentType !== 'none') {
     conn.append(
-      el('p', { class: 'note bad', text: `חסרות הרשאות בטיקטוק: ${c.tiktok.missingScopes.join(', ')} — פרסום ייכשל עד חיבור מחדש` })
+      el('p', {
+        class: 'note bad',
+        text: `commercialContentType הוא ${c.tiktok.commercialContentType} — טיקטוק לא מוסיפה סאונד אוטומטי לפוסט כזה, והפוסטים יעלו בלי סאונד`,
+      })
     );
   }
   conn.append(
@@ -663,7 +671,7 @@ function boardView() {
           probe.textContent = r.error
             ? `טיקטוק: ${r.error}`
             : r.configured
-              ? `טיקטוק: @${r.username || '?'} · ${(r.options || []).map((o2) => o2.label).join(', ')}${r.preAudit ? ' (לפני audit — רק פרטי)' : ''}`
+              ? `טיקטוק: ${r.username || '?'} · ${(r.options || []).map((o2) => o2.label).join(', ')}${r.canPostMore === false ? ' · לא יכול לפרסם עכשיו' : ''}`
               : 'טיקטוק לא מוגדר';
         },
       }),
@@ -793,7 +801,7 @@ function proposalCard(p) {
         'div',
         { class: 'row' },
         el('button', { class: 'btn primary', text: '📸 אינסטגרם', onclick: build(['instagram']) }),
-        el('button', { class: 'btn', text: '🎵 טיקטוק (טיוטה)', onclick: build(['tiktok']) }),
+        el('button', { class: 'btn', text: '🎵 טיקטוק', onclick: build(['tiktok']) }),
         el('button', { class: 'btn', text: '📸🎵 שניהם', onclick: build(['instagram', 'tiktok']) }),
         el('span', { class: 'spacer' }),
         el('button', {
@@ -1100,7 +1108,7 @@ function queueView() {
           'td',
           {},
           el('span', { class: 'tag', text: targetsHe(q.targets) || 'אין יעד' }),
-          q.draft ? el('span', { class: 'tag warn', text: 'טיוטה' }) : null
+          q.draft ? el('span', { class: 'tag warn', text: 'טיקטוק: טיוטה (AI)' }) : null
         ),
         may('act')
           ? el(
@@ -1114,15 +1122,7 @@ function queueView() {
                   text: '📤 פרסם',
                   disabled: state.busy.has(`pub:${q.n}`),
                   onclick: () => act(`pub:${q.n}`, () => api(`/api/queue/${q.n}/publish`, { method: 'POST' })),
-                }),
-                q.targets.includes('tiktok')
-                  ? el('button', {
-                      class: 'btn small ghost',
-                      text: '🎵 לטיוטות',
-                      disabled: state.busy.has(`dr:${q.n}`),
-                      onclick: () => act(`dr:${q.n}`, () => api(`/api/queue/${q.n}/draft`, { method: 'POST' })),
-                    })
-                  : null
+                })
               )
             )
           : null

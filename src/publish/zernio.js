@@ -537,6 +537,23 @@ export async function publishZernio(cand, { client = defaultClient(), dryRun = f
 }
 
 /**
+ * Who we post as and which privacy levels the account allows, for the
+ * approval card in manual mode, /tiktok and the panel's probe. One call.
+ */
+export async function creatorSummary({ client = defaultClient() } = {}) {
+  const info = await client.creatorInfo(process.env.ZERNIO_TIKTOK_ACCOUNT_ID, { mediaType: 'photo' });
+  const options = (info?.privacyLevels || [])
+    .map((l) => (typeof l === 'string' ? l : l?.value))
+    .filter(Boolean)
+    .sort((a, b) => PRIVACY_ORDER.indexOf(a) - PRIVACY_ORDER.indexOf(b));
+  return {
+    username: info?.creator?.nickname || null,
+    options,
+    canPostMore: info?.creator?.canPostMore !== false,
+  };
+}
+
+/**
  * Views for the posts Zernio made, newest first, across as many pages as the
  * window has. Each row is `{ postId, platformPostId, url, publishedAt, views,
  * likes, comments, shares }`.

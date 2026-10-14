@@ -9,7 +9,7 @@ import { toBrickCandidate, brickApprovalMessage } from '../brick/candidate.js';
 import { proposalMessage, proposalWarning } from '../brick/proposal.js';
 import { renderBrickCover, renderBrickSlideAt, coverSlide } from '../render/brickDeck.js';
 import { cachedShotFor, shotOrProduct } from '../images/homeShot.js';
-import { creatorInfo, defaultPrivacy, nextPrivacy, privacyHe, describeError as describeTikTokError } from '../publish/tiktok.js';
+import { creatorSummary, defaultPrivacy, nextPrivacy, privacyHe, describeError as describeTikTokError } from '../publish/zernio.js';
 import { targetsForKind, targetsHe, liveTargets } from '../publish/targets.js';
 import { runOverridden, noteOverride } from '../override.js';
 
@@ -24,9 +24,9 @@ import { runOverridden, noteOverride } from '../override.js';
 // drifts, or this.
 //
 // Drift is not hypothetical here. Approving a deck is not "set a flag" — it
-// decides whether TikTok gets a draft now or a queue slot later, refunds the
+// queues the post owing exactly the destinations it was built for, refunds the
 // day's quota on a rejection, and settles the card so it cannot be tapped twice.
-// A browser button that reimplemented three of those four would look like it
+// A browser button that reimplemented two of those three would look like it
 // worked for weeks.
 //
 // THE RULES EVERY ACTION HERE FOLLOWS
@@ -76,22 +76,23 @@ const say = (text) => surface().say(text).catch(() => {});
 // ---------------------------------------------------------------------------
 
 /**
- * Ask TikTok who we would be posting as, and which privacy levels it allows.
+ * Ask Zernio who we would be posting as on TikTok, and which privacy levels
+ * the account allows. Manual mode only: the card shows the level, and the
+ * privacy button cycles it.
  *
  * Done at staging rather than at publish time, because the answer has to be on
- * the card you are looking at when you tap approve — that is TikTok's rule for
- * Direct Post and the reason this call exists. A failure here does not block
- * staging: the card still goes out for approval carrying the reason, and the
- * publish attempt is what fails, loudly, with the same message.
+ * the card you are looking at when you tap approve. A failure here does not
+ * block staging: the card still goes out carrying the reason, and the publish
+ * checks creator-info again for itself.
  */
 export async function attachTikTok(cand) {
   if (!cand.publishTargets?.includes('tiktok')) return cand;
   // A draft has no privacy level to show you. TikTok asks you in the app when
-  // you post it, so asking creator_info here would spend a call to display a
-  // choice that is not yours to make.
+  // you post it, so asking here would spend a call to display a choice that
+  // is not yours to make.
   if (cand.tiktokDraft) return cand;
   try {
-    const info = await creatorInfo();
+    const info = await creatorSummary();
     return {
       ...cand,
       tiktok: {
@@ -162,37 +163,20 @@ export async function approve(key, { actor = null, tg = null } = {}) {
   if (!cand) return { ok: false, reason: 'gone', said: 'כבר טופל' };
   store.clearPendingEdit(key);
 
-  // A draft is a handoff, not a publish, so there is nothing for the drip to
-  // pace. It goes to the TikTok inbox now and waits there; the interval exists
-  // so the FEED does not arrive in bursts, and an inbox is not a feed.
-  // Instagram is a real post and keeps its place in the queue.
+  // Everything waits its turn in the queue, a TikTok draft included. A draft
+  // used to skip the drip, on the grounds that an inbox is not a feed. Through
+  // Zernio a draft counts against the same daily caps as a post, so it is paced
+  // like one.
   const targets = cand.pendingTargets?.length ? cand.pendingTargets : cand.publishTargets || [];
-  const draftNow = Boolean(cand.tiktokDraft) && targets.includes('tiktok');
-  const queued = draftNow ? targets.filter((t) => t !== 'tiktok') : targets;
-
-  if (queued.length) store.enqueue({ ...cand, pendingTargets: queued });
+  if (targets.length) store.enqueue({ ...cand, pendingTargets: targets });
   const pos = store.queueSize();
-  const said = draftNow
-    ? queued.length
-      ? `✅ טיוטה לטיקטוק · ${pos} בתור לאינסטגרם`
-      : '✅ נשלח לטיוטות בטיקטוק'
-    : `✅ אושר — ${pos} בתור`;
+  const said = `✅ אושר — ${pos} בתור${cand.tiktokDraft && targets.includes('tiktok') ? ' · טיקטוק כטיוטה (תמונות AI)' : ''}`;
 
   const who = describeActor(actor);
   await surface().settle(tg || cand.tg, who ? `${said} · ${who}` : said, cand);
 
-  record('approved', actor, { key, headline: cand.headline, targets: queued, draftNow, queueSize: pos });
-
-  // After the card is settled, so a slow upload cannot leave the message looking
-  // undecided while it runs.
-  if (draftNow) {
-    jobs.run('טיוטה לטיקטוק', () => publishNext({ ...cand, pendingTargets: ['tiktok'] }), {
-      actor: who,
-      meta: { headline: cand.headline },
-    });
-  }
-
-  return { ok: true, said, queueSize: pos, draftNow, headline: cand.headline };
+  record('approved', actor, { key, headline: cand.headline, targets, queueSize: pos });
+  return { ok: true, said, queueSize: pos, headline: cand.headline };
 }
 
 export async function reject(key, { actor = null, tg = null } = {}) {
@@ -592,7 +576,7 @@ export async function rejectProposal(key, { actor = null, tg = null } = {}) {
  * two aspect ratios; picking the platform first halves that, and the approval
  * card then previews the crop that is actually going out.
  */
-export function buildProposal(key, { targets = ['instagram'], draft = false, actor = null } = {}) {
+export function buildProposal(key, { targets = ['instagram'], actor = null } = {}) {
   const held = store.getProposal(key);
   if (!held) return { ok: false, reason: 'gone', said: 'כבר טופל' };
 
@@ -601,11 +585,7 @@ export function buildProposal(key, { targets = ['instagram'], draft = false, act
   // that after waiting for the photographs is the wrong order to find it out in.
   const configured = targetsForKind('deck');
   const missing = targets.filter((t) => !configured.includes(t));
-  const said = missing.length
-    ? `⏳ בונה — ${targetsHe(missing)} עוד לא מחובר, הפוסט ימתין`
-    : draft
-      ? '⏳ בונה — טיקטוק יחכה לך בטיוטות'
-      : '⏳ בונה';
+  const said = missing.length ? `⏳ בונה — ${targetsHe(missing)} עוד לא מחובר, הפוסט ימתין` : '⏳ בונה';
 
   const who = describeActor(actor);
   // runOverridden wraps the whole job body, not just the planning. The override
@@ -645,7 +625,9 @@ export function buildProposal(key, { targets = ['instagram'], draft = false, act
         }
 
         // Rendered for the chosen destination only, and staged owing just that.
-        const cand = await toBrickCandidate(built, { targets, tiktokDraft: draft });
+        // Whether TikTok gets a post or an inbox draft is decided inside, by
+        // the photographs. See tiktokRoute.
+        const cand = await toBrickCandidate(built, { targets });
 
         if (store.hasPublished(cand.id)) {
           const msg = `⏭️ המצגת הזו כבר פורסמה (${cand.id}) — נסה רעיון אחר`;
@@ -668,7 +650,6 @@ export function buildProposal(key, { targets = ['instagram'], draft = false, act
           subject: proposal.subject,
           slides: built.slides.length,
           targets,
-          draft,
         });
         return { ok: true, key: staged.key, slides: built.slides.length, headline: cand.headline };
       } catch (e) {
@@ -679,7 +660,7 @@ export function buildProposal(key, { targets = ['instagram'], draft = false, act
         throw e;
       }
     }),
-    { actor: who, meta: { key, targets, draft } }
+    { actor: who, meta: { key, targets } }
   );
 
   return { ok: true, job, said, missing };
@@ -739,40 +720,6 @@ export async function publishAt(n, { actor = null } = {}) {
   });
   record('publish:at', actor, { n, headline: item.headline, ok });
   return { ok, headline: item.headline, said: ok ? '📤 פורסם' : 'לא פורסם — ראו את ההודעה' };
-}
-
-/**
- * Send a queued post to TikTok drafts now, without waiting for the drip.
- *
- * The same act approval performs automatically, available for anything already in
- * the queue — a post approved before this existed, or one whose TikTok half was
- * requeued after a failure.
- *
- * Only the TikTok half moves. Anything else the post still owes goes back on the
- * queue and keeps its turn, because that half is a real publish and the drip
- * exists for it.
- */
-export function draftAt(n, { actor = null } = {}) {
-  const item = store.takeQueuedAt(n);
-  if (!item) return { ok: false, reason: 'no-item', said: `אין פריט ${n} בתור` };
-
-  const targets = item.pendingTargets?.length ? item.pendingTargets : item.publishTargets || [];
-  if (!targets.includes('tiktok')) {
-    // Put it back exactly as it was. Taking a post out of the queue to say it was
-    // the wrong one would be a worse answer than the error.
-    store.enqueue(item);
-    return { ok: false, reason: 'not-tiktok', said: `הפריט הזה לא מיועד לטיקטוק (${targetsHe(targets) || 'אין יעד'})` };
-  }
-
-  const rest = targets.filter((t) => t !== 'tiktok');
-  if (rest.length) store.enqueue({ ...item, pendingTargets: rest });
-
-  const job = jobs.run('טיוטה לטיקטוק', () => publishNext({ ...item, pendingTargets: ['tiktok'] }), {
-    actor: describeActor(actor),
-    meta: { headline: item.headline },
-  });
-  record('draft:at', actor, { n, headline: item.headline });
-  return { ok: true, job, headline: item.headline, said: `⏳ שולח לטיוטות: ${item.headline}` };
 }
 
 /**

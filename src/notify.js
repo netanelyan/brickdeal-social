@@ -35,22 +35,25 @@ export function targetAbandoned(headline, abandoned = []) {
   return `⤫ ויתרנו: ${why} — ${headline}`;
 }
 
-export function published({ headline, succeeded, failed = [], drafted = [] }) {
+export function published({ headline, succeeded, failed = [], drafted = [], score = null, link = null }) {
   // A destination that took a DRAFT did not publish, and must not be listed as
   // though it did. This reported per POST rather than per destination, so a
   // deck sent to both said "פורסם לאינסטגרם וטיקטוק" — half true, and false in
   // the direction that matters: you read "posted", never open the app, and the
   // app is the only place a draft becomes a post.
   const posted = succeeded.filter((t) => !drafted.includes(t));
-  // One line. This fires on every post, so it is the message that decides
-  // whether the chat is readable at all — and "where to find a TikTok draft" is
-  // something learned once, not reprinted every time. (Inbox, not the Drafts
-  // folder; it is in the README.)
+  // One line: what went where, and its score. This fires on every post, so it
+  // is the message that decides whether the chat is readable at all. The link
+  // goes underneath rather than inside it, because a URL in a Hebrew line
+  // reorders the words around it (see withDetail).
   const parts = [];
-  if (posted.length) parts.push(`📤 ${targetsHe(posted)}`);
-  if (drafted.length) parts.push(`📥 ${targetsHe(drafted)} טיוטה`);
+  if (posted.length) parts.push(`📤 פורסם: ${targetsHe(posted)}`);
+  // A draft is the one case that needs a person, so it says what to do.
+  // (Inbox, not the Drafts folder; it is in the README.)
+  if (drafted.length) parts.push(`📥 ${targetsHe(drafted)}: טיוטה בתיבה — לסמן "AI" ולפרסם באפליקציה`);
+  if (score != null) parts.push(`ציון ${score}`);
   for (const f of failed) parts.push(`⚠️ ${TARGET_HE[f.target] || f.target}: ${f.message}`);
-  return `${parts.join(' · ')} — ${headline}`;
+  return `${parts.join(' · ')} — ${headline}${link ? `\n${link}` : ''}`;
 }
 
 /**

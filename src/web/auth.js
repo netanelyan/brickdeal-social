@@ -31,9 +31,9 @@ const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
 const SESSION_DAYS = Math.max(1, Number(process.env.WEB_SESSION_DAYS ?? '14'));
 
 // Failed sign-ins are answered slowly, and after a handful that username stops
-// being answered at all for a few minutes. Per username rather than per IP for
-// the reason src/oauthServer.js gives: behind a proxy the only address seen is
-// Caddy's, and a forwarded header is a claim by the caller rather than a fact.
+// being answered at all for a few minutes. Per username rather than per IP,
+// because behind a proxy the only address seen is Caddy's, and a forwarded
+// header is a claim by the caller rather than a fact.
 const FAIL_DELAY_MS = 400;
 const LOCKOUT_AFTER = 6;
 const LOCKOUT_MS = 5 * 60_000;

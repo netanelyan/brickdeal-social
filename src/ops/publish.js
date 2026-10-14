@@ -8,12 +8,12 @@ import {
   isPlatformLimit as isPlatformLimitInstagram,
 } from '../publish/instagram.js';
 import {
-  publishTikTok,
+  publishZernio,
   describeError as describeTikTokError,
   isCardLevel as isCardLevelTikTok,
   isPlatformLimit as isPlatformLimitTikTok,
   isConfigProblem as isConfigProblemTikTok,
-} from '../publish/tiktok.js';
+} from '../publish/zernio.js';
 import { targetsForKind, targetsHe, allowedForKind, publishTargets } from '../publish/targets.js';
 import { overrideNotes } from '../override.js';
 
@@ -64,10 +64,16 @@ const publishedFacts = (cand) => ({
   // Where the post was about. A deck names its region; a card names it on the
   // trip, which is the field verify.js already insists every card have.
   place: (cand.deck ? cand.deck.where : cand.trip?.where) || null,
-  // So the row does not claim a post that has not been made. A draft reached
-  // the inbox; whether it was ever posted happens in the app, where this
-  // process cannot see it.
+  // So the row does not claim a post that has not been made. A deck with
+  // generated photographs reaches the TikTok inbox rather than the feed, and
+  // whether it was ever posted happens in the app, where this process cannot
+  // see it.
   tiktokDraft: Boolean(cand.tiktokDraft),
+  // What the cover said and what it scored, which is what the score-against-
+  // views loop reads back. Null on a deck built in manual mode, which is not
+  // scored.
+  hook: cand.deck?.hookHe || null,
+  score: Number.isFinite(cand.deck?.score?.total) ? cand.deck.score.total : null,
 });
 
 /**
@@ -184,7 +190,7 @@ export async function publishNext(item = null) {
     // client — which is the truth in that situation.
     telegram: () => surface().publishToChannel(cand),
     instagram: () => publishInstagram(cand),
-    tiktok: () => publishTikTok(cand, { draft: Boolean(cand.tiktokDraft) }),
+    tiktok: () => publishZernio(cand),
   };
   const errorText = {
     instagram: describeError,
@@ -224,6 +230,11 @@ export async function publishNext(item = null) {
       // the retry can ask "is this already live?" with, and without it the retry
       // posts a second copy of a post that went out fine.
       if (target === 'instagram' && e?.creationId) cand.instagramCreationId = e.creationId;
+      // Zernio's version of the same problem. After a timeout nobody knows
+      // whether the post was made, and sending the same idempotency key again
+      // returns it if it was. After a definite answer the key is null, and the
+      // next attempt gets a fresh one.
+      if (target === 'tiktok' && e && 'idempotencyKey' in e) cand.zernioKey = e.idempotencyKey || null;
 
       // "Not now" — checked BEFORE the card-level test, because a platform
       // limit arrives as step:'config' from our own preflight and would
@@ -276,6 +287,11 @@ export async function publishNext(item = null) {
       telegram: Boolean(done.telegram),
       instagram: Boolean(done.instagram),
       tiktok: Boolean(done.tiktok),
+      // The id the analytics job asks Zernio about, and the link the
+      // notification carries. TikTok often has no link for some minutes after
+      // a post; the analytics job fills it in later.
+      zernioPostId: done.tiktok?.postId || null,
+      tiktokUrl: done.tiktok?.url || null,
     });
   }
 
@@ -310,9 +326,18 @@ export async function publishNext(item = null) {
     if (succeeded.length) {
       // A deck handed to your inbox did not publish, and saying it did is the
       // one wrong thing to say here: you would read "posted" and not open the
-      // app, which is the only place the last step can happen.
+      // app, which is the only place the AI label and the last tap can happen.
       const drafted = cand.tiktokDraft && succeeded.includes('tiktok') ? ['tiktok'] : [];
-      await say(notify.published({ headline: cand.headline, succeeded, failed: [], drafted }));
+      await say(
+        notify.published({
+          headline: cand.headline,
+          succeeded,
+          failed: [],
+          drafted,
+          score: publishedFacts(cand).score,
+          link: done.tiktok?.url || (done.tiktok?.postId ? `zernio ${done.tiktok.postId}` : null),
+        })
+      );
       emit('published', { headline: cand.headline, succeeded, drafted, id: cand.id });
     }
     return true;

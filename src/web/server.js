@@ -11,10 +11,9 @@ import * as settings from '../ops/settings.js';
 import * as jobs from '../ops/jobs.js';
 import { subscribe, since as eventsSince, lastId } from '../ops/bus.js';
 import { cardOutputDir } from '../render/index.js';
-import { handleTikTokExchange, exchangeConfigured } from '../oauthServer.js';
 import { loadDeals } from '../brick/feed.js';
 import { remainingQuota, describeError as describeIgError, instagramConfigured } from '../publish/instagram.js';
-import { creatorInfo, describeError as describeTikTokError, tiktokConfigured, privacyHe } from '../publish/tiktok.js';
+import { creatorSummary, describeError as describeTikTokError, zernioConfigured, privacyHe } from '../publish/zernio.js';
 
 // The website: the same marketing, from a browser.
 //
@@ -24,21 +23,19 @@ import { creatorInfo, describeError as describeTikTokError, tiktokConfigured, pr
 // so a second process serving this page would not corrupt data/store.json — the
 // save is tmp-plus-rename — but it WOULD silently roll back every change the bot
 // had made since the web process last loaded. Approve a deck in the browser and
-// the next thing the bot writes puts it back in the queue. src/oauthServer.js
-// already documents this at length; it is the same constraint, and it is the
-// reason there is no separate web service to deploy.
+// the next thing the bot writes puts it back in the queue. That is the reason
+// there is no separate web service to deploy.
 //
 // WHERE IT LISTENS, AND WHY THAT IS NOT A PREFERENCE
 //
-// 127.0.0.1, like the TikTok connect endpoint it absorbs. Caddy terminates TLS
-// and proxies to it. Binding 0.0.0.0 would publish an admin panel that can
+// 127.0.0.1. Caddy terminates TLS and proxies to it. Binding 0.0.0.0 would publish an admin panel that can
 // publish to Instagram on a plain HTTP port, bypassing the thing holding the
 // certificate — so an install that overrides WEB_BIND is warned about it, loudly,
 // on every boot.
 //
-// ONE PORT, NOT TWO. The Caddyfile already proxies /tiktok/* here, and that route
-// is served unchanged (same bearer secret, same lockout) so an existing deploy
-// keeps working with one added route block rather than a second upstream.
+// It also used to answer TikTok's browser connect on /tiktok/exchange. TikTok
+// now goes through Zernio, which holds the TikTok connection itself, so that
+// route is gone; a Caddyfile that still proxies /tiktok/* gets a 404 from it.
 
 const UI_DIR = fileURLToPath(new URL('./ui/', import.meta.url));
 const DEFAULT_PORT = 8787;
@@ -504,10 +501,7 @@ on('POST', '/api/proposals/:key/build', async (req, res, { key }) => {
   const { targets } = await readJson(req);
   const wanted = Array.isArray(targets) ? targets.filter((t) => t === 'instagram' || t === 'tiktok') : [];
   if (!wanted.length) throw new HttpError(400, 'צריך לבחור יעד אחד לפחות');
-  // Reaching TikTok always means a draft — the API cannot name a sound, and sound
-  // is the one thing that cannot be changed after publishing. See the button in
-  // bot.js for the full argument.
-  const result = ops.buildProposal(key, { targets: wanted, draft: wanted.includes('tiktok'), actor: actor(who) });
+  const result = ops.buildProposal(key, { targets: wanted, actor: actor(who) });
   sendJson(res, result.ok ? 202 : 409, result);
 });
 
@@ -579,12 +573,6 @@ on('POST', '/api/queue/:n/publish', async (req, res, { n }) => {
   sendJson(res, result.ok ? 200 : 409, result);
 });
 
-on('POST', '/api/queue/:n/draft', async (req, res, { n }) => {
-  const who = requireWrite(req);
-  const result = ops.draftAt(Number(n), { actor: actor(who) });
-  sendJson(res, result.ok ? 202 : 409, result);
-});
-
 on('POST', '/api/queue/clear', (req, res) => {
   const who = requireWrite(req);
   sendJson(res, 200, ops.clearQueue({ actor: actor(who) }));
@@ -620,16 +608,14 @@ on('GET', '/api/probe/instagram', async (req, res) => {
 
 on('GET', '/api/probe/tiktok', async (req, res) => {
   require_(req, 'read');
-  if (!tiktokConfigured()) return sendJson(res, 200, { configured: false });
+  if (!zernioConfigured()) return sendJson(res, 200, { configured: false });
   try {
-    const info = await creatorInfo();
+    const info = await creatorSummary();
     sendJson(res, 200, {
       configured: true,
       username: info.username,
       options: (info.options || []).map((o) => ({ value: o, label: privacyHe(o) })),
-      // One privacy level, and it is SELF_ONLY: that is what an app before audit
-      // gets, and it is worth naming rather than showing as a short list.
-      preAudit: info.options?.length === 1 && info.options[0] === 'SELF_ONLY',
+      canPostMore: info.canPostMore,
     });
   } catch (e) {
     sendJson(res, 200, { configured: true, error: describeTikTokError(e) });
@@ -736,14 +722,6 @@ on('POST', '/api/admins/signout-all', (req, res) => {
   sendJson(res, 200, { ok: true });
 });
 
-// --- TikTok's browser connect, unchanged -------------------------------------
-//
-// Same path, same bearer secret, same lockout, same single-flight. It is here so
-// the Caddyfile keeps one upstream; the logic stayed in src/oauthServer.js
-// because it is TikTok's flow rather than this panel's.
-
-on('POST', '/tiktok/exchange', (req, res) => handleTikTokExchange(req, res));
-
 // --- the page's own files, last -----------------------------------------------
 //
 // Registered after every API route on purpose. It matches any single-segment GET,
@@ -847,8 +825,6 @@ export function startWebServer() {
           'and speaks plain HTTP — put a TLS proxy in front of it, or bind 127.0.0.1 and proxy to it.'
       );
     }
-    if (!exchangeConfigured()) console.log('   tiktok connect: OFF (no TIKTOK_BOT_SECRET set)');
-    else console.log('   tiktok connect: ON (POST /tiktok/exchange)');
   });
 
   return server;

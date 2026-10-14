@@ -22,8 +22,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // firing mid-run cannot inherit it.
 //
 // What is deliberately NOT bypassable here:
-//   - TikTok's 5-posts-per-24h cap and every other platform rule. Those are not
-//     ours to waive; see TIKTOK_DAILY_CAP in publish/tiktok.js.
+//   - The TikTok daily cap and every other platform rule. Those are not ours
+//     to waive; see TIKTOK_DAILY_CAP in publish/zernio.js.
 //   - hasPublished(), which stops the same post reaching real followers twice.
 //     That is not a quota, it is a duplicate, and the owner asking for a second
 //     Dolomites deck is asking for a different post rather than the same one.

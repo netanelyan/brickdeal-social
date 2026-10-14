@@ -7,14 +7,7 @@ import { brickApprovalMessage, photoSummary } from '../brick/candidate.js';
 import { proposalMessage, proposalWarning } from '../brick/proposal.js';
 import { liveTargets, targetsForKind, allowedForKind, TARGET_HE } from '../publish/targets.js';
 import { instagramConfigured, tokenDaysLeft, authMode } from '../publish/instagram.js';
-import {
-  tiktokConfigured,
-  tokenHoursLeft as tiktokHoursLeft,
-  refreshTokenDaysLeft as tiktokRefreshDaysLeft,
-  missingScopes as tiktokMissingScopes,
-  privacyHe,
-  TIKTOK_DAILY_CAP,
-} from '../publish/tiktok.js';
+import { zernioConfigured, privacyHe, TIKTOK_DAILY_CAP } from '../publish/zernio.js';
 import { configured as imagesEnabled } from '../images/homeShot.js';
 import { brickConfig } from '../brick/config.js';
 
@@ -181,9 +174,8 @@ export const queue = () =>
       headline: c.headline,
       id: c.id,
       targets: owed,
-      // Only when TikTok is still owed. Approval sends the draft immediately and
-      // queues the rest, so the remainder is Instagram-only — and calling that
-      // "draft" describes a handoff that already happened.
+      // Only when TikTok is still owed: a deck of generated photographs that
+      // will reach the inbox rather than the feed.
       draft: Boolean(c.tiktokDraft && owed.includes('tiktok')),
       attempts: c.publishAttempts || 0,
       cover: slideView(c.deck?.preview?.[0] || c.card),
@@ -246,14 +238,15 @@ export const connections = () => ({
         lastOkAt: store.lastOkAt('instagram'),
       }
     : { configured: false },
-  tiktok: tiktokConfigured()
+  tiktok: zernioConfigured()
     ? {
         configured: true,
-        tokenHoursLeft: tiktokHoursLeft(),
-        refreshTokenDaysLeft: tiktokRefreshDaysLeft(),
-        scope: store.getTikTokToken()?.scope || null,
-        // Decks go out as drafts, so video.upload is the one that matters.
-        missingScopes: tiktokMissingScopes({ draft: true }),
+        via: 'zernio',
+        privacy: brickConfig().tiktok.privacy,
+        privacyHe: privacyHe(brickConfig().tiktok.privacy),
+        autoAddMusic: brickConfig().tiktok.autoAddMusic,
+        commercialContentType: brickConfig().tiktok.commercialContentType,
+        aiPhotos: brickConfig().tiktok.aiPhotos,
         dailyCap: TIKTOK_DAILY_CAP(),
         usedInLast24h: store.tiktokPostsInLast24h(),
         capFreesAt: store.tiktokCapFreesAt(),

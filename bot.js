@@ -25,17 +25,13 @@ import {
   describeError,
 } from './src/publish/instagram.js';
 import {
-  tiktokConfigured,
-  creatorInfo,
+  zernioConfigured,
+  creatorSummary,
   privacyHe,
-  refreshTikTokToken,
-  tokenHoursLeft as tiktokHoursLeft,
-  refreshTokenDaysLeft as tiktokRefreshDaysLeft,
   describeError as describeTikTokError,
-  missingScopes as tiktokMissingScopes,
-  SCOPES as TIKTOK_SCOPES,
   TIKTOK_DAILY_CAP,
-} from './src/publish/tiktok.js';
+} from './src/publish/zernio.js';
+import { brickConfig } from './src/brick/config.js';
 import { targetsForKind, liveTargets, targetsHe } from './src/publish/targets.js';
 import { configured as imagesEnabled } from './src/images/homeShot.js';
 import { startWebServer, stopWebServer } from './src/web/server.js';
@@ -85,8 +81,8 @@ if (!TG_BOT_TOKEN) {
 if (!targetsForKind('card').length && !targetsForKind('deck').length) {
   console.error(
     'No publish destination configured. Cards go to Instagram ' +
-      '(IG_USER_ID + IG_ACCESS_TOKEN + CARD_PUBLIC_BASE_URL) and decks go to TikTok ' +
-      '(npm run tiktok-token, or connect it from the browser). Set up at least one.\n' +
+      '(IG_USER_ID + IG_ACCESS_TOKEN + CARD_PUBLIC_BASE_URL) and decks go to TikTok through Zernio ' +
+      '(ZERNIO_API_KEY + ZERNIO_TIKTOK_ACCOUNT_ID + CARD_PUBLIC_BASE_URL). Set up at least one.\n' +
       'CHANNEL_ID no longer counts: Telegram is where you approve posts, not where they publish.'
   );
   process.exit(1);
@@ -178,8 +174,7 @@ function stagingButtons(key, cand) {
     rows.push([Markup.button.callback('🔁 שער חדש', `dh:${key}`)]);
   }
   // Only when there is a real choice to make. With one privacy level available
-  // — the unaudited case, where TikTok offers SELF_ONLY and nothing else — a
-  // button that cycles back to the same value is a button that lies about
+  // a button that cycles back to the same value is a button that lies about
   // having options.
   if (cand?.tiktok?.options?.length > 1) {
     rows.push([Markup.button.callback(`🔒 פרטיות: ${privacyHe(cand.tiktok.privacy)}`, `tp:${key}`)]);
@@ -196,13 +191,10 @@ const proposalButtons = (key) =>
   Markup.inlineKeyboard([
     [
       Markup.button.callback('📸 אינסטגרם', `db:${key}:instagram`),
-      // TikTok is ALWAYS a draft. There were two buttons and the direct one had
-      // nothing to recommend it: the API cannot name a sound, so a direct post
-      // gets whatever TikTok picks and can never be changed afterwards - sound
-      // is the one thing not editable after publishing. A draft costs one tap
-      // in the app and buys the sound, the cover and the caption. It is also
-      // not subject to the audit, which the direct path is.
-      Markup.button.callback('🎵 טיקטוק (טיוטה)', `db:${key}:tiktok`),
+      // A real post through Zernio, with TikTok's own sound on it. A deck of
+      // generated photographs still reaches the inbox instead, because it has
+      // to be labelled by hand; the card says which, after the build.
+      Markup.button.callback('🎵 טיקטוק', `db:${key}:tiktok`),
     ],
     [Markup.button.callback('📸🎵 שניהם', `db:${key}:both`)],
     [Markup.button.callback('🤖 שנה בהוראה', `dr:${key}`), Markup.button.callback('❌ דחה', `dx:${key}`)],
@@ -349,12 +341,7 @@ bot.action(/^db:(.+):(instagram|tiktok|both)$/, async (ctx) => {
   // previewing the crop that needs no further action from you is the useful
   // way round.
   const targets = choice === 'both' ? ['instagram', 'tiktok'] : [choice];
-  // Reaching TikTok always means a draft. See the button.
-  const result = ops.buildProposal(key, {
-    targets,
-    draft: targets.includes('tiktok'),
-    actor: actorOf(ctx),
-  });
+  const result = ops.buildProposal(key, { targets, actor: actorOf(ctx) });
   await ctx.answerCbQuery(result.said);
   if (result.ok) await ctx.editMessageReplyMarkup(undefined).catch(() => {});
 });
@@ -469,7 +456,7 @@ bot.command('queue', (ctx) => {
   const lines = rows.slice(0, SHOWN).map(
     (c) =>
       `${c.n}. ${c.kind === 'deck' ? '🎞️' : '📰'} ${c.headline}\n   ${targetsHe(c.targets) || 'אין יעד'}${
-        c.draft ? ' · טיוטה' : ''
+        c.draft ? ' · טיקטוק כטיוטה (AI)' : ''
       }`
   );
 
@@ -500,14 +487,6 @@ bot.command('post', async (ctx) => {
 bot.command('next', async (ctx) => {
   const result = await ops.publishNow({ actor: actorOf(ctx) });
   await ctx.reply(result.said);
-});
-
-bot.command('draft', async (ctx) => {
-  const arg = argOf(ctx, 'draft');
-  const n = Number(arg);
-  if (!arg || !Number.isInteger(n) || n < 1) return ctx.reply('שימוש: /draft 2 — המספר מהרשימה ב-/queue');
-  const result = ops.draftAt(n, { actor: actorOf(ctx) });
-  await ctx.reply(result.ok ? result.said : `${result.said} — /queue לרשימה`);
 });
 
 /**
@@ -670,80 +649,31 @@ bot.command('deck', async (ctx) => {
   await ctx.reply(result.said);
 });
 
-bot.command('tiktok_connect', (ctx) => {
-  const missing = tiktokMissingScopes({ draft: true });
-  ctx.reply(
-    [
-      missing.length
-        ? `🔴 החיבור הנוכחי חסר: ${missing.join(', ')}`
-        : '✅ החיבור הנוכחי כולל את כל ההרשאות הדרושות',
-      '',
-      'ההרשאות הדרושות, בדיוק כך:',
-      TIKTOK_SCOPES.join(','),
-      '',
-      'דרך 1 - לתקן את הדף באתר:',
-      'ב-/tiktok/connect, הפרמטר scope בקישור ההרשאה צריך להיות המחרוזת שלמעלה.',
-      'רק האתר יכול לייצר state שה-callback שלו יקבל, ולכן רק הוא יכול לסיים חיבור בדפדפן.',
-      '',
-      'דרך 2 - מהטרמינל ב-VPS, עובד עכשיו:',
-      'npm run tiktok-token',
-      'הסקריפט מדפיס קישור עם ההרשאות הנכונות. פתחו, אשרו, ואז העתיקו את כל',
-      'הכתובת מהדפדפן והדביקו בטרמינל. דף ה-callback יראה שגיאת state - זה צפוי,',
-      'והקוד עדיין תקף כי הדף לא עשה בו שימוש.',
-    ].join('\n'),
-    { link_preview_options: { is_disabled: true } }
-  );
-});
-
 bot.command('tiktok', async (ctx) => {
-  if (!tiktokConfigured()) {
-    return ctx.reply(
-      'טיקטוק לא מחובר.\nהגדר TIKTOK_CLIENT_KEY ו-TIKTOK_CLIENT_SECRET ו-TIKTOK_REDIRECT_URI ב-.env, ואז npm run tiktok-token'
-    );
+  if (!zernioConfigured()) {
+    return ctx.reply('טיקטוק לא מחובר.\nהגדר ZERNIO_API_KEY ו-ZERNIO_TIKTOK_ACCOUNT_ID ב-.env (החשבון עצמו מחובר בלוח של Zernio)');
   }
 
   const health = store.targetHealth('tiktok');
-  const hours = tiktokHoursLeft();
-  const refreshDays = tiktokRefreshDaysLeft();
+  const tt = brickConfig().tiktok;
 
-  // Everything knowable without asking TikTok anything comes first, for the
-  // same reason /igquota does it: when the API refuses, the token state is the
-  // first thing you want next to the refusal, not after it.
-  const local = [];
-  if (hours != null) {
-    local.push(
-      hours > 0
-        ? `🔑 טוקן הגישה תקף עוד ${hours} שעות (מתחדש אוטומטית)`
-        : `🔑 טוקן הגישה פג — יתחדש בפרסום הבא, או npm run tiktok-token`
-    );
-  }
-  if (refreshDays != null) local.push(`🔁 טוקן הרענון תקף עוד ${refreshDays} ימים`);
-
-  // The scopes, which nothing reported until a post failed on one.
-  const granted = store.getTikTokToken()?.scope;
-  if (granted) {
-    local.push(`🔐 הרשאות: ${granted}`);
-    // Decks go out as drafts, so video.upload is the one that matters.
-    const missing = tiktokMissingScopes({ draft: true });
-    if (missing.length) {
-      local.push(
-        `🔴 חסר: ${missing.join(', ')} — פרסום ייכשל עד חיבור מחדש.`,
-        '   רענון טוקן לא מוסיף הרשאות; צריך אישור חדש מול טיקטוק.'
-      );
-    }
-  }
+  // Everything knowable without asking anybody comes first, for the same
+  // reason /igquota does it: when the API refuses, these are the facts you
+  // want next to the refusal.
+  const local = [
+    `⚙️ פרטיות: ${privacyHe(tt.privacy)} · סאונד: ${tt.autoAddMusic ? 'אוטומטי' : 'כבוי'} · תוכן מסחרי: ${tt.commercialContentType}`,
+    `🤖 מצגת עם תמונות AI: ${tt.aiPhotos === 'skip' ? 'לא נשלחת לטיקטוק' : 'טיוטה בתיבה, לסמן ולפרסם ידנית'}`,
+    `📊 ${store.tiktokPostsInLast24h()}/${TIKTOK_DAILY_CAP()} פוסטים ב-24 שעות`,
+  ];
   if (health.lastOkAt) local.push(`✅ פורסם לאחרונה לפני ${notify.humanDuration(Date.now() - health.lastOkAt)}`);
   else local.push('⚪ עוד לא פורסם לטיקטוק מהמכונה הזו');
   if (health.failures) local.push(`⚠️ ${health.failures} כשלונות ברצף`);
 
   try {
-    const info = await creatorInfo();
+    const info = await creatorSummary();
     const levels = info.options.map(privacyHe).join(', ') || 'לא התקבלו';
-    const audit =
-      info.options.length === 1 && info.options[0] === 'SELF_ONLY'
-        ? '\n⚠️ רק פרסום פרטי זמין — זה מה שאפליקציה לפני אישור (audit) מקבלת'
-        : '';
-    ctx.reply([`🎵 @${info.username || '?'}`, `🔒 רמות פרטיות זמינות: ${levels}${audit}`, ...local].join('\n'));
+    const allowed = info.options.includes(tt.privacy) ? '' : `\n🔴 ${privacyHe(tt.privacy)} לא מותר לחשבון — כל פרסום ייכשל עד שזה יתוקן`;
+    ctx.reply([`🎵 ${info.username || '?'} · דרך Zernio`, `🔒 רמות פרטיות זמינות: ${levels}${allowed}`, ...local].join('\n'));
   } catch (e) {
     ctx.reply([`🔴 ${describeTikTokError(e)}`, '', ...local].join('\n'));
   }
@@ -761,16 +691,14 @@ bot.command('tiktok', async (ctx) => {
 bot.command('health', (ctx) => {
   const rows = views.health();
   const extra = [];
-  if (tiktokConfigured()) {
+  if (zernioConfigured()) {
     const cap = TIKTOK_DAILY_CAP();
     const used = store.tiktokPostsInLast24h();
-    extra.push(`🎵 טיקטוק: ${used}/${cap} פוסטים ב-24 שעות האחרונות`);
+    extra.push(`🎵 טיקטוק (Zernio): ${used}/${cap} פוסטים ב-24 שעות האחרונות`);
     if (used >= cap) {
       const freesAt = store.tiktokCapFreesAt();
       if (freesAt) extra.push(`   המכסה מתפנה בעוד ${notify.humanDuration(Math.max(0, freesAt - Date.now()))}`);
     }
-    const hours = tiktokHoursLeft();
-    if (hours != null) extra.push(`   🔑 טוקן גישה: ${hours} שעות`);
   }
   if (store.heldCount()) extra.push(`📥 ${store.heldCount()} פוסטים מוחזקים · /held · /retry`);
   if (store.queueSize()) extra.push(`📦 ${store.queueSize()} בתור`);
@@ -800,7 +728,6 @@ bot.command('help', (ctx) =>
       '/queue — מה בתור, לפי הסדר, ממוספר',
       '/next — מפרסם את הבא בתור',
       '/post <מספר> — מפרסם אחד מסוים מהתור, מדלג על הסדר',
-      '/draft <מספר> — שולח את החצי של טיקטוק לטיוטות עכשיו',
       '/photo <מספר> — תמונה חדשה לשקופית מסוימת (עולה קריאה למודל)',
       '/held — מצגות מאושרות שממתינות ליעד שנפל',
       '/retry — אחרי שתיקנת: מחזיר אותן לתור',
@@ -809,8 +736,7 @@ bot.command('help', (ctx) =>
       '/clear_queue — מרוקן את התור (פוסטים שכבר אושרו)',
       '',
       '/igquota — מכסת אינסטגרם',
-      '/tiktok — חיבור טיקטוק, טוקנים ורמות פרטיות',
-      '/tiktok_connect — אילו הרשאות צריך ואיך לחבר',
+      '/tiktok — טיקטוק דרך Zernio: החשבון, רמות הפרטיות והמכסה',
       '',
       'תשובה להצעה משנה אותה: כתוב נושא, מחיר או שם של סט.',
       'לוח הזמנים והקופי נערכים באתר — /site',
@@ -909,7 +835,6 @@ function tick() {
   if (day !== lastRunDay) {
     lastRunDay = day;
     refreshToken().catch(() => {});
-    refreshTikTokToken().catch(() => {});
   }
 
   // Deck proposals through the day, in waking hours. Only the PROPOSAL - the
@@ -977,6 +902,23 @@ async function main() {
   // lie in both directions: it would name Telegram, which receives nothing, and
   // it would not say that a card and a deck go to different places.
   console.log(`   decks to: ${targetsForKind('deck').join(' + ') || 'NOWHERE (nothing is connected)'}`);
+  if (zernioConfigured()) {
+    const tt = brickConfig().tiktok;
+    console.log(
+      `   tiktok: via Zernio · ${tt.privacy} · music ${tt.autoAddMusic ? 'on' : 'off'} · ` +
+        `commercial ${tt.commercialContentType} · AI-photo decks: ${tt.aiPhotos === 'skip' ? 'kept off TikTok' : 'inbox draft'}`
+    );
+    // Said, not fixed. TikTok allows only its Commercial Music Library on a post
+    // that discloses commercial content, so auto-added music attaches nothing
+    // and every post goes out silent. Changing either value here would be
+    // deciding a disclosure question for the owner.
+    if (tt.autoAddMusic && tt.commercialContentType !== 'none') {
+      console.warn(
+        `   tiktok: ⚠️  commercialContentType is "${tt.commercialContentType}" and autoAddMusic is on — ` +
+          'TikTok attaches no auto-added music to a post with a commercial disclosure, so posts will be silent'
+      );
+    }
+  }
   console.log('   telegram: approval only — nothing publishes to a channel');
   console.log(
     `   photographs: ${
@@ -993,16 +935,15 @@ async function main() {
     `   proposals ${decksPerDay()}/day between ${runHour()}:00 and ${gatherUntilHour()}:00 · drip every ${minutes()} min`
   );
 
-  // Both refreshes are "maybe" by nature — each returns early unless the token
-  // is close enough to lapsing to be worth a call — so there is nothing to
-  // decide here beyond letting them fail quietly.
+  // The refresh is "maybe" by nature — it returns early unless the token is
+  // close enough to lapsing to be worth a call — so there is nothing to decide
+  // here beyond letting it fail quietly.
   //
   // And they must fail quietly. main() rejecting exits the process, pm2 starts
   // it again, and a refresh is a network call: one unreachable API at boot
   // would otherwise become a restart loop on a bot that had nothing wrong with
   // it. Whatever does not refresh now is retried at the next day change.
   await refreshToken().catch((e) => console.error('instagram token refresh at boot:', e.message));
-  await refreshTikTokToken().catch((e) => console.error('tiktok token refresh at boot:', e.message));
   await probeInstagram();
 
   setInterval(tick, 60_000);

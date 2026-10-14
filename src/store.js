@@ -88,14 +88,9 @@ const empty = {
   // come back, rather than being dropped. /retry replays them.
   held: [],
   igToken: null,
-  // TikTok's pair. Kept separately from igToken because the two expire on
-  // completely different clocks — 60 days against 24 hours — and the refresh
-  // token here is the one that needs a browser to replace.
-  tiktokToken: null,
   // --- the three collections the website added ------------------------------
   //
-  // All three live here, in the one file, for the reason src/oauthServer.js
-  // spells out at length: store.js holds the whole document in memory and saves
+  // All three live here, in the one file, for one reason: store.js holds the whole document in memory and saves
   // it whole, so a SECOND process writing its own copy would not corrupt the
   // file but would silently roll back every change made since it loaded. The
   // website runs inside the bot's process and writes through this module, so
@@ -631,6 +626,14 @@ export function recordPublished({
   instagram,
   tiktok,
   tiktokDraft = false,
+  // Zernio's id for the TikTok post, and its link once TikTok has one. The
+  // analytics job matches views on the first and fills in the second.
+  zernioPostId = null,
+  tiktokUrl = null,
+  // The cover and its score, for the loop that checks the scorer against
+  // what the posts actually did.
+  hook = null,
+  score = null,
 }) {
   if (id) state.publishedIds[id] = Date.now();
   for (const extra of alsoIds) if (extra) state.publishedIds[extra] = Date.now();
@@ -654,6 +657,8 @@ export function recordPublished({
     // process knows, nothing was posted", and a direct post is that knowledge
     // arriving.
     if (tiktok && !tiktokDraft) existing.tiktokDraft = false;
+    if (zernioPostId) existing.zernioPostId = zernioPostId;
+    if (tiktokUrl) existing.tiktokUrl = tiktokUrl;
   } else {
     state.published.push({
       ts: Date.now(),
@@ -691,6 +696,10 @@ export function recordPublished({
       // cannot observe. Everything downstream that says "published" should say
       // something else about these.
       tiktokDraft: Boolean(tiktok && tiktokDraft),
+      zernioPostId: zernioPostId || null,
+      tiktokUrl: tiktokUrl || null,
+      hook: hook || null,
+      score: Number.isFinite(score) ? score : null,
     });
   }
   prunePublished(state);
@@ -700,11 +709,10 @@ export function recordPublished({
 /**
  * How many posts reached TikTok in the last 24 hours.
  *
- * TikTok caps an unaudited client at 5 a day and this is the number that cap is
- * measured against. It is counted from our own record rather than asked of the
- * API, because there is no endpoint that answers it — the only way to discover
- * the cap at TikTok's end is to be refused by it, which costs a post and
- * degrades the destination on the way through.
+ * TIKTOK_DAILY_CAP in publish/zernio.js is measured against this. It is
+ * counted from our own record rather than asked of the API, because the only
+ * way to discover a cap at TikTok's end is to be refused by it, which costs a
+ * post.
  *
  * Rows written before `tiktokAt` existed fall back to `ts`. That is the right
  * way to be wrong: it can only ever over-count a post near the boundary, and
@@ -712,14 +720,10 @@ export function recordPublished({
  */
 export function tiktokPostsInLast24h(now = Date.now()) {
   const cutoff = now - DAY_MS;
-  // Drafts are excluded, and this is the whole reason the flag is stored. The
-  // cap counts posts PUBLISHED through the API in 24 hours; a deck handed to
-  // your inbox publishes nothing until you tap post in the app, and TikTok does
-  // not charge it. Counting it here would spend a limit that was never touched
-  // and hold back direct posts that could have gone out.
-  return state.published.filter(
-    (p) => p.tiktok && !p.tiktokDraft && (p.tiktokAt ?? p.ts ?? 0) >= cutoff
-  ).length;
+  // Drafts are counted. They were not while drafts went out through TikTok's
+  // own inbox endpoint, but through Zernio both TikTok's per-account limit and
+  // Zernio's daily cap count a draft exactly like a post.
+  return state.published.filter((p) => p.tiktok && (p.tiktokAt ?? p.ts ?? 0) >= cutoff).length;
 }
 
 /** When the oldest TikTok post inside the 24h window falls out of it. */
@@ -1087,29 +1091,6 @@ export function setIgToken({ token, expiresAt }) {
   save();
 }
 export const getIgToken = () => state.igToken || null;
-
-// --- TikTok token -------------------------------------------------------------
-// Two clocks, both persisted. The access token lasts a day and is refreshed on
-// the publish path; the refresh token lasts about a year and cannot be renewed
-// without opening a browser, so its expiry is worth being able to report before
-// it arrives rather than after.
-export function setTikTokToken({ accessToken, refreshToken, expiresAt, refreshExpiresAt, openId, scope }) {
-  state.tiktokToken = {
-    accessToken,
-    refreshToken,
-    expiresAt,
-    refreshExpiresAt,
-    openId: openId ?? state.tiktokToken?.openId ?? null,
-    scope: scope ?? state.tiktokToken?.scope ?? null,
-    updatedAt: Date.now(),
-  };
-  save();
-}
-export const getTikTokToken = () => state.tiktokToken || null;
-export function clearTikTokToken() {
-  state.tiktokToken = null;
-  save();
-}
 
 // --- runtime settings ---------------------------------------------------------
 //
