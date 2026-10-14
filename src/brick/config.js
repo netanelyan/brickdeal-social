@@ -117,6 +117,27 @@ export function brickConfig() {
     throw new Error(`brick-config.json: deck.slides (${slides}) plus the cover and the end card is more than Instagram's ten`);
   }
 
+  // How a deck goes out on TikTok. Every value is checked against the short
+  // list TikTok accepts and refused when it is not on it, because each one is
+  // a statement made in public: a typo in the privacy level would otherwise
+  // reach TikTok as a refused post or, worse, as a different level than the
+  // one written here.
+  const tt = raw.tiktok || {};
+  const privacy = String(tt.privacy || 'PUBLIC_TO_EVERYONE');
+  if (!TIKTOK_PRIVACY.includes(privacy)) {
+    throw new Error(`brick-config.json: tiktok.privacy must be one of ${TIKTOK_PRIVACY.join(', ')}, not "${privacy}"`);
+  }
+  const commercialContentType = String(tt.commercialContentType || 'none');
+  if (!TIKTOK_COMMERCIAL.includes(commercialContentType)) {
+    throw new Error(
+      `brick-config.json: tiktok.commercialContentType must be one of ${TIKTOK_COMMERCIAL.join(', ')}, not "${commercialContentType}"`
+    );
+  }
+  const aiPhotos = String(tt.aiPhotos || 'draft');
+  if (!AI_PHOTO_POLICIES.includes(aiPhotos)) {
+    throw new Error(`brick-config.json: tiktok.aiPhotos must be one of ${AI_PHOTO_POLICIES.join(', ')}, not "${aiPhotos}"`);
+  }
+
   cached = {
     copy: { allowTrademark: raw.copy?.allowTrademark === true },
     labels: {
@@ -225,10 +246,25 @@ export function brickConfig() {
       // for everything added after the first version.
       countdownMin: Math.min(slides, Math.max(minSlides, count(deck.countdownMin, 5))),
     },
+    tiktok: {
+      privacy,
+      commercialContentType,
+      // On unless it is switched off in so many words. A silent photo post
+      // reaches fewer people, and TikTok picks the track either way.
+      autoAddMusic: tt.autoAddMusic !== false,
+      aiPhotos,
+    },
   };
 
   return cached;
 }
+
+// TikTok's own vocabularies, as Zernio passes them through.
+const TIKTOK_PRIVACY = ['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'];
+const TIKTOK_COMMERCIAL = ['none', 'brand_organic', 'brand_content'];
+// What happens to a deck carrying a generated photograph: the TikTok inbox,
+// where a person adds the AI label, or not TikTok at all.
+const AI_PHOTO_POLICIES = ['draft', 'skip'];
 
 const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
 const count = (v, fallback) => Math.max(0, Math.round(num(v, fallback)));

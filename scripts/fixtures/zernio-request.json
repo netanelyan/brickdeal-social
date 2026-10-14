@@ -1,0 +1,28 @@
+{
+  "content": "אם אתם אוהבים לקנות סטים במחירים של הארץ, תמשיכו לגלול",
+  "mediaItems": [
+    { "type": "image", "url": "https://cards.example.co/brick-d1-tiktok-01.jpg" },
+    { "type": "image", "url": "https://cards.example.co/brick-d1-tiktok-02.jpg" },
+    { "type": "image", "url": "https://cards.example.co/brick-d1-tiktok-03.jpg" },
+    { "type": "image", "url": "https://cards.example.co/brick-d1-tiktok-04.jpg" },
+    { "type": "image", "url": "https://cards.example.co/brick-d1-tiktok-05.jpg" },
+    { "type": "image", "url": "https://cards.example.co/brick-d1-tiktok-06.jpg" },
+    { "type": "image", "url": "https://cards.example.co/brick-d1-tiktok-07.jpg" },
+    { "type": "image", "url": "https://cards.example.co/brick-d1-tiktok-08.jpg" },
+    { "type": "image", "url": "https://cards.example.co/brick-d1-tiktok-09.jpg" },
+    { "type": "image", "url": "https://cards.example.co/brick-d1-tiktok-10.jpg" }
+  ],
+  "platforms": [{ "platform": "tiktok", "accountId": "acc_tiktok_1" }],
+  "tiktokSettings": {
+    "media_type": "photo",
+    "photo_cover_index": 0,
+    "privacy_level": "PUBLIC_TO_EVERYONE",
+    "allow_comment": true,
+    "auto_add_music": true,
+    "description": "ועדיין אתם משלמים מחיר מלא? 💵\nכל הקישורים בקהילה בטלגרם, הלינק בביו 📍\n- - - -\n#fyp #foryou #אבניבנייה #סטיםתואמים #חוסכים",
+    "commercialContentType": "none",
+    "content_preview_confirmed": true,
+    "express_consent_given": true
+  },
+  "publishNow": true
+}

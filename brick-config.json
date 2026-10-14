@@ -583,5 +583,38 @@
     "minPieces": 200,
     "countdownShare": 0.33,
     "countdownMin": 5
+  },
+
+  "tiktok": {
+    "_comment": [
+      "How a deck goes out on TikTok, through Zernio (src/publish/zernio.js).",
+      "",
+      "`privacy` is checked against the levels TikTok reports for the account",
+      "before every post, and a post is refused rather than moved to another",
+      "level when it is not allowed. One of PUBLIC_TO_EVERYONE,",
+      "MUTUAL_FOLLOW_FRIENDS, FOLLOWER_OF_CREATOR, SELF_ONLY.",
+      "",
+      "`autoAddMusic` lets TikTok put a sound on the post. It cannot be told",
+      "WHICH sound: Zernio's `musicSoundInfo` is for video posts only, and these",
+      "are photo carousels. Off means a silent post.",
+      "",
+      "`commercialContentType` is the disclosure: none, brand_organic or",
+      "brand_content. WITH EITHER OF THE TWO BRAND VALUES ON, autoAddMusic",
+      "ATTACHES NOTHING: TikTok allows only its Commercial Music Library on a",
+      "disclosed post, and auto-added music is not from it. The bot warns about",
+      "that combination at boot and changes neither value.",
+      "",
+      "`aiPhotos` is what happens to a deck carrying any generated photograph.",
+      "TikTok requires those to be labelled as AI-generated, and a direct photo",
+      "post through the API cannot carry the label (Zernio rejects",
+      "video_made_with_ai on photos). 'draft' sends such a deck to the TikTok",
+      "inbox and tells you on Telegram to add the label and post it. 'skip'",
+      "keeps it off TikTok. Only a deck made entirely of screened seller or",
+      "catalogue photos is posted by itself."
+    ],
+    "privacy": "PUBLIC_TO_EVERYONE",
+    "autoAddMusic": true,
+    "commercialContentType": "none",
+    "aiPhotos": "draft"
   }
 }
