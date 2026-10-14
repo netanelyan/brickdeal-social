@@ -323,6 +323,8 @@ export function statusReport({
   decksPerDay = 0,
   heldCount = 0,
   targetHealth = {},
+  mode = 'manual',
+  paused = null,
 }) {
   // Rewritten when the card half came out, and it is shorter for a real reason
   // rather than because things were trimmed. Most of what this used to report
@@ -335,13 +337,16 @@ export function statusReport({
   // which is what is waiting on YOU.
   return [
     '🔎 סטטוס',
+    // First, because it changes how everything under it reads: in auto mode
+    // nothing waits on you, and paused nothing moves at all.
+    `${mode === 'manual' ? '✋ ידני' : '🤖 אוטומטי'}${paused ? ` · ⏸️ מושהה מאז לפני ${humanDuration(Date.now() - paused.at)} · /resume` : ''}`,
     `💡 ${proposalSize} הצעות ממתינות · ⏳ ${stagingSize} מצגות לאישור · 📦 ${queueSize} בתור`,
     `📤 ${publishedToday} פורסמו היום`,
     '',
     'ב-24 השעות האחרונות:',
     `✅ עלו לאישור: ${staged}`,
     '',
-    `🎯 הצעות היום: ${decksToday}/${decksPerDay}`,
+    `🎯 מצגות היום: ${decksToday}/${decksPerDay}`,
     `📝 אושרו היום: ${stagedToday ?? 0}` + (rejectedToday ? ` (${rejectedToday} נדחו)` : ''),
     `⚙️ דריפ כל ${postIntervalMinutes} דק' · מפרסם ל${targetsHe(targets)}`,
     // Per destination, because "published today" hides the case that matters:

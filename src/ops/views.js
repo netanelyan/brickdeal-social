@@ -262,6 +262,8 @@ export function overview() {
   const dayKey = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
   return {
     now: Date.now(),
+    mode: brickConfig().approval.mode,
+    paused: store.pausedState(),
     counts: {
       staged: store.stagingSize(),
       proposals: store.proposalSize(),

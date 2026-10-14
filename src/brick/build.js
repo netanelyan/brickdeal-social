@@ -693,8 +693,12 @@ export async function buildSlides(recipe, { wantImages = true, onProgress = null
  * `request` is whatever was typed after /deck: a theme key, a theme's Hebrew
  * name, a price, or nothing. Nothing is the common case and means "whatever
  * this feed can best make right now".
+ *
+ * `avoidRecipe` is the kind of the deck this one replaces, when the scorer
+ * sent a deck back for different sets. The feed's best recipe of another kind
+ * is tried first; the same kind again only when nothing else can be built.
  */
-export async function proposeDeck(request = null, { onProgress = null, rand = Math.random } = {}) {
+export async function proposeDeck(request = null, { onProgress = null, rand = Math.random, avoidRecipe = null } = {}) {
   const { deals, dropped: feedDropped, total } = await loadDeals();
 
   // Never the same set twice in a fortnight.
@@ -740,7 +744,8 @@ export async function proposeDeck(request = null, { onProgress = null, rand = Ma
   // as it reads: `/deck 100` is a price deck every time, and a deck the owner
   // named should not turn into a countdown one time in three.
   const asked = countdownRequest(request);
-  const tryCountdown = asked !== null || (!request && rand() < brickConfig().deck.countdownShare);
+  const tryCountdown =
+    asked !== null || (!request && avoidRecipe !== 'countdown' && rand() < brickConfig().deck.countdownShare);
   let planned = null;
   let fallback = null;
   if (tryCountdown) {
@@ -756,7 +761,7 @@ export async function proposeDeck(request = null, { onProgress = null, rand = Ma
   // it named one, and to whatever the feed can best make if it did not. Never
   // to the raw request: "טופ 5" read as a set name finds whichever set has a 5
   // in its title.
-  const recipe = planned?.recipe || chooseRecipe(pool, asked ? asked.theme : request);
+  const recipe = planned?.recipe || chooseRecipe(pool, asked ? asked.theme : request, { avoid: avoidRecipe });
   if (!recipe) {
     const err = new Error(
       `nothing to build from: ${deals.length} usable deals out of ${total} on the feed` +
@@ -918,7 +923,7 @@ export async function buildDeck(request = null, opts = {}) {
  * rule and it is the right one: a deck you asked for and did not get costs a
  * message, and a deck of the wrong kind costs nothing at all.
  */
-export function chooseRecipe(deals, request) {
+export function chooseRecipe(deals, request, { avoid = null } = {}) {
   const want = String(request || '').trim();
 
   if (want) {
@@ -973,7 +978,8 @@ export function chooseRecipe(deals, request) {
     }
   }
 
-  return available(deals)[0] || null;
+  const options = available(deals);
+  return options.find((r) => r.kind !== avoid) || options[0] || null;
 }
 
 /**

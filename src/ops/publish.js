@@ -293,6 +293,17 @@ export async function publishNext(item = null) {
       zernioPostId: done.tiktok?.postId || null,
       tiktokUrl: done.tiktok?.url || null,
     });
+
+    // And on the deck's score, which is where the analytics job will put its
+    // views. Only TikTok decides the path: a deck that also went to Instagram
+    // is measured by its TikTok post, and one that skipped TikTok is not
+    // measured at all.
+    const scored = done.tiktok
+      ? { path: cand.tiktokDraft ? 'draft' : 'published', zernioPostId: done.tiktok.postId || null, url: done.tiktok.url || null, publishedAt: Date.now() }
+      : !(cand.publishTargets || []).includes('tiktok')
+        ? { path: 'instagram', publishedAt: Date.now() }
+        : null;
+    if (scored) store.updateScored(cand.id, scored);
   }
 
   // Anything a publisher repaired on the way through — a privacy level the

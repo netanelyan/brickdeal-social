@@ -493,7 +493,19 @@ const actor = (who) => ({ kind: 'web', id: who.id, name: who.name, username: who
 on('POST', '/api/deck', async (req, res) => {
   const who = requireWrite(req);
   const { request = null } = await readJson(req);
-  sendJson(res, 202, ops.proposeDeck({ request: request || null, actor: actor(who) }));
+  // Built and scored in auto mode, proposed in manual mode, exactly as /deck.
+  const result = ops.makeDeck({ request: request || null, actor: actor(who) });
+  sendJson(res, result.ok ? 202 : 409, result);
+});
+
+// The kill switch, the same two functions /pause and /resume call.
+on('POST', '/api/pause', (req, res) => {
+  const who = requireWrite(req);
+  sendJson(res, 200, ops.pause({ actor: actor(who) }));
+});
+on('POST', '/api/resume', (req, res) => {
+  const who = requireWrite(req);
+  sendJson(res, 200, ops.resume({ actor: actor(who) }));
 });
 
 on('POST', '/api/proposals/:key/build', async (req, res, { key }) => {
@@ -564,7 +576,8 @@ on('POST', '/api/staged/clear', (req, res) => {
 
 on('POST', '/api/queue/next', async (req, res) => {
   const who = requireWrite(req);
-  sendJson(res, 200, await ops.publishNow({ actor: actor(who) }));
+  const result = await ops.publishNow({ actor: actor(who) });
+  sendJson(res, result.reason === 'paused' ? 409 : 200, result);
 });
 
 on('POST', '/api/queue/:n/publish', async (req, res, { n }) => {

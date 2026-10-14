@@ -1959,6 +1959,130 @@ group('the scorer — hard gates first, then one strict model call');
 }
 
 /* -------------------------------------------------------------------------- */
+group('the kill switch, and the interval auto mode cannot beat');
+
+{
+  const store = await import('../src/store.js');
+  const ops = await import('../src/ops/marketing.js');
+  const { detach } = await import('../src/ops/surface.js');
+  detach();
+
+  const paused = ops.pause({ actor: { kind: 'telegram', name: 'טסט' } });
+  ok('/pause pauses', paused.ok && Boolean(store.pausedState()));
+  ok('and says who did it', store.pausedState().by === 'טסט · מטלגרם');
+  const onDisk = JSON.parse(readFileSync(process.env.STORE_PATH, 'utf8'));
+  ok('and is written to the store, so a restart does not lift it', Boolean(onDisk.paused?.at));
+  ok('a second /pause says it already is', ops.pause({}).already === true);
+
+  const next = await ops.publishNow({ actor: { kind: 'telegram' } });
+  eq('/next is refused while paused', next.reason, 'paused');
+  const at = await ops.publishAt(1, { actor: { kind: 'telegram' } });
+  eq('and so is /post', at.reason, 'paused');
+
+  const interval = 240 * 60_000;
+  const t = Date.parse('2026-10-14T12:00:00Z');
+  ok('the drip does not run while paused', !ops.dripDue({ now: t, lastDripAt: t - 2 * interval, lastPublishedAt: null, intervalMs: interval, paused: store.pausedState() }));
+
+  const resumed = ops.resume({ actor: { kind: 'web', name: 'טסט' } });
+  ok('/resume lifts it', resumed.ok && store.pausedState() === null);
+  ok('a second /resume says nothing was paused', ops.resume({}).already === true);
+  eq('the audit trail has both', store.auditTrail({ limit: 5 }).filter((a) => ['paused', 'resumed'].includes(a.action)).length, 2);
+
+  ok('the drip runs once the interval has passed since its last attempt and the last post', ops.dripDue({ now: t, lastDripAt: t - interval, lastPublishedAt: t - interval, intervalMs: interval }));
+  ok('not a minute before the interval since its own last attempt', !ops.dripDue({ now: t, lastDripAt: t - interval + 60_000, lastPublishedAt: null, intervalMs: interval }));
+  ok('and not a minute before the interval since the last post, however it was made', !ops.dripDue({ now: t, lastDripAt: t - 3 * interval, lastPublishedAt: t - interval + 60_000, intervalMs: interval }));
+  ok('a first post waits only for the drip', ops.dripDue({ now: t, lastDripAt: t - interval, lastPublishedAt: null, intervalMs: interval }));
+}
+
+/* -------------------------------------------------------------------------- */
+group('auto mode — publish, rebuild once, or drop');
+
+{
+  const store = await import('../src/store.js');
+  const ops = await import('../src/ops/marketing.js');
+  const { detach, attach } = await import('../src/ops/surface.js');
+
+  const said = [];
+  attach({ say: async (text) => said.push(text) });
+  store.clearQueue();
+
+  // Fakes for the five steps. Everything the loop decides is real.
+  const run = async (scores, { publishTargets = ['tiktok'], route = { path: 'post', generated: 0 } } = {}) => {
+    const calls = { plan: [], redraw: 0 };
+    let n = 0;
+    let built = 0;
+    const deps = {
+      targets: ['tiktok'],
+      plan: async (request, opts = {}) => (calls.plan.push(opts.avoidRecipe || null), { subject: 'סטים', recipe: opts.avoidRecipe ? 'price' : 'savings' }),
+      build: async (proposal) => ({
+        recipe: proposal.recipe,
+        hookHe: 'שער ראשון',
+        slides: [{ productId: `p${++built}`, image: { src: 'data:image/png;base64,AA', provenance: 'generated', checked: true } }],
+      }),
+      wrap: async (b) => ({
+        id: `auto-${b.slides[0].productId}`,
+        kind: 'deck',
+        headline: `מצגת ${b.slides[0].productId}`,
+        deck: { recipe: b.recipe, hookHe: b.hookHe, slides: b.slides },
+        publishTargets,
+        tiktokRoute: route,
+        tiktokDraft: route.path === 'draft',
+      }),
+      score: async () => ({ threshold: 70, gates: [], at: new Date().toISOString(), ...scores[n++] }),
+      redraw: async (deck) => {
+        calls.redraw++;
+        deck.hookHe = 'שער שני';
+        return { ok: true, drawn: { hook: 'שער שני' } };
+      },
+    };
+    const result = await ops.autoPipeline({ request: null }, deps);
+    return { result, calls };
+  };
+
+  const pass = (total = 80) => ({ stage: 'B', pass: true, total, sub: { hook: total, slide1: total, photos: total, savings: total, variety: total }, weakest: 'hook' });
+  const fail = (weakest, total = 55) => ({ stage: 'B', pass: false, total, sub: { hook: 60, slide1: 60, photos: 60, savings: 60, variety: 60, [weakest]: 30 }, weakest, why: `${total} < 70` });
+
+  const a = await run([pass(82)]);
+  ok('a deck over the threshold is queued', a.result.queued && store.queueSize() === 1);
+  eq('carrying its score', store.queuedItems()[0]?.deck?.score?.total, 82);
+  eq('and the store keeps it, queued', store.scoredItems({ limit: 1 })[0]?.path, 'queued');
+  eq('with nothing said in Telegram until it posts', said.length, 0);
+  store.clearQueue();
+
+  const b = await run([fail('hook'), pass(74)]);
+  eq('a weak cover is redrawn once', b.calls.redraw, 1);
+  ok('and the redrawn deck, passing, is queued', b.result.queued && store.queueSize() === 1);
+  const kept = store.queuedItems()[0]?.deck;
+  eq('both scores are kept on the deck', kept?.scores?.length, 2);
+  eq('the second says why it was rebuilt', kept?.scores?.[1]?.rebuilt, 'cover');
+  eq('and the cover on it is the new one', kept?.hookHe, 'שער שני');
+  store.clearQueue();
+
+  const c = await run([fail('savings'), fail('variety', 60)]);
+  eq('weak savings rebuild with different sets, asking for a different recipe', c.calls.plan.join(','), ',savings');
+  ok('a deck that fails twice is dropped', c.result.dropped && store.queueSize() === 0);
+  eq('the drop is recorded with its reason', store.scoredItems({ limit: 1 })[0]?.path, 'dropped');
+  ok('and logged in Telegram in one message', said.length === 1 && said[0].includes('נפסלה'));
+  said.length = 0;
+
+  const d = await run([{ stage: 'A', pass: false, total: null, sub: null, gates: [{ gate: 'photo', why: 'x: no photograph', fix: 'recipe' }], why: 'x: no photograph' }, { stage: 'A', pass: false, total: null, sub: null, gates: [{ gate: 'photo', why: 'y: no photograph', fix: 'recipe' }], why: 'y: no photograph' }]);
+  ok('a stage-A failure is rebuilt with different sets, never a new cover', d.calls.redraw === 0 && d.calls.plan.length === 2);
+  ok('and dropped when the rebuild fails too', d.result.dropped);
+  said.length = 0;
+
+  const e = await run([pass(90)], { publishTargets: [], route: { path: 'skip', generated: 3 } });
+  ok('a pass the AI-photo policy keeps off TikTok, with nowhere else to go, is not queued', e.result.dropped && store.queueSize() === 0);
+  ok('and the reason says so', /tiktok\.aiPhotos/.test(e.result.why));
+  said.length = 0;
+
+  const f = await run([pass(77)], { route: { path: 'draft', generated: 2 } });
+  ok('a pass with generated photographs is queued as a TikTok draft', f.result.route === 'draft' && store.queuedItems()[0]?.tiktokDraft === true);
+
+  store.clearQueue();
+  detach();
+}
+
+/* -------------------------------------------------------------------------- */
 group('a generated photograph sends the deck to the inbox, not the feed');
 
 {

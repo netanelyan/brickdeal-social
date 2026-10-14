@@ -238,7 +238,11 @@ function listen() {
     'resent',
     'publish:next',
     'publish:at',
-    'draft:at',
+    'paused',
+    'resumed',
+    'auto:queued',
+    'auto:dropped',
+    'views:synced',
     'settings:dial',
     'settings:copy',
     'job:started',
@@ -526,11 +530,24 @@ function boardView() {
         class: 'sub',
         text: `פרסום אחרון ${ago(o.lastPublishedAt)} · כרטיס אחרון ${ago(o.lastStagedAt)}`,
       }),
+      el('span', { class: `tag ${o.mode === 'manual' ? '' : 'ok'}`, text: o.mode === 'manual' ? '✋ ידני' : '🤖 אוטומטי' }),
+      o.paused ? el('span', { class: 'tag bad', text: `⏸️ מושהה מאז ${ago(o.paused.at)}` }) : null,
       el('span', { class: 'spacer' }),
       may('act')
         ? el('button', {
+            class: `btn ${o.paused ? 'primary' : 'ghost'}`,
+            text: o.paused ? '▶️ המשך' : '⏸️ עצור הכל',
+            disabled: state.busy.has('pause'),
+            onclick: () =>
+              o.paused || confirmed('לעצור את כל הבנייה והפרסום האוטומטיים עד שימשיכו?')
+                ? act('pause', () => api(o.paused ? '/api/resume' : '/api/pause', { method: 'POST' }))
+                : null,
+          })
+        : null,
+      may('act')
+        ? el('button', {
             class: 'btn primary',
-            text: '💡 הצע מצגת',
+            text: o.mode === 'manual' ? '💡 הצע מצגת' : '🤖 בנה מצגת',
             disabled: state.busy.has('deck'),
             onclick: () => act('deck', () => api('/api/deck', { method: 'POST', body: {} })),
           })
@@ -539,7 +556,7 @@ function boardView() {
         ? el('button', {
             class: 'btn',
             text: '📤 פרסם את הבא',
-            disabled: state.busy.has('next') || !o.counts.queue,
+            disabled: state.busy.has('next') || !o.counts.queue || Boolean(o.paused),
             onclick: () => act('next', () => api('/api/queue/next', { method: 'POST' })),
           })
         : null
@@ -1582,6 +1599,11 @@ function auditView() {
     'publish:next': 'פרסם את הבא',
     'publish:at': 'פרסם מהתור',
     'draft:at': 'שלח לטיוטות',
+    paused: 'עצר הכל',
+    resumed: 'המשיך',
+    'auto:queued': 'מצגת עברה ניקוד ונכנסה לתור',
+    'auto:dropped': 'מצגת נפסלה בניקוד',
+    'views:synced': 'משך צפיות',
     retry: 'החזיר מוחזקים',
     'cleared:pending': 'ניקה ממתינים',
     'cleared:queue': 'רוקן את התור',

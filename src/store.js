@@ -88,6 +88,19 @@ const empty = {
   // come back, rather than being dropped. /retry replays them.
   held: [],
   igToken: null,
+  // The kill switch. { at, by } while /pause is in force, null otherwise.
+  // Persisted, because a pause that a restart quietly lifted would be a kill
+  // switch that works until pm2 restarts the process.
+  paused: null,
+  // { date, count }: decks the schedule started today. It was a variable in
+  // bot.js, which a restart reset to zero, and in auto mode a deck started is
+  // a deck that may post.
+  deckDay: null,
+  // Every deck the scorer judged, with its score, what happened to it, and,
+  // once the analytics job has asked Zernio, its views. Bounded; see
+  // SCORED_MAX. Separate from `published`, which is pruned to the quota window
+  // and would lose the history /score needs.
+  scored: [],
   // --- the three collections the website added ------------------------------
   //
   // All three live here, in the one file, for one reason: store.js holds the whole document in memory and saves
@@ -203,6 +216,7 @@ function load() {
   if (!s.sourceHealth || typeof s.sourceHealth !== 'object') s.sourceHealth = {};
   if (!s.sourceOff || typeof s.sourceOff !== 'object') s.sourceOff = {};
   if (!s.proposedIds || typeof s.proposedIds !== 'object') s.proposedIds = {};
+  if (!Array.isArray(s.scored)) s.scored = [];
   // The website's three. Same posture as the rest: a store written before they
   // existed opens cleanly with them empty, because "no admins yet" is the state
   // a fresh install is supposed to be in — scripts/admin.js is what leaves it.
@@ -768,6 +782,70 @@ export const publishedToday = () => {
   start.setHours(0, 0, 0, 0);
   return state.published.filter((p) => p.ts >= start.getTime()).length;
 };
+
+// --- the kill switch ------------------------------------------------------------
+
+export const pausedState = () => state.paused || null;
+
+export function setPaused(by = null) {
+  state.paused = { at: Date.now(), by };
+  save();
+  return state.paused;
+}
+
+/** Lift the pause. Returns what it was, or null if nothing was paused. */
+export function clearPaused() {
+  const was = state.paused || null;
+  state.paused = null;
+  save();
+  return was;
+}
+
+// --- decks the schedule started today ------------------------------------------
+
+export const decksStartedToday = (day) => (state.deckDay?.date === day ? state.deckDay.count : 0);
+
+export function noteDeckStarted(day) {
+  if (state.deckDay?.date !== day) state.deckDay = { date: day, count: 0 };
+  state.deckDay.count++;
+  save();
+  return state.deckDay.count;
+}
+
+// --- scores, and the views they were meant to predict ----------------------------
+
+const SCORED_MAX = 300;
+
+/** Record one judged deck. `id` is the deck id; the newest row for an id is the live one. */
+export function recordScore(entry) {
+  state.scored.push({ ts: Date.now(), views: null, viewsAt: null, ...entry });
+  if (state.scored.length > SCORED_MAX) state.scored = state.scored.slice(-SCORED_MAX);
+  save();
+}
+
+/** Update the newest row for this deck. Returns false when there is none. */
+export function updateScored(id, patch) {
+  for (let i = state.scored.length - 1; i >= 0; i--) {
+    if (state.scored[i].id === id) {
+      state.scored[i] = { ...state.scored[i], ...patch };
+      save();
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Newest first. */
+export const scoredItems = ({ limit = 100 } = {}) => [...state.scored].reverse().slice(0, limit).map((r) => ({ ...r }));
+
+/**
+ * Posts that reached the feed and have a view count: what the benchmark
+ * covers and the score-against-views check are measured on. Inbox drafts are
+ * left out, because a person finished them and their views say nothing about
+ * what the bot made.
+ */
+export const measuredPosts = () =>
+  state.scored.filter((r) => r.path === 'published' && Number.isFinite(r.views)).map((r) => ({ ...r }));
 
 // --- per-destination health --------------------------------------------------
 //

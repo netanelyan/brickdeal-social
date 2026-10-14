@@ -5,7 +5,9 @@ import * as jobs from './jobs.js';
 import { telegram as surface } from './surface.js';
 import { publishNext } from './publish.js';
 import { proposeDeck as planDeck, buildProposed, draftHook, countdownHook } from '../brick/build.js';
-import { toBrickCandidate, brickApprovalMessage } from '../brick/candidate.js';
+import { toBrickCandidate, brickApprovalMessage, routeHe } from '../brick/candidate.js';
+import { scoreDeck, decide, scoreLine } from '../brick/score.js';
+import { brickConfig } from '../brick/config.js';
 import { proposalMessage, proposalWarning } from '../brick/proposal.js';
 import { renderBrickCover, renderBrickSlideAt, coverSlide } from '../render/brickDeck.js';
 import { cachedShotFor, shotOrProduct } from '../images/homeShot.js';
@@ -219,6 +221,66 @@ export async function cyclePrivacy(key, { actor = null, tg = null } = {}) {
 }
 
 /**
+ * A new cover line on a built deck, and the cover re-rendered at every size it
+ * has, over `image`. Mutates `deck`.
+ *
+ * Shared by the button on an approval card and by the auto pipeline, which
+ * rebuilds a deck's cover when the cover is what the scorer marked down.
+ * Returns `{ ok: true, drawn }`, or `{ ok: false, hook }` when the line that
+ * came back is one this deck has already had.
+ */
+async function redrawCover(deck, image, progress = () => {}) {
+  progress('כותב שער חדש...');
+
+  // The line on screen, and any it already replaced, handed over as things
+  // not to write again. Without this the second call returns the first
+  // answer: same recipe in, same sentence out.
+  deck.pastHooks = [...new Set([...(deck.pastHooks || []), deck.hookHe].filter(Boolean))];
+
+  // A countdown redraws as a countdown: another of its numbered lines, the
+  // used ones excluded, and costing no model call at all. Only when every
+  // shape has been on this deck does it fall back to a written hook, whose
+  // swipe line still says where the countdown starts.
+  const numbered = deck.recipe === 'countdown' ? countdownHook(deck.slides, { avoid: deck.pastHooks }) : null;
+  const drawn =
+    numbered ||
+    (await draftHook(
+      {
+        kind: deck.recipe,
+        subject: deck.subject,
+        theme: deck.theme || null,
+        ceiling: deck.ceiling || null,
+        agorotCeiling: deck.agorotCeiling || null,
+        deals: (deck.slides || []).map((s) => ({
+          product: s.nameHe,
+          price: s.deal?.price,
+          comparison: s.deal?.comparison,
+        })),
+      },
+      { avoid: deck.pastHooks }
+    ));
+
+  if (drawn.hook === deck.hookHe || deck.pastHooks.includes(drawn.hook)) return { ok: false, hook: drawn.hook };
+
+  deck.hookHe = drawn.hook;
+  deck.emphasisHe = drawn.emphasis;
+  deck.hookFrom = drawn.from;
+
+  progress('מצייר את השער...');
+
+  // Every size the deck was rendered for, so the two stay in step. A cover
+  // re-drawn for TikTok alone would leave Instagram publishing the old line.
+  for (const size of ['tiktok', 'instagram']) {
+    if (!Array.isArray(deck[size]) || !deck[size].length) continue;
+    deck[size][0] = await renderBrickCover(deck, { size, image });
+  }
+  if (Array.isArray(deck.preview) && deck.preview.length) {
+    deck.preview[0] = deck[deck.instagram ? 'instagram' : 'tiktok'][0];
+  }
+  return { ok: true, drawn };
+}
+
+/**
  * A new cover line, and slide one re-drawn to carry it.
  *
  * The rest of the deck is untouched — same five slides, same photographs, same
@@ -252,57 +314,13 @@ export function newCover(key, { actor = null } = {}) {
         return { ok: false, message: msg };
       }
 
-      progress('כותב שער חדש...');
-
-      // The line on screen, and any it already replaced, handed over as things
-      // not to write again. Without this the second call returns the first
-      // answer: same recipe in, same sentence out.
-      deck.pastHooks = [...new Set([...(deck.pastHooks || []), deck.hookHe].filter(Boolean))];
-
-      // A countdown redraws as a countdown: another of its numbered lines, the
-      // used ones excluded, and costing no model call at all. Only when every
-      // shape has been on this deck does it fall back to a written hook, whose
-      // swipe line still says where the countdown starts.
-      const numbered = deck.recipe === 'countdown' ? countdownHook(deck.slides, { avoid: deck.pastHooks }) : null;
-      const drawn =
-        numbered ||
-        (await draftHook(
-          {
-            kind: deck.recipe,
-            subject: deck.subject,
-            theme: deck.theme || null,
-            ceiling: deck.ceiling || null,
-            agorotCeiling: deck.agorotCeiling || null,
-            deals: (deck.slides || []).map((s) => ({
-              product: s.nameHe,
-              price: s.deal?.price,
-              comparison: s.deal?.comparison,
-            })),
-          },
-          { avoid: deck.pastHooks }
-        ));
-
-      if (drawn.hook === deck.hookHe || deck.pastHooks.includes(drawn.hook)) {
-        const msg = `🔁 יצא אותו שער — נסה שוב\n\n"${drawn.hook}"`;
+      const redrawn = await redrawCover(deck, image, progress);
+      if (!redrawn.ok) {
+        const msg = `🔁 יצא אותו שער — נסה שוב\n\n"${redrawn.hook}"`;
         await say(msg);
-        return { ok: false, message: msg, hook: drawn.hook };
+        return { ok: false, message: msg, hook: redrawn.hook };
       }
-
-      deck.hookHe = drawn.hook;
-      deck.emphasisHe = drawn.emphasis;
-      deck.hookFrom = drawn.from;
-
-      progress('מצייר את השער...');
-
-      // Every size the deck was rendered for, so the two stay in step. A cover
-      // re-drawn for TikTok alone would leave Instagram publishing the old line.
-      for (const size of ['tiktok', 'instagram']) {
-        if (!Array.isArray(deck[size]) || !deck[size].length) continue;
-        deck[size][0] = await renderBrickCover(deck, { size, image });
-      }
-      if (Array.isArray(deck.preview) && deck.preview.length) {
-        deck.preview[0] = deck[deck.instagram ? 'instagram' : 'tiktok'][0];
-      }
+      const { drawn } = redrawn;
 
       store.updateStaging(key, { deck, card: deck.preview?.[0] || cand.card });
       const fresh = store.getStaging(key);
@@ -670,6 +688,267 @@ export function buildProposal(key, { targets = ['instagram'], actor = null } = {
 }
 
 // ---------------------------------------------------------------------------
+// Auto mode — propose, build, score, then publish or drop, with nobody tapping
+// ---------------------------------------------------------------------------
+
+/** Who decides what is posted, read on every use so a panel save takes effect. */
+export const approvalMode = () => brickConfig().approval.mode;
+
+/**
+ * Make a deck the way the current mode makes one: straight through the scorer
+ * in auto mode, as a proposal card in manual mode. The one thing /deck, the
+ * timer and the panel's button call, so none of them has to know the mode.
+ */
+export function makeDeck(opts = {}) {
+  return approvalMode() === 'manual' ? proposeDeck(opts) : autoDeck(opts);
+}
+
+// One auto deck at a time. A deck takes minutes and spends money on every
+// photograph, and two running at once would be two decks chasing the same
+// best sets on the feed.
+let autoRunning = false;
+export const autoBusy = () => autoRunning;
+
+/**
+ * Build a deck and let the scorer decide whether it is posted.
+ *
+ * propose -> build -> score. A pass is queued for the drip, which posts it no
+ * sooner than POST_INTERVAL_MINUTES after the last post. A fail is rebuilt
+ * once (see `decide` in score.js) and then dropped, with one line in Telegram
+ * saying why. Every score, the rebuilt one included, is kept on the deck and
+ * in the store.
+ *
+ * Paused or not, it builds when somebody asks: /pause stops the schedule and
+ * the drip, not the owner. A deck made while paused waits in the queue.
+ */
+export function autoDeck({ request = null, actor = null, reason = '/deck' } = {}) {
+  if (autoRunning) return { ok: false, reason: 'busy', said: '⏳ כבר נבנית מצגת — אחת בכל פעם' };
+  autoRunning = true;
+  const who = describeActor(actor);
+  const job = jobs.run(
+    'מצגת אוטומטית',
+    (progress) =>
+      runOverridden(reason, async () => {
+        try {
+          return await autoPipeline({ request, actor, progress });
+        } finally {
+          autoRunning = false;
+        }
+      }),
+    { actor: who, meta: { request } }
+  );
+  return {
+    ok: true,
+    job,
+    said: store.pausedState() ? '⏳ בונה ומנקד — מושהה, אז מה שיעבור ימתין בתור עד /resume' : '⏳ בונה ומנקד',
+  };
+}
+
+/** A stage-A failure, for a deck that could not even be wrapped for the scorer. */
+const unbuildable = (why) => ({
+  at: new Date().toISOString(),
+  stage: 'A',
+  pass: false,
+  total: null,
+  sub: null,
+  threshold: brickConfig().score.threshold,
+  gates: [{ gate: 'build', why, fix: 'recipe' }],
+  why,
+});
+
+/** The score as it is kept on the deck and in the store: everything but the noise. */
+const compact = (r, attempt, rebuilt) => ({
+  attempt,
+  rebuilt: rebuilt || null,
+  at: r.at,
+  stage: r.stage,
+  pass: r.pass,
+  total: r.total,
+  sub: r.sub,
+  weakest: r.weakest || null,
+  notes: r.notes || null,
+  model: r.model || null,
+  threshold: r.threshold,
+  why: r.why || null,
+});
+
+/**
+ * The pipeline itself. Its five steps are handed in by the suite, which drives
+ * the rebuild loop with fakes: the real build generates photographs and
+ * renders in a browser, and none of that is what the loop's logic is about.
+ */
+export async function autoPipeline({ request = null, actor = null, progress = () => {} } = {}, deps = {}) {
+  const {
+    plan = planDeck,
+    build = buildProposed,
+    wrap = toBrickCandidate,
+    score = scoreDeck,
+    redraw = redrawCover,
+    targets = targetsForKind('deck'),
+  } = deps;
+  if (!targets.length) throw new Error('no deck destination is configured');
+
+  progress(request ? `קורא את הפיד — ${request}` : 'קורא את הפיד');
+  let proposal;
+  try {
+    proposal = await plan(request || null);
+  } catch (e) {
+    const why = e.feedDropped?.length
+      ? ['', ...e.feedDropped.slice(0, 5).map((d) => `   ✗ ${d.id}: ${String(d.why).slice(0, 90)}`)].join('\n')
+      : '';
+    await say(notify.withDetail(`❌ לא נבנתה מצגת${why}`, e));
+    throw e;
+  }
+
+  const scores = [];
+  let built = null;
+  let cand = null;
+  let rebuilt = null;
+  let result = null;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    if (!built) {
+      progress(`${attempt > 1 ? 'בונה מחדש' : 'בונה'} — ${proposal.subject}`);
+      built = await build(proposal, { onProgress: (s) => progress(s) });
+      try {
+        cand = await wrap(built, { targets });
+      } catch (e) {
+        cand = null;
+        result = unbuildable(e.message);
+      }
+    }
+    if (cand) {
+      progress('מנקד...');
+      result = store.hasPublished(cand.id) ? unbuildable(`this exact deck was already published (${cand.id})`) : await score(cand);
+    }
+    scores.push(compact(result, attempt, rebuilt));
+    console.log(`auto: attempt ${attempt} · ${built.recipe} · ${scoreLine(result)}`);
+
+    const next = decide(result, { attempt });
+    if (next === 'publish' || next === 'drop') break;
+
+    // A new cover is drawn over the photograph the deck was built with, which
+    // the built deck still holds; the candidate's copy was stripped to keep
+    // the store small. With no photograph to draw on, different sets instead.
+    const hero = coverSlide(built);
+    if (next === 'cover' && cand && hero?.image?.src) {
+      rebuilt = 'cover';
+      const redrawn = await redraw(cand.deck, hero.image, progress);
+      if (redrawn.ok) {
+        built.hookHe = cand.deck.hookHe;
+        continue;
+      }
+    }
+    rebuilt = 'recipe';
+    try {
+      proposal = await plan(request || null, { avoidRecipe: built.recipe });
+    } catch (e) {
+      // Nothing else on the feed to build from. The first deck's score
+      // stands, and it is dropped on it.
+      console.log(`auto: no second deck to build — ${e.message}`);
+      break;
+    }
+    built = null;
+    cand = null;
+  }
+
+  const final = scores.at(-1);
+  if (cand) {
+    cand.deck.score = final;
+    cand.deck.scores = scores;
+  }
+  const deckId = cand?.id || null;
+  const headline = cand?.headline || proposal.subject;
+
+  // A pass that the AI-photo policy kept off TikTok, with nowhere else to go,
+  // is not a post. Said as a drop with its reason rather than queued to
+  // nowhere.
+  const nowhere = final.pass && cand && !(cand.publishTargets || []).length;
+  if (final.pass && !nowhere) {
+    store.enqueue({ ...cand, pendingTargets: cand.publishTargets });
+    store.noteStagedAt();
+    store.recordScore({
+      id: deckId,
+      headline,
+      hook: cand.deck.hookHe,
+      recipe: cand.deck.recipe,
+      total: final.total,
+      sub: final.sub,
+      threshold: final.threshold,
+      attempts: scores.length,
+      scores,
+      route: cand.tiktokRoute?.path || null,
+      path: 'queued',
+    });
+    record('auto:queued', actor, { key: deckId, headline, score: final.total, route: cand.tiktokRoute?.path || null });
+    // Which path the deck took, in the log. Telegram hears about it once, when
+    // it is actually posted.
+    console.log(`auto: queued ${deckId} · score ${final.total} · ${cand.tiktokRoute ? routeHe(cand.tiktokRoute) : 'no TikTok'}`);
+    return { ok: true, queued: true, id: deckId, headline, score: final.total, route: cand.tiktokRoute?.path || null };
+  }
+
+  const why = nowhere ? routeHe(cand.tiktokRoute) : final.why;
+  store.noteStagedAt();
+  store.recordScore({
+    id: deckId,
+    headline,
+    hook: cand?.deck?.hookHe || null,
+    recipe: built?.recipe || proposal.recipe,
+    total: final.total,
+    sub: final.sub,
+    threshold: final.threshold,
+    attempts: scores.length,
+    scores,
+    route: cand?.tiktokRoute?.path || null,
+    path: 'dropped',
+    reason: why,
+  });
+  record('auto:dropped', actor, { key: deckId, headline, score: final.total, why });
+  console.log(`auto: dropped ${deckId || proposal.subject} · ${why}`);
+  await say(`🗑️ נפסלה${scores.length > 1 ? ' (גם אחרי בנייה מחדש)' : ''}: ${headline} · ${final.total != null ? `ציון ${final.total}/${final.threshold}` : `שלב ${final.stage}`}\n${why}`);
+  return { ok: false, dropped: true, id: deckId, headline, score: final.total, why };
+}
+
+// ---------------------------------------------------------------------------
+// The kill switch
+// ---------------------------------------------------------------------------
+
+/**
+ * Stop everything that happens without a person: the timer's decks and the
+ * drip. Persisted, so a restart does not lift it. Nothing in the queue is
+ * lost; it waits.
+ */
+export function pause({ actor = null } = {}) {
+  if (store.pausedState()) return { ok: true, already: true, said: '⏸️ כבר מושהה · /resume' };
+  store.setPaused(describeActor(actor));
+  record('paused', actor, {});
+  return { ok: true, said: `⏸️ מושהה — לא נבנה ולא יפורסם כלום אוטומטית עד /resume (${store.queueSize()} בתור ממתינים)` };
+}
+
+export function resume({ actor = null } = {}) {
+  const was = store.clearPaused();
+  if (!was) return { ok: true, already: true, said: '▶️ לא היה מושהה' };
+  record('resumed', actor, { pausedAt: was.at });
+  return { ok: true, said: `▶️ חזר לפעול · ${store.queueSize()} בתור` };
+}
+
+const PAUSED = { ok: false, reason: 'paused', said: '⏸️ מושהה — /resume קודם' };
+
+/**
+ * Whether the drip may publish now.
+ *
+ * Never while paused, never sooner than the interval after its own last
+ * attempt, and never sooner than the interval after the last post of any
+ * kind. The last one is the rule auto mode rests on: a post somebody pushed
+ * out by hand resets the clock for the automatic one behind it.
+ */
+export function dripDue({ now = Date.now(), lastDripAt, lastPublishedAt = null, intervalMs, paused = null }) {
+  if (paused) return false;
+  if (now - lastDripAt < intervalMs) return false;
+  return lastPublishedAt == null || now - lastPublishedAt >= intervalMs;
+}
+
+// ---------------------------------------------------------------------------
 // The queue
 // ---------------------------------------------------------------------------
 
@@ -682,6 +961,7 @@ export function buildProposal(key, { targets = ['instagram'], actor = null } = {
  * difference between a deliberate double-post and one you will be surprised by.
  */
 export async function publishNow({ actor = null } = {}) {
+  if (store.pausedState()) return PAUSED;
   const intervalMs = store.setting('POST_INTERVAL_MINUTES') * 60_000;
   const sinceLast = store.lastPublishedAt() ? Date.now() - store.lastPublishedAt() : null;
   const ok = await runOverridden('/next', async () => {
@@ -705,6 +985,7 @@ export async function publishNow({ actor = null } = {}) {
  * subtract one is how the wrong post gets published.
  */
 export async function publishAt(n, { actor = null } = {}) {
+  if (store.pausedState()) return PAUSED;
   // Taken out BEFORE publishing, so a slow publish cannot have the drip pick the
   // same post up underneath it. If publishing then fails, the post follows the
   // ordinary failure path — held or requeued — exactly as it would have from the
@@ -769,6 +1050,10 @@ export async function retryHeld({ actor = null } = {}) {
 
   if (!rows.length) {
     return { ok: true, count: 0, said: 'אין מה להחזיר לתור. סימנתי את כל היעדים כתקינים — הפרסום הבא ינסה שוב.' };
+  }
+  // Back in the queue either way. Paused, they wait there for /resume.
+  if (store.pausedState()) {
+    return { ok: true, count: rows.length, said: `🔁 ${rows.length} פוסטים חזרו לתור · מושהה, יפורסמו אחרי /resume` };
   }
   const ok = await publishNext();
   return {

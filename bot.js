@@ -99,7 +99,9 @@ if (!OWNER_ID) {
   process.exit(1);
 }
 if (!STAGING_CHAT_ID) {
-  console.error('Set STAGING_CHAT_ID in .env — nothing publishes without an approval tap, so there must be somewhere to send approvals.');
+  console.error(
+    'Set STAGING_CHAT_ID in .env — it is where every post is reported in auto mode, and where approvals are sent in manual mode.'
+  );
   process.exit(1);
 }
 
@@ -567,8 +569,10 @@ bot.command('status', async (ctx) => {
       postIntervalMinutes: minutes(),
       stagedToday: store.stagedToday(day) - store.rejectedToday(day),
       rejectedToday: store.rejectedToday(day),
-      decksToday,
+      decksToday: store.decksStartedToday(day),
       decksPerDay: decksPerDay(),
+      mode: ops.approvalMode(),
+      paused: store.pausedState(),
       heldCount: store.heldCount(),
       targetHealth: Object.fromEntries(liveTargets().map((t) => [t, store.targetHealth(t)])),
       targets: liveTargets(),
@@ -645,9 +649,17 @@ bot.command('igquota', async (ctx) => {
  * a complaint.
  */
 bot.command('deck', async (ctx) => {
-  const result = ops.proposeDeck({ request: argOf(ctx, 'deck'), actor: actorOf(ctx) });
+  // Built and scored in auto mode, proposed in manual mode. See makeDeck.
+  const result = ops.makeDeck({ request: argOf(ctx, 'deck'), actor: actorOf(ctx) });
   await ctx.reply(result.said);
 });
+
+/**
+ * The kill switch. Stops the timer's decks and the drip until /resume, and
+ * survives a restart. /deck still builds when asked; what it makes waits.
+ */
+bot.command('pause', (ctx) => ctx.reply(ops.pause({ actor: actorOf(ctx) }).said));
+bot.command('resume', (ctx) => ctx.reply(ops.resume({ actor: actorOf(ctx) }).said));
 
 bot.command('tiktok', async (ctx) => {
   if (!zernioConfigured()) {
@@ -712,12 +724,15 @@ bot.command('help', (ctx) =>
   ctx.reply(
     [
       'פקודות:',
-      '/deck — מציע מצגת מהדילים שיש עכשיו',
+      '/deck — מצגת מהדילים שיש עכשיו (במצב אוטומטי: נבנית, מנוקדת ומתפרסמת או נפסלת)',
       '/deck harry-potter — מצגת על נושא מסוים',
       '/deck 100 — מצגת של סטים עד 100 ₪',
       '/deck אגורות — מצגת לפי מחיר לחלק (או "/deck 8 אגורות")',
       '/deck דירוג — הסטים שהכי חוסכים, ממקום 8 עד מקום 1 (או "/deck דירוג רכבים")',
       '/deck בונסאי — מצגת על סט מסוים',
+      '',
+      '/pause — עוצר הכל: לא נבנה ולא מתפרסם כלום אוטומטית',
+      '/resume — ממשיך',
       '',
       '/site — כתובת אתר הניהול ומצב החשבונות',
       '/status — סטטוס מלא',
@@ -756,17 +771,16 @@ let quietAlertSent = false;
 const bootedAt = Date.now();
 
 /**
- * How many deck proposals may arrive unasked in a day.
+ * How many decks the schedule may start in a day.
  *
  * Capped two ways. DECKS_PER_DAY is the day's budget, and a ceiling on the
- * backlog stops them accumulating: three unanswered proposals sitting in the
- * chat is a signal to stop offering, not to offer a fourth.
+ * backlog stops them accumulating: unanswered proposals in manual mode, or
+ * scored decks waiting in the queue in auto mode. Three waiting is a signal to
+ * stop making them, not to make a fourth.
  *
- * A proposal is free — the feed is a file and the prices are cached — so what
- * this paces is your attention rather than any cost.
+ * The count is in the store now. It was a variable here, which every restart
+ * reset to zero, and in auto mode a deck started is a deck that may post.
  */
-let deckDay = null;
-let decksToday = 0;
 let lastDeckSuggestAt = 0;
 // When the drip last fired. The drip used to be its own setInterval, which meant
 // POST_INTERVAL_MINUTES was captured at boot and a change to it did nothing until
@@ -837,30 +851,39 @@ function tick() {
     refreshToken().catch(() => {});
   }
 
-  // Deck proposals through the day, in waking hours. Only the PROPOSAL - the
-  // feed is read and the sets are priced, both of which are free, and nothing
-  // is written or generated until you tap. Spaced by the gather interval so
-  // they arrive through the day rather than three at once at 08:00.
-  if (deckDay !== day) {
-    deckDay = day;
-    decksToday = 0;
-  }
+  // The kill switch. Nothing below runs while it is on: no deck is started and
+  // nothing is published. The token refresh above and the quiet alarm below
+  // still run, because neither of them posts anything.
+  const paused = store.pausedState();
+
+  // Decks through the day, in waking hours, spaced by the gather interval so
+  // they arrive through the day rather than three at once at 08:00. In manual
+  // mode that is a free proposal waiting for a tap; in auto mode it is a deck
+  // built, scored, and queued or dropped.
+  const auto = ops.approvalMode() !== 'manual';
+  const backlog = auto ? store.queueSize() : store.proposalSize();
   if (
+    !paused &&
     inHours &&
     decksPerDay() > 0 &&
-    decksToday < decksPerDay() &&
-    store.proposalSize() < deckBacklogMax() &&
+    store.decksStartedToday(day) < decksPerDay() &&
+    backlog < deckBacklogMax() &&
+    !(auto && ops.autoBusy()) &&
     Date.now() - lastDeckSuggestAt >= gatherIntervalMs()
   ) {
     lastDeckSuggestAt = Date.now();
-    decksToday += 1;
-    // `timer` rather than a person, so the audit trail distinguishes a proposal
-    // the schedule offered from one somebody asked for.
-    ops.proposeDeck({ actor: { kind: 'timer' }, reason: 'timer' });
+    store.noteDeckStarted(day);
+    // `timer` rather than a person, so the audit trail distinguishes a deck
+    // the schedule made from one somebody asked for.
+    ops.makeDeck({ actor: { kind: 'timer' }, reason: 'timer' });
   }
 
-  // The drip.
-  if (Date.now() - lastDripAt >= intervalMs()) {
+  // The drip, never sooner than POST_INTERVAL_MINUTES after the last post as
+  // well as after the last attempt. A post somebody pushed out by hand with
+  // /next resets the clock for the automatic one behind it, so the feed never
+  // gets two posts closer together than the interval without a person having
+  // decided it.
+  if (ops.dripDue({ lastDripAt, lastPublishedAt: store.lastPublishedAt(), intervalMs: intervalMs(), paused })) {
     lastDripAt = Date.now();
     publishNext().catch((e) => console.error('publish error:', e.message));
   }
@@ -919,7 +942,12 @@ async function main() {
       );
     }
   }
-  console.log('   telegram: approval only — nothing publishes to a channel');
+  console.log(
+    ops.approvalMode() === 'manual'
+      ? '   telegram: approval only — nothing publishes to a channel'
+      : '   mode: AUTO — decks are scored and posted with no tap; telegram gets one line per post'
+  );
+  if (store.pausedState()) console.log(`   ⏸️  PAUSED since ${new Date(store.pausedState().at).toISOString()} — /resume`);
   console.log(
     `   photographs: ${
       imagesEnabled() ? 'generated at home-shot quality' : 'NOT configured — slides fall back to catalogue images'
@@ -959,6 +987,9 @@ async function main() {
         targets: liveTargets(),
         images: imagesEnabled(),
       }),
+      `${ops.approvalMode() === 'manual' ? '✋ ידני — כל פוסט מחכה לאישור' : '🤖 אוטומטי — מנקד ומפרסם בלי אישור'}${
+        store.pausedState() ? ' · ⏸️ מושהה (/resume)' : ''
+      }`,
       // Said at boot rather than only on /site, because an install with no
       // accounts has a panel nobody can reach and no other moment where that
       // becomes apparent.

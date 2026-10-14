@@ -1,7 +1,7 @@
 {
   "name": "brickdeal-social",
   "version": "0.1.0",
-  "description": "BrickDeal social pipeline — deal feed to Hebrew TikTok slideshow, with a human tap in the middle.",
+  "description": "BrickDeal social pipeline — deal feed to Hebrew TikTok slideshow, scored and posted through Zernio, with a kill switch.",
   "type": "module",
   "private": true,
   "engines": {
