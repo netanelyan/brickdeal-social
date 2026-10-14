@@ -10,6 +10,7 @@ import { agorotPerPiece } from './recipes.js';
 import { MAX_HOOK_WORDS } from './build.js';
 import { benchmarks, benchmarkLines } from './benchmarks.js';
 import { renderToJpeg } from '../render/index.js';
+import { measuredPosts } from '../store.js';
 
 // Whether a built deck is good enough to post without anybody looking at it.
 //
@@ -302,7 +303,7 @@ export async function modelScore(cand, { api = null, sheet = null, weights = bri
       model,
       max_tokens: 16000,
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCORE_SCHEMA } },
-      system: [{ type: 'text', text: scoreSystem(), cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: scoreSystem(benchmarks(measuredPosts())), cache_control: { type: 'ephemeral' } }],
       messages: [
         {
           role: 'user',

@@ -19,7 +19,7 @@ import {
 } from './recipes.js';
 import { THEME_HE } from './themes.js';
 import { shotOrProduct } from '../images/homeShot.js';
-import { hasPublished, wasProposed, noteProposed } from '../store.js';
+import { hasPublished, wasProposed, noteProposed, measuredPosts } from '../store.js';
 import { benchmarks, benchmarkLines } from './benchmarks.js';
 
 // Feed to deck.
@@ -207,7 +207,9 @@ export async function draftHook(recipe, { rand = Math.random, avoid = [] } = {})
       model: MODEL,
       max_tokens: 700,
       output_config: { effort: 'low', format: { type: 'json_schema', schema: HOOK_SCHEMA } },
-      system: [{ type: 'text', text: hookSystem(), cache_control: { type: 'ephemeral' } }],
+      // The measured covers: this channel's own top and bottom three once
+      // enough of its posts have views, the reference account's until then.
+      system: [{ type: 'text', text: hookSystem(benchmarks(measuredPosts())), cache_control: { type: 'ephemeral' } }],
       messages: [
         {
           role: 'user',

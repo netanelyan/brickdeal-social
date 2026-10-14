@@ -314,6 +314,7 @@ const loaders = {
   queue: async () => ({ queue: await api('/api/queue'), held: await api('/api/held') }),
   held: async () => ({ held: await api('/api/held') }),
   published: async () => ({ published: await api('/api/published') }),
+  scores: async () => ({ scores: await api('/api/scores') }),
   feed: async () => ({ feed: await api('/api/feed') }),
   settings: async () => ({ config: await api('/api/config') }),
   admins: async () => ({ admins: await api('/api/admins') }),
@@ -364,6 +365,7 @@ const TABS = [
   { id: 'queue', label: 'תור', icon: '📦', count: (o) => o.counts.queue },
   { id: 'held', label: 'מוחזקים', icon: '⏸️', count: (o) => o.counts.held, bad: true },
   { id: 'published', label: 'פורסם', icon: '📤' },
+  { id: 'scores', label: 'ציונים', icon: '🧮' },
   { id: 'feed', label: 'פיד', icon: '🧱' },
   { id: 'settings', label: 'הגדרות', icon: '⚙️', needs: 'configure' },
   { id: 'admins', label: 'מנהלים', icon: '👥', needs: 'accounts' },
@@ -416,6 +418,7 @@ function render() {
       queue: queueView,
       held: heldView,
       published: publishedView,
+      scores: scoresView,
       feed: feedView,
       settings: settingsView,
       admins: adminsView,
@@ -1253,6 +1256,92 @@ function publishedView() {
           p.telegram ? el('span', { class: 'tag ok', text: 'טלגרם' }) : null
         ),
         el('td', { class: 'meta', text: [p.topic, p.place].filter(Boolean).join(' · ') || '—' })
+      )
+    );
+  }
+  box.append(el('div', { class: 'card flush' }, el('div', { class: 'wrap' }, table)));
+  return box;
+}
+
+// ---------------------------------------------------------------------------
+// Scores against views
+// ---------------------------------------------------------------------------
+
+function scoresView() {
+  const data = state.data.scores;
+  const box = el(
+    'div',
+    {},
+    el(
+      'div',
+      { class: 'head' },
+      el('h1', { text: 'ציונים' }),
+      el('span', { class: 'sub', text: 'האם הציון של המצגת מנבא כמה יצפו בה' }),
+      el('span', { class: 'spacer' }),
+      may('act')
+        ? el('button', {
+            class: 'btn small',
+            text: '📊 משוך צפיות עכשיו',
+            disabled: state.busy.has('views'),
+            onclick: () => act('views', () => api('/api/scores/sync', { method: 'POST' })),
+          })
+        : null
+    )
+  );
+  if (!data) return box.append(el('div', { class: 'empty', text: 'טוען…' })), box;
+
+  // The verdict first, in words, because it is the one thing on the page that
+  // says whether the rest of it is worth reading.
+  box.append(
+    el(
+      'div',
+      { class: 'card' },
+      el('p', {
+        class: `note ${data.verdict.state === 'no' ? 'bad' : ''}`,
+        text: `${data.verdict.state === 'yes' ? '✅' : data.verdict.state === 'no' ? '❌' : '⏳'} ${data.verdict.he}`,
+      }),
+      el('div', {
+        class: 'meta',
+        text: [
+          data.rho == null ? `ρ: אין מספיק נתונים (${data.n} נמדדו)` : `ρ = ${data.rho.toFixed(2)} על ${data.n} פוסטים`,
+          `סף ${data.threshold}`,
+          `${data.dropped} נפסלו`,
+          `${data.drafts} יצאו כטיוטה`,
+          data.lastSyncAt ? `צפיות עודכנו ${ago(data.lastSyncAt)}` : 'צפיות עוד לא נמשכו',
+        ].join(' · '),
+      })
+    )
+  );
+
+  if (!data.posts.length) return box.append(el('div', { class: 'empty', text: 'עוד אין פוסטים מנוקדים שפורסמו' })), box;
+
+  const table = el(
+    'table',
+    { class: 'list' },
+    el('tr', {}, el('th', { text: 'מתי' }), el('th', { text: 'ציון' }), el('th', { text: 'צפיות' }), el('th', { text: 'שער' }), el('th', { text: 'חלקים' }))
+  );
+  for (const p of data.posts) {
+    table.append(
+      el(
+        'tr',
+        {},
+        el('td', { class: 'meta', text: p.publishedAt ? clock(p.publishedAt) : '—' }),
+        el('td', {}, el('b', { text: p.score == null ? '—' : String(p.score) })),
+        el('td', { text: p.views == null ? 'עוד לא נמדד' : p.views.toLocaleString('en-US') }),
+        // A link only when it is https: the URL comes from Zernio, and a
+        // javascript: URL in an href is code that runs on click.
+        el(
+          'td',
+          {},
+          /^https:\/\//.test(p.url || '')
+            ? el('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer', text: p.hook || p.headline || '—' })
+            : el('span', { text: p.hook || p.headline || '—' })
+        ),
+        el(
+          'td',
+          { class: 'meta' },
+          p.sub ? `שער ${p.sub.hook} · שקופית ${p.sub.slide1} · תמונות ${p.sub.photos} · חיסכון ${p.sub.savings} · גיוון ${p.sub.variety}` : '—'
+        )
       )
     );
   }

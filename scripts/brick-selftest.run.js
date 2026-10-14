@@ -2083,6 +2083,82 @@ group('auto mode — publish, rebuild once, or drop');
 }
 
 /* -------------------------------------------------------------------------- */
+group('closing the loop — views against scores, and the covers fed back');
+
+{
+  const { spearman, scoreboard, chanceBar, MIN_POSTS } = await import('../src/ops/scoreboard.js');
+  const { benchmarks, REFERENCE, OWN_MIN } = await import('../src/brick/benchmarks.js');
+  const { measuredBlock } = await import('../src/brick/build.js');
+  const { scoreSystem } = await import('../src/brick/score.js');
+
+  eq('a perfect ordering correlates at 1', spearman([1, 2, 3, 4], [10, 20, 30, 400]), 1);
+  eq('a reversed one at -1', spearman([1, 2, 3, 4], [40, 30, 20, 10]), -1);
+  eq('two points are not a correlation', spearman([1, 2], [1, 2]), null);
+  ok('the chance bar falls as posts are added', chanceBar(20) > chanceBar(40) && Math.abs(chanceBar(20) - 0.377) < 0.01);
+
+  const posts = (n, viewsOf) =>
+    Array.from({ length: n }, (_, i) => ({ id: `d${i}`, total: 60 + i, views: viewsOf(i), hook: `שער ${i}`, path: 'published' }));
+  eq('under twenty measured posts it is too early to say', scoreboard(posts(12, (i) => 100 * i)).verdict.state, 'early');
+  const flat = scoreboard(posts(MIN_POSTS, (i) => [500, 120, 900, 300, 450][i % 5]));
+  eq('with twenty and no relation, it says the score does not predict views', flat.verdict.state, 'no');
+  ok('in words', flat.verdict.he.startsWith('הציון לא מנבא צפיות'));
+  eq('with twenty that line up, it says the score predicts them', scoreboard(posts(MIN_POSTS, (i) => 100 + 50 * i)).verdict.state, 'yes');
+  const unmeasured = scoreboard([...posts(3, (i) => i), { id: 'x', total: 80, views: null }]);
+  eq('a post with no views yet is listed but not counted', `${unmeasured.posts.length}/${unmeasured.n}`, '4/3');
+
+  eq('with too few measured posts of its own, the prompts use the reference', benchmarks(posts(OWN_MIN - 1, (i) => i)), REFERENCE);
+  const own = benchmarks(posts(OWN_MIN + 2, (i) => (i * 5) % 12));
+  eq('with enough, its own', own.source, 'own');
+  eq('the top three by real views', own.winners.map((w) => w.views).join(','), '11,10,9');
+  eq('and the bottom three', own.losers.map((w) => w.views).join(','), '0,1,2');
+  ok('the hook prompt prints them', measuredBlock(own).includes(`${own.winners[0].text}    11 views`));
+  ok('so does the judge', scoreSystem(own).includes(`${own.losers[0].text}    0 views`));
+  ok('and stops quoting the reference account', !scoreSystem(own).includes('208,700'));
+}
+
+{
+  const store = await import('../src/store.js');
+  const ops = await import('../src/ops/marketing.js');
+  const jobs = await import('../src/ops/jobs.js');
+  const z = await import('../src/publish/zernio.js');
+
+  const saved = Object.fromEntries(['ZERNIO_API_KEY', 'ZERNIO_TIKTOK_ACCOUNT_ID', 'CARD_PUBLIC_BASE_URL'].map((k) => [k, process.env[k]]));
+  process.env.ZERNIO_API_KEY = 'test-key';
+  process.env.ZERNIO_TIKTOK_ACCOUNT_ID = 'acc_tiktok_1';
+  process.env.CARD_PUBLIC_BASE_URL = 'https://cards.example.co';
+
+  store.recordScore({ id: 'v1', hook: 'שער אחד', total: 81, path: 'published', zernioPostId: 'zp-v1', publishedAt: Date.now() - 2 * DAY });
+  store.recordScore({ id: 'v2', hook: 'שער שניים', total: 72, path: 'draft', zernioPostId: 'zp-v2', publishedAt: Date.now() - DAY });
+  let asked = null;
+  z.setClient({
+    analytics: async (query) => {
+      asked = query;
+      return {
+        posts: [
+          { _id: 'zp-v1', platformPostUrl: 'https://www.tiktok.com/@b/photo/1', analytics: { views: 1234, likes: 50, comments: 3, shares: 2 } },
+          { postId: 'zp-v2', analytics: { views: 99 } },
+        ],
+        pagination: { pages: 1 },
+      };
+    },
+  });
+  const started = ops.syncViews({ actor: { kind: 'timer' } });
+  for (let i = 0; i < 50 && jobs.get(started.job.id)?.status === 'running'; i++) await new Promise((r) => setTimeout(r, 10));
+  eq('the views job asks Zernio about TikTok', asked?.platform, 'tiktok');
+  const v1 = store.scoredItems({ limit: 10 }).find((r) => r.id === 'v1');
+  eq('and keeps the views next to the score', v1?.views, 1234);
+  eq('with the link TikTok gave the post', v1?.url, 'https://www.tiktok.com/@b/photo/1');
+  eq('an inbox draft is not measured', store.scoredItems({ limit: 10 }).find((r) => r.id === 'v2')?.views, null);
+  ok('and a measured post is what the benchmark list is built from', store.measuredPosts().some((p) => p.id === 'v1'));
+
+  z.setClient(null);
+  for (const [k, v] of Object.entries(saved)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 group('a generated photograph sends the deck to the inbox, not the feed');
 
 {

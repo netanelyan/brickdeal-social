@@ -7,6 +7,7 @@ import { publishNext } from './publish.js';
 import { proposeDeck as planDeck, buildProposed, draftHook, countdownHook } from '../brick/build.js';
 import { toBrickCandidate, brickApprovalMessage, routeHe } from '../brick/candidate.js';
 import { scoreDeck, decide, scoreLine } from '../brick/score.js';
+import { zernioConfigured, fetchViews } from '../publish/zernio.js';
 import { brickConfig } from '../brick/config.js';
 import { proposalMessage, proposalWarning } from '../brick/proposal.js';
 import { renderBrickCover, renderBrickSlideAt, coverSlide } from '../render/brickDeck.js';
@@ -907,6 +908,54 @@ export async function autoPipeline({ request = null, actor = null, progress = ()
   console.log(`auto: dropped ${deckId || proposal.subject} · ${why}`);
   await say(`🗑️ נפסלה${scores.length > 1 ? ' (גם אחרי בנייה מחדש)' : ''}: ${headline} · ${final.total != null ? `ציון ${final.total}/${final.threshold}` : `שלב ${final.stage}`}\n${why}`);
   return { ok: false, dropped: true, id: deckId, headline, score: final.total, why };
+}
+
+// ---------------------------------------------------------------------------
+// Views, for the check that the score means anything
+// ---------------------------------------------------------------------------
+
+/**
+ * Ask Zernio how many views each scored TikTok post has, and keep them next
+ * to its score. Run once a day by the timer, and from the panel's button.
+ *
+ * Only posts that reached the feed are asked about. An inbox draft has no
+ * TikTok id until a person posts it, and Zernio never learns that it did.
+ */
+export function syncViews({ actor = null } = {}) {
+  if (!zernioConfigured()) return { ok: false, reason: 'not-configured', said: 'Zernio לא מוגדר' };
+  const job = jobs.run(
+    'צפיות מ-Zernio',
+    async (progress) => {
+      const tracked = store.scoredItems({ limit: 300 }).filter((r) => r.path === 'published' && r.zernioPostId);
+      if (!tracked.length) return { ok: true, updated: 0, of: 0 };
+      // From the oldest tracked post, but never more than a year back: the
+      // analytics endpoint refuses a wider range.
+      const oldest = Math.min(...tracked.map((r) => r.publishedAt || r.ts));
+      const from = new Date(Math.max(oldest - 86_400_000, Date.now() - 365 * 86_400_000));
+      progress(`שואל על ${tracked.length} פוסטים`);
+      const rows = await fetchViews({ fromDate: localDay(from), toDate: localDay() });
+
+      let updated = 0;
+      for (const r of tracked) {
+        const hit = rows.find((v) => v.ids.includes(r.zernioPostId));
+        if (!hit || hit.views == null) continue;
+        store.updateScored(r.id, {
+          views: hit.views,
+          likes: hit.likes,
+          comments: hit.comments,
+          shares: hit.shares,
+          url: hit.url || r.url || null,
+          viewsAt: Date.now(),
+        });
+        updated++;
+      }
+      record('views:synced', actor, { updated, of: tracked.length });
+      console.log(`views: ${updated}/${tracked.length} posts measured`);
+      return { ok: true, updated, of: tracked.length };
+    },
+    { actor: describeActor(actor) }
+  );
+  return { ok: true, job, said: '📊 מושך צפיות מ-Zernio...' };
 }
 
 // ---------------------------------------------------------------------------

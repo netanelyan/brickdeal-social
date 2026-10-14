@@ -39,7 +39,7 @@ export function benchmarks(measured = []) {
     .filter((p) => p.hook && Number.isFinite(p.views))
     .sort((a, b) => b.views - a.views);
   if (own.length < OWN_MIN) return REFERENCE;
-  const row = (p) => ({ text: p.hook, views: p.views, score: Number.isFinite(p.score) ? p.score : null });
+  const row = (p) => ({ text: p.hook, views: p.views, score: Number.isFinite(p.total) ? p.total : null });
   return {
     source: 'own',
     n: own.length,

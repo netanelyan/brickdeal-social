@@ -10,6 +10,7 @@ import { instagramConfigured, tokenDaysLeft, authMode } from '../publish/instagr
 import { zernioConfigured, privacyHe, TIKTOK_DAILY_CAP } from '../publish/zernio.js';
 import { configured as imagesEnabled } from '../images/homeShot.js';
 import { brickConfig } from '../brick/config.js';
+import { scoreboard } from './scoreboard.js';
 
 // What is going on, as data rather than as a message.
 //
@@ -311,3 +312,21 @@ export const marketingConfig = () => {
 };
 
 export const audit = ({ limit = 100 } = {}) => store.auditTrail({ limit });
+
+/**
+ * Score against views for the last posts that reached the TikTok feed, with
+ * the correlation and its verdict. /score and the panel both read this.
+ */
+export function scores({ limit = 30 } = {}) {
+  const all = store.scoredItems({ limit: 300 });
+  const board = scoreboard(all.filter((r) => r.path === 'published').slice(0, limit));
+  return {
+    ...board,
+    // What else the scorer did in the same stretch, so a quiet week of drops
+    // is visible next to the posts.
+    dropped: all.filter((r) => r.path === 'dropped').length,
+    drafts: all.filter((r) => r.path === 'draft').length,
+    lastSyncAt: all.reduce((t, r) => Math.max(t, r.viewsAt || 0), 0) || null,
+    threshold: brickConfig().score.threshold,
+  };
+}

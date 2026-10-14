@@ -659,6 +659,35 @@ bot.command('deck', async (ctx) => {
  * survives a restart. /deck still builds when asked; what it makes waits.
  */
 bot.command('pause', (ctx) => ctx.reply(ops.pause({ actor: actorOf(ctx) }).said));
+
+/**
+ * Score against views, for the last 30 posts that reached the feed, and
+ * whether the score predicts anything. The verdict line is the point.
+ */
+bot.command('score', (ctx) => {
+  const s = views.scores({ limit: 30 });
+  if (!s.posts.length) {
+    return ctx.reply(`🧮 עוד אין פוסטים מנוקדים שפורסמו${s.dropped ? ` · ${s.dropped} נפסלו` : ''}`);
+  }
+  const lines = s.posts.map(
+    (p) => `${p.score ?? '—'} → ${p.views == null ? 'עוד לא נמדד' : `${p.views.toLocaleString('en-US')} צפיות`} · ${String(p.hook || p.headline || '').slice(0, 40)}`
+  );
+  ctx.reply(
+    [
+      `🧮 ציון מול צפיות · ${s.posts.length} הפוסטים האחרונים (סף ${s.threshold})`,
+      '',
+      ...lines,
+      '',
+      s.rho == null ? `ρ: אין מספיק נתונים (${s.n} נמדדו)` : `ρ = ${s.rho.toFixed(2)} על ${s.n} פוסטים שנמדדו`,
+      `${s.verdict.state === 'yes' ? '✅' : s.verdict.state === 'no' ? '❌' : '⏳'} ${s.verdict.he}`,
+      s.dropped || s.drafts ? `🗑️ ${s.dropped} נפסלו · 📥 ${s.drafts} יצאו כטיוטה` : null,
+      s.lastSyncAt ? `📊 צפיות עודכנו לפני ${notify.humanDuration(Date.now() - s.lastSyncAt)}` : '📊 צפיות עוד לא נמשכו',
+    ]
+      .filter((l) => l !== null)
+      .join('\n'),
+    { link_preview_options: { is_disabled: true } }
+  );
+});
 bot.command('resume', (ctx) => ctx.reply(ops.resume({ actor: actorOf(ctx) }).said));
 
 bot.command('tiktok', async (ctx) => {
@@ -731,6 +760,7 @@ bot.command('help', (ctx) =>
       '/deck דירוג — הסטים שהכי חוסכים, ממקום 8 עד מקום 1 (או "/deck דירוג רכבים")',
       '/deck בונסאי — מצגת על סט מסוים',
       '',
+      '/score — ציון מול צפיות ב-30 הפוסטים האחרונים, והאם הציון מנבא משהו',
       '/pause — עוצר הכל: לא נבנה ולא מתפרסם כלום אוטומטית',
       '/resume — ממשיך',
       '',
@@ -849,6 +879,9 @@ function tick() {
   if (day !== lastRunDay) {
     lastRunDay = day;
     refreshToken().catch(() => {});
+    // Once a day, views for every scored post, so /score has something to
+    // check the scorer against. Reads only, so the pause does not stop it.
+    if (zernioConfigured()) ops.syncViews({ actor: { kind: 'timer' } });
   }
 
   // The kill switch. Nothing below runs while it is on: no deck is started and

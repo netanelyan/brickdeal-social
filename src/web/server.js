@@ -498,6 +498,17 @@ on('POST', '/api/deck', async (req, res) => {
   sendJson(res, result.ok ? 202 : 409, result);
 });
 
+// Score against views, the same facts /score prints.
+on('GET', '/api/scores', (req, res) => {
+  require_(req, 'read');
+  sendJson(res, 200, views.scores({ limit: 30 }));
+});
+on('POST', '/api/scores/sync', (req, res) => {
+  const who = requireWrite(req);
+  const result = ops.syncViews({ actor: actor(who) });
+  sendJson(res, result.ok ? 202 : 409, result);
+});
+
 // The kill switch, the same two functions /pause and /resume call.
 on('POST', '/api/pause', (req, res) => {
   const who = requireWrite(req);
