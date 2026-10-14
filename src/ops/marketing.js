@@ -5,7 +5,7 @@ import * as jobs from './jobs.js';
 import { telegram as surface } from './surface.js';
 import { publishNext } from './publish.js';
 import { proposeDeck as planDeck, buildProposed, draftHook, countdownHook } from '../brick/build.js';
-import { toBrickCandidate, brickApprovalMessage, routeHe } from '../brick/candidate.js';
+import { toBrickCandidate, brickApprovalMessage, routeHe, tiktokRoute } from '../brick/candidate.js';
 import { scoreDeck, decide, scoreLine } from '../brick/score.js';
 import { zernioConfigured, fetchViews } from '../publish/zernio.js';
 import { brickConfig } from '../brick/config.js';
@@ -399,7 +399,20 @@ export function newPhoto(key, n, { actor = null } = {}) {
         deck.preview[at + 1] = deck[deck.instagram ? 'instagram' : 'tiktok'][at + 1];
       }
 
-      store.updateStaging(key, { deck });
+      // A new photograph can be a generated one, which changes how the deck
+      // reaches TikTok. Worked out again here so the card says what will
+      // happen; publishZernio checks it again at publish time either way.
+      const route = cand.tiktokRoute ? tiktokRoute(deck.slides) : null;
+      store.updateStaging(key, {
+        deck,
+        ...(route
+          ? {
+              tiktokRoute: route,
+              tiktokDraft: route.path === 'draft',
+              publishTargets: route.path === 'skip' ? (cand.publishTargets || []).filter((t) => t !== 'tiktok') : cand.publishTargets,
+            }
+          : {}),
+      });
       const fresh = store.getStaging(key);
       console.log(`deck: new photo for slide ${n} · ${image.provenance} · ${slide.nameHe}`);
 
@@ -820,7 +833,11 @@ export async function autoPipeline({ request = null, actor = null, progress = ()
     }
     if (cand) {
       progress('מנקד...');
-      result = store.hasPublished(cand.id) ? unbuildable(`this exact deck was already published (${cand.id})`) : await score(cand);
+      result = store.hasPublished(cand.id)
+        ? unbuildable(`this exact deck was already published (${cand.id})`)
+        : store.queuedItems().some((q) => q.id === cand.id)
+          ? unbuildable(`this exact deck is already in the queue (${cand.id})`)
+          : await score(cand);
     }
     scores.push(compact(result, attempt, rebuilt));
     console.log(`auto: attempt ${attempt} · ${built.recipe} · ${scoreLine(result)}`);

@@ -138,22 +138,32 @@ export function brickConfig() {
     throw new Error(`brick-config.json: tiktok.aiPhotos must be one of ${AI_PHOTO_POLICIES.join(', ')}, not "${aiPhotos}"`);
   }
 
-  // Who decides what is posted: the scorer, or a person tapping. Refused when
-  // it is neither, because a typo here must not quietly mean either one.
-  const mode = String(raw.approval?.mode || 'auto');
+  // Who decides what is posted: the scorer, or a person tapping. Absent means
+  // the default, auto. Present and anything else, an empty string included,
+  // is refused, because a typo here must not quietly mean either one.
+  const mode = raw.approval?.mode === undefined ? 'auto' : raw.approval.mode;
   if (!APPROVAL_MODES.includes(mode)) {
-    throw new Error(`brick-config.json: approval.mode must be "auto" or "manual", not "${mode}"`);
+    throw new Error(`brick-config.json: approval.mode must be "auto" or "manual", not ${JSON.stringify(mode)}`);
   }
 
   // The bar a deck has to clear, and how the five parts of its score add up.
+  // A real number or nothing: `num` reads null, "" and false as 0, and a
+  // threshold of 0 posts every deck the judge answers for.
   const sc = raw.score || {};
-  const threshold = num(sc.threshold, 70);
+  if (sc.threshold !== undefined && typeof sc.threshold !== 'number') {
+    throw new Error(`brick-config.json: score.threshold must be a number from 0 to 100, not ${JSON.stringify(sc.threshold)}`);
+  }
+  const threshold = sc.threshold ?? 70;
   if (!(threshold >= 0 && threshold <= 100)) {
     throw new Error(`brick-config.json: score.threshold must be between 0 and 100, not ${sc.threshold}`);
   }
   const weights = {};
   for (const [k, fallbackWeight] of Object.entries(SCORE_WEIGHTS)) {
-    const w = num(sc.weights?.[k], fallbackWeight);
+    const given = sc.weights?.[k];
+    if (given !== undefined && typeof given !== 'number') {
+      throw new Error(`brick-config.json: score.weights.${k} must be a number of 0 or more, not ${JSON.stringify(given)}`);
+    }
+    const w = given ?? fallbackWeight;
     if (!(w >= 0)) throw new Error(`brick-config.json: score.weights.${k} must be a number of 0 or more`);
     weights[k] = w;
   }

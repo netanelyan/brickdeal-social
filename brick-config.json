@@ -596,7 +596,9 @@
       "'manual': the old flow. The proposal card and the approval card come",
       "back, nothing is scored, and nothing publishes without a tap. A switch",
       "saved from the panel's settings page takes effect at the next deck; an",
-      "edit to this file by hand takes effect at the next restart."
+      "edit to this file by hand takes effect at the next restart. Decks the",
+      "scorer already queued still post after a switch to manual: they were",
+      "decided. /pause holds them, and /clear_queue throws them away."
     ],
     "mode": "auto"
   },

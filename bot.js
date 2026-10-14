@@ -812,6 +812,8 @@ const bootedAt = Date.now();
  * reset to zero, and in auto mode a deck started is a deck that may post.
  */
 let lastDeckSuggestAt = 0;
+// Said once per breakage, not once a minute.
+let configBroken = false;
 // When the drip last fired. The drip used to be its own setInterval, which meant
 // POST_INTERVAL_MINUTES was captured at boot and a change to it did nothing until
 // a restart. Measured against the clock inside the one-minute tick instead, so the
@@ -893,9 +895,22 @@ function tick() {
   // they arrive through the day rather than three at once at 08:00. In manual
   // mode that is a free proposal waiting for a tap; in auto mode it is a deck
   // built, scored, and queued or dropped.
-  const auto = ops.approvalMode() !== 'manual';
+  // A config that does not load means no deck can be built, but it must not
+  // take the drip and the quiet alarm down with it: every tick would throw
+  // here, and the uncaught-exception handler would keep a process alive that
+  // had quietly stopped posting.
+  let mode = null;
+  try {
+    mode = ops.approvalMode();
+  } catch (e) {
+    if (!configBroken) console.error(`deck timer: brick-config.json does not load, no decks until it does — ${e.message}`);
+    configBroken = true;
+  }
+  if (mode) configBroken = false;
+  const auto = mode !== 'manual';
   const backlog = auto ? store.queueSize() : store.proposalSize();
   if (
+    mode &&
     !paused &&
     inHours &&
     decksPerDay() > 0 &&

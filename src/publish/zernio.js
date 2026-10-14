@@ -96,8 +96,11 @@ const MAX_DESCRIPTION = 4000;
  *   transient   anything else: a 5xx, a timeout, a message nobody has seen.
  *               Retried, and three in a row degrade the destination.
  *
- * `idempotencyKey` is set only when a retry should reuse it, which is when
- * nothing definite came back. See publishZernio.
+ * `keyDecided` is set only on an error from the post call itself, the one
+ * moment that says anything about the idempotency key: `idempotencyKey` is
+ * then the key the retry must send, or null when it must start a fresh one.
+ * Every other error leaves the key the card already carries alone. See
+ * publishZernio.
  */
 export class ZernioError extends Error {
   constructor(message, { kind = 'transient', step = null, code = null, status = null, postId = null, idempotencyKey = null } = {}) {
@@ -109,6 +112,7 @@ export class ZernioError extends Error {
     this.status = status;
     this.postId = postId;
     this.idempotencyKey = idempotencyKey;
+    this.keyDecided = false;
   }
 }
 
@@ -124,11 +128,17 @@ export function classify({ status = null, code = null, message = '' } = {}) {
   const m = String(message || '').toLowerCase();
   const c = String(code || '');
 
+  // Five drafts waiting in the TikTok inbox block the sixth, and waiting does
+  // not free the slot: somebody has to post or discard one in the app. So it
+  // is a connection problem, which stands TikTok down and says so once,
+  // rather than a limit, which would requeue the deck forever.
+  if (/pending drafts/.test(m)) return { kind: 'connection' };
+
   if (
     status === 429 ||
     c === 'rate_limited' ||
     c === 'idempotency_conflict' ||
-    /too many posts in the last 24 hours|at capacity|daily active user quota|pending drafts|posts per hour|rate limit|too many requests/.test(m)
+    /too many posts in the last 24 hours|at capacity|daily active user quota|posts per hour|rate limit|too many requests/.test(m)
   ) {
     return { kind: 'limit' };
   }
@@ -163,6 +173,7 @@ export const isConfigProblem = (e) => e instanceof ZernioError && e.kind === 'co
 
 const HINTS = {
   limit: 'מגבלת פרסום של טיקטוק או של Zernio. הפוסט ממתין ויפורסם כשהמכסה תתפנה.',
+  drafts: 'יש 5 טיוטות שממתינות בתיבת הטיקטוק. פרסמו או מחקו אחת באפליקציה, ואז /retry.',
   connection: 'צריך תיקון ידני: מפתח ה-API של Zernio, החשבון המחובר שם, או רמת הפרטיות ב-brick-config.json.',
   card: 'הפוסט הזה לא יעבור כפי שהוא. ניסיון חוזר לא ישנה את זה.',
 };
@@ -171,7 +182,7 @@ const HINTS = {
 export function describeError(e) {
   if (!(e instanceof ZernioError)) return e?.message || String(e);
   const bits = [e.kind, e.code && `code ${e.code}`, e.status && `HTTP ${e.status}`, e.postId && `zernio ${e.postId}`].filter(Boolean);
-  const hint = HINTS[e.kind];
+  const hint = /pending drafts/i.test(e.message) ? HINTS.drafts : HINTS[e.kind];
   return `${e.message} [${bits.join(', ')}]${hint ? `\n   ${hint}` : ''}`;
 }
 
@@ -504,7 +515,20 @@ export async function publishZernio(cand, { client = defaultClient(), dryRun = f
   });
   notes.push(...creator.notes);
 
-  const draft = Boolean(cand.tiktokDraft);
+  // Worked out again from the photographs rather than trusted from the card.
+  // `tiktokDraft` was set when the deck was built, and a photograph replaced
+  // since (/photo in manual mode) can be a generated one. A post with a
+  // generated photograph must never go out direct, because it would go out
+  // without the AI label.
+  const generated = (cand.deck?.slides || []).some((s) => s.image?.provenance === 'generated');
+  if (generated && settings.aiPhotos === 'skip') {
+    throw new ZernioError('this deck has a generated photograph and tiktok.aiPhotos is "skip"', {
+      kind: 'card',
+      step: 'preflight',
+      code: 'ai_photos_skipped',
+    });
+  }
+  const draft = Boolean(cand.tiktokDraft) || generated;
   const body = requestBody({
     accountId,
     hook: cand.deck?.hookHe || cand.headline,
@@ -520,15 +544,31 @@ export async function publishZernio(cand, { client = defaultClient(), dryRun = f
 
   if (dryRun) return { dryRun: true, body, idempotencyKey, images, slides: images.length, draft, privacy: creator.privacy, notes };
 
+  // The key after the post call. Any answer that is not a 2xx keeps it: if a
+  // post was made the same key returns it, and if none was made Zernio treats
+  // the retry as new. Only a post Zernio made and then failed drops it,
+  // because the same key would return that failed post forever.
   let res;
   try {
     res = await client.createPost(body, { idempotencyKey });
   } catch (e) {
-    if (e instanceof ZernioError) e.idempotencyKey = e.kind === 'transient' ? idempotencyKey : null;
+    if (e instanceof ZernioError) {
+      e.idempotencyKey = idempotencyKey;
+      e.keyDecided = true;
+    }
     throw e;
   }
 
-  const out = interpretPost(res, { draft });
+  let out;
+  try {
+    out = interpretPost(res, { draft });
+  } catch (e) {
+    if (e instanceof ZernioError) {
+      e.idempotencyKey = e.postId ? null : idempotencyKey;
+      e.keyDecided = true;
+    }
+    throw e;
+  }
   if (out.pending) notes.push(`Zernio קיבלה את הפוסט ומחזיקה אותו (${out.status}) — הוא יעלה לבד`);
   console.log(
     `tiktok: zernio ${out.postId} -> ${out.status}${out.draft ? ' (inbox draft)' : ''}${out.url ? ` ${out.url}` : ''}`
@@ -568,12 +608,15 @@ export async function fetchViews({ client = defaultClient(), fromDate, toDate, m
     const json = await client.analytics({ platform: 'tiktok', fromDate, toDate, limit: 100, page });
     for (const p of json?.posts || []) {
       const a = p.analytics || {};
+      // A count Zernio has not synced yet is not zero views. Read as zero it
+      // would be a post nobody watched, and the worst cover in the benchmarks.
+      const synced = !p.syncStatus || p.syncStatus === 'synced' || p.syncStatus === 'partial';
       rows.push({
         ids: [p._id, p.postId, p.latePostId].filter(Boolean),
         platformPostId: p.platformPostId || null,
         url: p.platformPostUrl || null,
         publishedAt: p.publishedAt || null,
-        views: Number.isFinite(Number(a.views)) ? Number(a.views) : null,
+        views: synced && typeof a.views === 'number' && Number.isFinite(a.views) ? a.views : null,
         likes: Number(a.likes) || 0,
         comments: Number(a.comments) || 0,
         shares: Number(a.shares) || 0,

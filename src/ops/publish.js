@@ -232,9 +232,10 @@ export async function publishNext(item = null) {
       if (target === 'instagram' && e?.creationId) cand.instagramCreationId = e.creationId;
       // Zernio's version of the same problem. After a timeout nobody knows
       // whether the post was made, and sending the same idempotency key again
-      // returns it if it was. After a definite answer the key is null, and the
-      // next attempt gets a fresh one.
-      if (target === 'tiktok' && e && 'idempotencyKey' in e) cand.zernioKey = e.idempotencyKey || null;
+      // returns it if it was. Only the post call's own answer changes the key:
+      // a creator-info failure or the daily cap on the next attempt must not
+      // erase the key a timeout left, or that attempt posts the deck twice.
+      if (target === 'tiktok' && e?.keyDecided) cand.zernioKey = e.idempotencyKey || null;
 
       // "Not now" — checked BEFORE the card-level test, because a platform
       // limit arrives as step:'config' from our own preflight and would

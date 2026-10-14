@@ -2159,6 +2159,109 @@ group('closing the loop — views against scores, and the covers fed back');
 }
 
 /* -------------------------------------------------------------------------- */
+group('what the review found — each one held to a test');
+
+{
+  const store = await import('../src/store.js');
+  const z = await import('../src/publish/zernio.js');
+  const ops = await import('../src/ops/marketing.js');
+  const settings = await import('../src/ops/settings.js');
+  const { publishNext } = await import('../src/ops/publish.js');
+  const { detach } = await import('../src/ops/surface.js');
+  detach();
+
+  const saved = Object.fromEntries(
+    ['ZERNIO_API_KEY', 'ZERNIO_TIKTOK_ACCOUNT_ID', 'CARD_PUBLIC_BASE_URL', 'CARD_PUBLIC_BASE_URLS', 'IG_USER_ID', 'IG_ACCESS_TOKEN', 'CHANNEL_ID'].map((k) => [k, process.env[k]])
+  );
+  process.env.ZERNIO_API_KEY = 'test-key';
+  process.env.ZERNIO_TIKTOK_ACCOUNT_ID = 'acc_tiktok_1';
+  process.env.CARD_PUBLIC_BASE_URL = 'https://cards.example.co';
+  for (const k of ['CARD_PUBLIC_BASE_URLS', 'IG_USER_ID', 'IG_ACCESS_TOKEN', 'CHANNEL_ID']) delete process.env[k];
+  store.clearQueue();
+  store.clearDegraded('tiktok');
+
+  const info = { creator: { canPostMore: true }, privacyLevels: [{ value: 'PUBLIC_TO_EVERYONE' }] };
+  const deck = (over = {}) => ({
+    kind: 'deck',
+    id: 'rev1',
+    headline: 'בדיקה',
+    publishTargets: ['tiktok'],
+    deck: { hookHe: 'שער', tiktok: [{ url: 'https://cards.example.co/r-1.jpg' }], slides: [] },
+    tiktokCaption: 'כיתוב',
+    ...over,
+  });
+
+  // A key a timeout left must survive a later failure before the post call.
+  z.setClient({ creatorInfo: async () => { throw new z.ZernioError('HTTP 503', { kind: 'transient', status: 503 }); } });
+  await publishNext(deck({ zernioKey: 'brickdeal-rev1-saved' }));
+  eq('a creator-info failure leaves the saved idempotency key alone', store.queuedItems()[0]?.zernioKey, 'brickdeal-rev1-saved');
+  store.clearQueue();
+
+  z.setClient({
+    creatorInfo: async () => info,
+    createPost: async () => { throw new z.ZernioError('still processing', { kind: 'limit', code: 'idempotency_conflict', status: 409 }); },
+  });
+  await publishNext(deck({ zernioKey: 'brickdeal-rev1-saved' }));
+  eq('and so does Zernio saying the first request is still in flight', store.queuedItems()[0]?.zernioKey, 'brickdeal-rev1-saved');
+  store.clearQueue();
+
+  // A generated photograph is never posted direct, whatever the card says.
+  const sent = [];
+  z.setClient({ creatorInfo: async () => info, createPost: async (b) => (sent.push(b), { status: 201, json: { post: { _id: 'zr', status: 'published', platforms: [{ platform: 'tiktok', status: 'published' }] } } }) });
+  const stale = deck({ id: 'rev2', tiktokDraft: false, deck: { hookHe: 'שער', tiktok: [{ url: 'https://cards.example.co/r-2.jpg' }], slides: [{ image: { provenance: 'generated', checked: true } }] } });
+  await z.publishZernio(stale);
+  eq('a card that says "direct" with a generated photograph on it goes as a draft', sent[0]?.tiktokSettings?.draft, true);
+
+  eq('five waiting drafts need a person, not a wait', z.classify({ message: 'TikTok allows only 5 pending drafts per account in any 24-hour period.' }).kind, 'connection');
+
+  z.setClient({
+    analytics: async () => ({
+      posts: [
+        { _id: 'a', analytics: { views: null } },
+        { _id: 'b', syncStatus: 'pending', analytics: { views: 0 } },
+        { _id: 'c', syncStatus: 'synced', analytics: { views: 0 } },
+      ],
+    }),
+  });
+  const viewed = await z.fetchViews({});
+  eq('a view count that is not a number is not zero', viewed[0].views, null);
+  eq('nor is one Zernio has not synced yet', viewed[1].views, null);
+  eq('a synced zero is a zero', viewed[2].views, 0);
+
+  // The same deck does not go into the queue twice.
+  store.enqueue(deck({ id: 'auto-dup' }));
+  const dup = await ops.autoPipeline(
+    {},
+    {
+      targets: ['tiktok'],
+      plan: async () => ({ subject: 'סטים', recipe: 'savings' }),
+      build: async () => ({ recipe: 'savings', slides: [{ productId: 'dup' }] }),
+      wrap: async () => deck({ id: 'auto-dup' }),
+      score: async () => ({ stage: 'B', pass: true, total: 90, threshold: 70, gates: [] }),
+    }
+  );
+  ok('a deck already waiting in the queue is not queued again', dup.dropped && store.queueSize() === 1);
+  ok('and the reason says so', /already in the queue/.test(dup.why));
+  store.clearQueue();
+
+  // A blank value in the config fails closed.
+  const original = settings.readRaw();
+  const withScore = (score) => JSON.stringify({ ...JSON.parse(original), score });
+  throws('score.threshold: null is refused rather than read as 0', () => settings.writeRaw(withScore({ threshold: null })));
+  throws('so is a threshold written as a string', () => settings.writeRaw(withScore({ threshold: '70' })));
+  throws('approval.mode: "" is refused rather than read as auto', () =>
+    settings.writeRaw(JSON.stringify({ ...JSON.parse(original), approval: { mode: '' } }))
+  );
+  eq('and the file is untouched after all three', settings.readRaw(), original);
+
+  z.setClient(null);
+  for (const [k, v] of Object.entries(saved)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 group('a generated photograph sends the deck to the inbox, not the feed');
 
 {
