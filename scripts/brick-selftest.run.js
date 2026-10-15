@@ -1002,7 +1002,10 @@ group('the slide');
 {
   const s = brickScale({ w: 1080, h: 1920 });
   ok('the name is the largest thing on its slide', s.name > s.line);
-  ok('the price lines are a step down, not a whisper', s.line / s.name > 0.7 && s.line / s.name < 0.85, `${s.line}/${s.name}`);
+  // The upper bound was 0.85 until the price lines were measured on a phone at
+  // about 15pt (41px of 1080), smaller than the phone's own body text. They are
+  // the post's argument, so the step down from the name got smaller, not gone.
+  ok('the price lines are a step down, not a whisper', s.line / s.name > 0.7 && s.line / s.name <= 0.9, `${s.line}/${s.name}`);
 
   // The cover now sets LARGER than a set name, which reverses what this test
   // asserted for most of the file's life.
@@ -2374,10 +2377,10 @@ group('the judge is a setting, and a second one can score beside it');
   const { brickConfig } = await import('../src/brick/config.js');
   const { scoreboard } = await import('../src/ops/scoreboard.js');
 
-  eq('the judge is not Opus by default', brickConfig().score.model, 'claude-sonnet-5-5');
-  eq('and there is no second judge unless one is set', brickConfig().score.compareModel, null);
+  eq('the judge is not Opus', brickConfig().score.model, 'claude-sonnet-5-5');
 
   const original = settings.readRaw();
+  const configured = brickConfig().score.compareModel;
   const raw = JSON.parse(original);
   settings.writeRaw(JSON.stringify({ ...raw, score: { ...raw.score, compareModel: 'claude-opus-5-5' } }));
 
@@ -2416,7 +2419,10 @@ group('the judge is a setting, and a second one can score beside it');
   eq('under its own model', r.compare?.model, 'claude-opus-5-5');
 
   settings.writeRaw(original);
-  eq('and the config goes back', brickConfig().score.compareModel, null);
+  eq('and the config goes back', brickConfig().score.compareModel, configured);
+  settings.writeRaw(JSON.stringify({ ...raw, score: { ...raw.score, compareModel: null } }));
+  eq('null means no second judge', brickConfig().score.compareModel, null);
+  settings.writeRaw(original);
 
   const rows = Array.from({ length: 6 }, (_, i) => ({ id: `r${i}`, total: 60 + i, views: 100 * (6 - i), compare: { model: 'claude-opus-5-5', total: 60 + i, }, path: 'published' }));
   rows.forEach((row, i) => (row.compare.total = 50 + 10 * i));
