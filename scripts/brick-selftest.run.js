@@ -1731,7 +1731,8 @@ group('TikTok through Zernio — ported from tiyul-social, and the inbox draft o
   ok('it posts once and polls until TikTok has it', ok1.seen.filter((s) => s.method === 'POST').length === 1 && done.status === 'published');
   eq('the post id comes from the URL', done.postId, '7300000000000000001');
   eq('Zernio\'s own id is kept', done.zernioId, 'zp1');
-  ok('the body it sent is the snapshot', same(ok1.seen[0].body, fixture));
+  const { metadata: sentMeta, ...wire } = ok1.seen[0].body;
+  ok('the body it sent is the snapshot, plus the key of the post on its metadata', same(wire, fixture) && /^zernio-/.test(sentMeta?.idempotencyKey || ''));
   eq('a post is not a draft', done.draft, false);
 
   let refused = null;
@@ -1798,6 +1799,138 @@ group('TikTok through Zernio — ported from tiyul-social, and the inbox draft o
   if (savedCap === undefined) delete process.env.TIKTOK_DAILY_CAP;
   else process.env.TIKTOK_DAILY_CAP = savedCap;
   eq('a privacy value nobody knows posts as SELF_ONLY, never public', route.privacyLevel('PUBLIC'), 'SELF_ONLY');
+}
+
+/* -------------------------------------------------------------------------- */
+group('a create call with no answer is looked up before any draft is made');
+
+{
+  const z = await import('../src/publish/zernio.js');
+  const route = await import('../src/publish/tiktokRoute.js');
+  const store = await import('../src/store.js');
+  const { publishNext } = await import('../src/ops/publish.js');
+  const { detach } = await import('../src/ops/surface.js');
+  detach();
+
+  const zenv = { ZERNIO_API_KEY: 'test-key', ZERNIO_TIKTOK_ACCOUNT_ID: 'acc_tiktok_1' };
+  const cand = {
+    kind: 'deck',
+    id: 'dup1',
+    headline: 'סטים',
+    deck: { hookHe: 'שער', tiktok: [{ url: 'https://c/1.jpg' }, { url: 'https://c/2.jpg' }] },
+    tiktokCaption: 'כיתוב',
+  };
+
+  // Zernio, where the create call never answers. `listed` is what a lookup
+  // finds: the post the create call made after all, nothing, or an error.
+  const zernio = ({ listed, statusFails = false, createAnswers = false }) => {
+    const seen = { keys: [], lookups: 0 };
+    const fetchImpl = async (url, opts = {}) => {
+      const u = String(url);
+      if (opts.method === 'POST' && u.endsWith('/posts')) {
+        seen.keys.push(opts.headers['idempotency-key']);
+        seen.metaKey = JSON.parse(opts.body).metadata?.idempotencyKey;
+        if (createAnswers) return { ok: true, status: 201, json: async () => ({ post: { _id: 'zp-made', status: 'publishing', platforms: [{ platform: 'tiktok', status: 'processing' }] } }) };
+        throw new Error('The operation was aborted due to timeout');
+      }
+      if (u.includes('/posts?')) {
+        seen.lookups++;
+        if (listed === 'error') throw new Error('getaddrinfo ENOTFOUND zernio.com');
+        const posts =
+          listed === 'made'
+            ? [{ _id: 'zp-other', metadata: { idempotencyKey: 'someone-else' } }, { _id: 'zp-made', status: 'published', metadata: { idempotencyKey: seen.keys.at(-1) }, platforms: [{ platform: 'tiktok', status: 'published', platformPostUrl: 'https://www.tiktok.com/@b/photo/7300000000000000009' }] }]
+            : [];
+        return { ok: true, status: 200, json: async () => ({ posts, pagination: { pages: 1 } }) };
+      }
+      if (u.includes('/posts/')) {
+        if (statusFails) throw new Error('socket hang up');
+        return { ok: true, status: 200, json: async () => ({ post: { _id: 'zp-made', status: 'published', platforms: [{ platform: 'tiktok', status: 'published' }] } }) };
+      }
+      throw new Error(`unexpected ${u}`);
+    };
+    return { fetchImpl, seen };
+  };
+  const cfg = { privacy: 'PUBLIC_TO_EVERYONE', autoAddMusic: true, commercialContentType: 'none', fallback: 'draft' };
+  const run = async (z0) => {
+    let drafted = 0;
+    let result = null;
+    let error = null;
+    try {
+      result = await route.publishTikTokRouted(cand, {
+        cfg,
+        deps: {
+          zernio: (c, o) => z.publishZernioTikTok(c, { ...o, env: zenv, fetchImpl: z0.fetchImpl, pollMs: 1, timeoutMs: 20 }),
+          draft: async () => (drafted++, { draft: true, notes: [] }),
+          usedLast24h: () => 0,
+          cap: () => 15,
+        },
+      });
+    } catch (e) {
+      error = e;
+    }
+    return { drafted, result, error };
+  };
+
+  const made = zernio({ listed: 'made' });
+  const a = await run(made);
+  eq('timeout but the post was created: no draft', a.drafted, 0);
+  eq('the post found by its key is the result', a.result?.zernioId, 'zp-made');
+  ok('and it is said so', a.result?.recovered === true);
+  ok('the key went out as the Idempotency-Key and on the metadata both', made.seen.keys[0] && made.seen.metaKey === made.seen.keys[0]);
+
+  const none = zernio({ listed: 'none' });
+  const b = await run(none);
+  eq('timeout and no post with that key: the draft fallback, as before', b.drafted, 1);
+  ok('after looking more than once, because a post being saved may not be listed yet', none.seen.lookups > 1);
+
+  const blind = zernio({ listed: 'error' });
+  const c = await run(blind);
+  eq('timeout and the lookup failing too: no draft', c.drafted, 0);
+  ok('the error says the post may exist', c.error?.unconfirmed === true);
+  eq('and carries the key for the retry', c.error?.idempotencyKey, blind.seen.keys[0]);
+
+  const polled = zernio({ createAnswers: true, statusFails: true });
+  const d = await run(polled);
+  ok('a status that cannot be read after the post was made is pending, not a failure', d.result?.pending === true && d.drafted === 0);
+
+  const dupe = await run({
+    fetchImpl: async () => ({ ok: false, status: 409, json: async () => ({ error: 'Duplicate content detected.', code: 'content_duplicate', existingPostId: 'zp-old' }) }),
+  });
+  ok("Zernio's 409 duplicate means the post exists: no draft", dupe.drafted === 0 && dupe.error?.exists === true);
+  ok('and it is not retried', z.isCardLevelZernio(dupe.error));
+
+  // The retry sends the same key, end to end through the publish loop.
+  const saved = Object.fromEntries(
+    ['ZERNIO_API_KEY', 'ZERNIO_TIKTOK_ACCOUNT_ID', 'CARD_PUBLIC_BASE_URL', 'CARD_PUBLIC_BASE_URLS', 'IG_USER_ID', 'IG_ACCESS_TOKEN', 'CHANNEL_ID', 'TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET'].map((k) => [k, process.env[k]])
+  );
+  Object.assign(process.env, zenv, { CARD_PUBLIC_BASE_URL: 'https://cards.example.co' });
+  for (const k of ['CARD_PUBLIC_BASE_URLS', 'IG_USER_ID', 'IG_ACCESS_TOKEN', 'CHANNEL_ID', 'TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET']) delete process.env[k];
+  store.clearQueue();
+  store.clearDegraded('tiktok');
+  const realFetch = globalThis.fetch;
+  const keys = [];
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (opts.method === 'POST') {
+      keys.push(opts.headers['idempotency-key']);
+      if (keys.length === 1) throw new Error('The operation was aborted due to timeout');
+      return { ok: true, status: 200, json: async () => ({ post: { _id: 'zp-same', status: 'published', platforms: [{ platform: 'tiktok', status: 'published' }] } }) };
+    }
+    if (u.includes('/posts?')) throw new Error('getaddrinfo ENOTFOUND zernio.com');
+    throw new Error(`unexpected ${u}`);
+  };
+  await publishNext({ ...cand, id: 'dup2', publishTargets: ['tiktok'], deck: { ...cand.deck, slides: [] } });
+  const requeued = store.queuedItems()[0];
+  ok('an unconfirmed post goes back in the queue holding its key', requeued?.zernioKey === keys[0]);
+  await publishNext(store.takeQueuedAt(1));
+  eq('and the retry sends that same key, so Zernio returns the post rather than making a second', keys[1], keys[0]);
+  ok('which then counts as published', store.recentPublished().some((p) => p.id === 'dup2' && p.zernioPostId === 'zp-same'));
+  globalThis.fetch = realFetch;
+  store.clearQueue();
+  for (const [k, v] of Object.entries(saved)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
 }
 
 /* -------------------------------------------------------------------------- */

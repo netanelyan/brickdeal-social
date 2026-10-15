@@ -32,6 +32,11 @@ import {
 // the publish notice says it fell back and why. A post is never lost to the new
 // route, and never posted twice: the fallback runs only after Zernio said no,
 // never while Zernio is still working on it (see createAndWait in zernio.js).
+//
+// AND NEVER WHEN THE POST MAY EXIST. A create call that timed out or failed
+// with no clear answer is looked up by its idempotency key first (zernio.js);
+// a post found that way is the result, and a lookup that could not run either
+// leaves the deck to be retried with the same key, not drafted.
 
 /** The zernio route's own ceiling: the lower of TIKTOK_DAILY_CAP and Zernio's 15. */
 export const zernioDailyCap = () => Math.min(15, TIKTOK_DAILY_CAP());
@@ -60,9 +65,15 @@ export async function publishTikTokRouted(cand, { cfg = brickConfig().tiktok, de
       autoAddMusic: cfg.autoAddMusic,
       commercialContentType: cfg.commercialContentType,
       env,
+      // The key an earlier attempt left when it could not tell whether it had
+      // made the post. Sent again, Zernio returns that post if it exists.
+      idempotencyKey: cand.zernioKey || null,
     });
   } catch (e) {
     if (isPlatformLimitZernio(e) || cfg.fallback !== 'draft') throw e;
+    // The post may exist (unconfirmed), or Zernio says it does (exists). A
+    // draft on top of either is the duplicate this route promises never to make.
+    if (e.unconfirmed || e.exists) throw e;
     // The one departure from tiyul-social: with no TikTok connection of its
     // own there is no inbox to fall back to, and the draft's "TikTok is not
     // configured" would replace the Zernio error that actually explains the

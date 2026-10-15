@@ -231,6 +231,11 @@ export async function publishNext(item = null) {
       // the retry can ask "is this already live?" with, and without it the retry
       // posts a second copy of a post that went out fine.
       if (target === 'instagram' && e?.creationId) cand.instagramCreationId = e.creationId;
+      // Zernio's version of the same problem. A create call nobody could
+      // confirm either way leaves its idempotency key on the card, and the
+      // retry sends it again: Zernio returns the post if it was made rather
+      // than making a second one.
+      if (target === 'tiktok' && e?.unconfirmed && e.idempotencyKey) cand.zernioKey = e.idempotencyKey;
 
       // "Not now" — checked BEFORE the card-level test, because a platform
       // limit arrives as step:'config' from our own preflight and would

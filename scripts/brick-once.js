@@ -40,6 +40,11 @@ import { brickConfig } from '../src/brick/config.js';
 // and nothing reaches the profile. It needs ZERNIO_API_KEY and refuses to run
 // without it. Each media URL is then fetched from here and its status printed.
 //
+// The Zernio key is account-wide and the account holds more than one TikTok
+// account, so before anything is built the pinned ZERNIO_TIKTOK_ACCOUNT_ID is
+// looked up with GET /v1/accounts?platform=tiktok, and the run stops unless its
+// username is ZERNIO_TIKTOK_USERNAME (brickdealil when that is unset).
+//
 // Writes to out/brick/ instead of to Telegram, with a contact sheet.
 //
 // Every expensive step degrades rather than failing, and this script is where
@@ -154,6 +159,10 @@ async function main() {
 
   if (realZernio && !zernioConfigured()) {
     console.error('\n  --zernio posts a real draft and needs ZERNIO_API_KEY in .env; nothing was built.\n');
+    process.exitCode = 1;
+    return;
+  }
+  if (realZernio && !(await accountCheck())) {
     process.exitCode = 1;
     return;
   }
@@ -294,6 +303,44 @@ async function buildOne(request, n) {
 }
 
 /**
+ * Whose TikTok the pinned account id is, asked of Zernio before anything is
+ * built or sent. True only when it is the expected username.
+ */
+async function accountCheck() {
+  const id = String(process.env.ZERNIO_TIKTOK_ACCOUNT_ID || '').trim();
+  const want = String(process.env.ZERNIO_TIKTOK_USERNAME || 'brickdealil').replace(/^@/, '').toLowerCase();
+  const base = (process.env.ZERNIO_BASE || 'https://zernio.com/api/v1').replace(/\/$/, '');
+  console.log(`\n  account check: GET ${base}/accounts?platform=tiktok`);
+  if (!id) {
+    console.error('    STOP: ZERNIO_TIKTOK_ACCOUNT_ID is not set, and the key reaches more than one TikTok account\n');
+    return false;
+  }
+  let json;
+  try {
+    const res = await fetch(`${base}/accounts?platform=tiktok`, {
+      headers: { authorization: `Bearer ${String(process.env.ZERNIO_API_KEY).trim()}`, accept: 'application/json' },
+      signal: AbortSignal.timeout(30_000),
+    });
+    json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${json?.error || ''}`);
+  } catch (e) {
+    console.error(`    STOP: the account list could not be read: ${e.message}\n`);
+    return false;
+  }
+  for (const a of json.accounts || []) {
+    console.log(`    ${a._id === id ? '>>' : '  '} ${a._id} ${a.platform} @${a.username || a.displayName || '?'}${a.isActive === false ? ' (inactive)' : ''}`);
+  }
+  const acc = (json.accounts || []).find((a) => a._id === id);
+  const name = String(acc?.username || '').toLowerCase();
+  if (!acc || acc.platform !== 'tiktok' || name !== want) {
+    console.error(`    STOP: ${id} is ${acc ? `@${acc.username || '?'} on ${acc.platform}` : 'not in this Zernio account'}, not @${want}; nothing was built or sent\n`);
+    return false;
+  }
+  console.log(`    ${id} is @${acc.username}: carrying on`);
+  return true;
+}
+
+/**
  * The cover line, checked for direction: written to a UTF-8 file, its first
  * code points printed, and held against the HTML the cover is rendered from.
  *
@@ -417,6 +464,7 @@ async function zernioOne(cand) {
 
   console.log(`    POST ${(process.env.ZERNIO_BASE || 'https://zernio.com/api/v1').replace(/\/$/, '')}/posts`);
   console.log('    Authorization: Bearer <redacted>');
+  console.log(`    Idempotency-Key: ${out.idempotencyKey}`);
   console.log(indent(JSON.stringify(out.body, null, 2)));
   console.log('    response:');
   console.log(indent(JSON.stringify(out.response, null, 2)));

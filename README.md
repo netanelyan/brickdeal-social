@@ -323,7 +323,7 @@ Requires Node 18+ (developed on 24) and no build step.
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env      # then fill it in
-npm test                  # 702 offline checks, no credentials needed
+npm test                  # 717 offline checks, no credentials needed
 npm run brick-lab         # look at the slides, ~15s a round
 npm run brick-once -- --fixture --no-images   # the whole path, publishing nothing
 npm start
@@ -354,7 +354,10 @@ of it happens at render time. Two scripts exist to look at them:
 - **`brick-once --zernio`** is real: it uploads the slides to Zernio's storage
   (a laptop has no public host), posts the deck through the real API **as an
   inbox draft**, forced for that run whatever the config says, and fetches every
-  media URL from outside to check it answers. Without `--zernio` the request
+  media URL from outside to check it answers. Before it builds anything it asks
+  Zernio whose TikTok `ZERNIO_TIKTOK_ACCOUNT_ID` is and stops unless the username
+  is `ZERNIO_TIKTOK_USERNAME` (`brickdealil` when unset), because the key reaches
+  every TikTok account in the Zernio account. Without `--zernio` the request
   goes to a fake client and nothing reaches Zernio or TikTok.
 
 TikTok is connected in Zernio's dashboard; `.env` takes `ZERNIO_API_KEY` (and
@@ -416,6 +419,17 @@ waits for it instead. The fallback needs TikTok's own connection
 (`npm run tiktok-token`); without one, a refused deck is retried and held like
 any other failure. `tiktok.fallback: "none"` turns it off. The draft lands in
 the TikTok inbox, not the Drafts folder on the profile.
+
+**Never a draft on top of a post.** Every post carries its own key, sent as
+Zernio's `Idempotency-Key` and stored on the post's `metadata`. When the create
+call times out or fails without a clear answer (a dropped connection, a 5xx),
+the post is looked up by that key before anything else: found, it is the
+result, and no draft is made; looked for and not there, the fallback goes
+ahead. When the lookup cannot run either, nothing is drafted: the deck is
+retried, holding the same key, and Zernio answers the retry with the original
+post if it was made. A status that cannot be read after Zernio gave the post an
+id leaves it pending, and Zernio's own `409` duplicate means the post exists,
+so neither is followed by a draft.
 
 **The daily cap is the lower of 15 and `TIKTOK_DAILY_CAP`**, checked before
 Zernio is asked, and it counts fallback drafts as well as posts.
