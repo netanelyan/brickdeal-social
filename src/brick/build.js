@@ -189,7 +189,7 @@ THE EMPHASIS is the one phrase in the line that gets shouted. Hebrew has no capi
  * lost its model call still has five perfectly good slides, and the pool
  * exists precisely so that the expensive half is optional.
  */
-export async function draftHook(recipe, { rand = Math.random, avoid = [] } = {}) {
+export async function draftHook(recipe, { rand = Math.random, avoid = [], api = null } = {}) {
   const pool = brickConfig().covers.lines;
   // A fallback that cannot hand back a line we are trying to get away from.
   // Without this, asking for a new cover could return the one on screen.
@@ -200,10 +200,12 @@ export async function draftHook(recipe, { rand = Math.random, avoid = [] } = {})
     return { hook: picked.text, emphasis: picked.emphasis, title: recipe.subject, from: 'pool' };
   };
 
-  if (!process.env.ANTHROPIC_API_KEY) return fallback();
+  // `api` is the suite's door: a fake client, so the path from a model's
+  // answer to the cover can be checked without a key or a network.
+  if (!api && !process.env.ANTHROPIC_API_KEY) return fallback();
 
   try {
-    const res = await getClient().messages.create({
+    const res = await (api || getClient()).messages.create({
       model: MODEL,
       max_tokens: 700,
       output_config: { effort: 'low', format: { type: 'json_schema', schema: HOOK_SCHEMA } },

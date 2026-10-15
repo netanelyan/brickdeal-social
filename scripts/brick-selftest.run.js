@@ -2201,6 +2201,38 @@ group('generated photographs post like any other deck');
 }
 
 /* -------------------------------------------------------------------------- */
+group('the Hebrew on a cover is stored in reading order, from the model to the slide');
+
+{
+  const { draftHook } = await import('../src/brick/build.js');
+  const { renderBrickSlideHtml } = await import('../src/render/brickSlide.js');
+
+  // Logical order: the first code point is the first letter a reader reads,
+  // ב of בואו. A string stored backwards would start with the last letter of
+  // the last word, and the slide's own bidi would turn it around a second time.
+  const known = 'בואו תראו כמה כסף אתם חוסכים על סטים';
+  const fake = {
+    messages: {
+      create: async () => ({
+        content: [{ type: 'text', text: JSON.stringify({ hook: known, emphasis: 'כמה כסף', title: 'סטים' }) }],
+        usage: {},
+      }),
+    },
+  };
+  const drawn = await draftHook({ subject: 'סטים', deals: [] }, { api: fake });
+  eq('the model\'s line comes back from draftHook unchanged', drawn.hook, known);
+  eq('beginning with ב, U+05D1', drawn.hook.codePointAt(0).toString(16).toUpperCase(), '5D1');
+  const codepoints = (s) => [...s].map((c) => c.codePointAt(0));
+  eq('every code point in the same order', JSON.stringify(codepoints(drawn.hook)), JSON.stringify(codepoints(known)));
+
+  const html = renderBrickSlideHtml({ hookHe: drawn.hook, emphasisHe: drawn.emphasis, image: null }, { cover: true });
+  const text = html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ');
+  ok('and the cover slide\'s HTML carries it in the same order', text.includes(known));
+  ok('with no bidi override character slipped in around it', !/[‪-‮⁦-⁩]/.test(html.slice(html.indexOf('בואו'), html.indexOf('בואו') + known.length + 80)));
+  ok('in a page that declares itself right to left, so the browser does the reversing for display', /<html lang="he" dir="rtl">/.test(html));
+}
+
+/* -------------------------------------------------------------------------- */
 group('the judge is a setting, and a second one can score beside it');
 
 {
