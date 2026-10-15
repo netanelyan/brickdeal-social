@@ -669,16 +669,22 @@ bot.command('score', (ctx) => {
     return ctx.reply(`🧮 עוד אין פוסטים מנוקדים שפורסמו${s.dropped ? ` · ${s.dropped} נפסלו` : ''}`);
   }
   const lines = s.posts.map(
-    (p) => `${p.score ?? '—'} → ${p.views == null ? 'עוד לא נמדד' : `${p.views.toLocaleString('en-US')} צפיות`} · ${String(p.hook || p.headline || '').slice(0, 40)}`
+    (p) =>
+      `${p.score ?? '—'}${s.compare ? `/${p.compareScore ?? '—'}` : ''} → ${p.views == null ? 'עוד לא נמדד' : `${p.views.toLocaleString('en-US')} צפיות`} · ${String(p.hook || p.headline || '').slice(0, 40)}`
   );
+  const judgeLine = (label, j) => [
+    j.rho == null ? `${label} ρ: אין מספיק נתונים (${j.n} נמדדו)` : `${label} ρ = ${j.rho.toFixed(2)} על ${j.n} פוסטים שנמדדו`,
+    `${j.verdict.state === 'yes' ? '✅' : j.verdict.state === 'no' ? '❌' : '⏳'} ${j.verdict.he}`,
+  ];
   ctx.reply(
     [
       `🧮 ציון מול צפיות · ${s.posts.length} הפוסטים האחרונים (סף ${s.threshold})`,
+      `שופט: ${s.model}${s.compare ? ` · השוואה: ${s.compare.model} (הציון שלו אחרי הלוכסן, לא מחליט)` : ''}`,
       '',
       ...lines,
       '',
-      s.rho == null ? `ρ: אין מספיק נתונים (${s.n} נמדדו)` : `ρ = ${s.rho.toFixed(2)} על ${s.n} פוסטים שנמדדו`,
-      `${s.verdict.state === 'yes' ? '✅' : s.verdict.state === 'no' ? '❌' : '⏳'} ${s.verdict.he}`,
+      ...judgeLine(s.model || '', s),
+      ...(s.compare ? ['', ...judgeLine(s.compare.model || '', s.compare)] : []),
       s.dropped || s.drafts ? `🗑️ ${s.dropped} נפסלו · 📥 ${s.drafts} יצאו כטיוטה` : null,
       s.lastSyncAt ? `📊 צפיות עודכנו לפני ${notify.humanDuration(Date.now() - s.lastSyncAt)}` : '📊 צפיות עוד לא נמשכו',
     ]

@@ -1291,23 +1291,31 @@ function scoresView() {
 
   // The verdict first, in words, because it is the one thing on the page that
   // says whether the rest of it is worth reading.
+  const judge = (j, label) => [
+    el('p', {
+      class: `note ${j.verdict.state === 'no' ? 'bad' : ''}`,
+      text: `${label ? `${label}: ` : ''}${j.verdict.state === 'yes' ? '✅' : j.verdict.state === 'no' ? '❌' : '⏳'} ${j.verdict.he}`,
+    }),
+  ];
   box.append(
     el(
       'div',
       { class: 'card' },
-      el('p', {
-        class: `note ${data.verdict.state === 'no' ? 'bad' : ''}`,
-        text: `${data.verdict.state === 'yes' ? '✅' : data.verdict.state === 'no' ? '❌' : '⏳'} ${data.verdict.he}`,
-      }),
+      ...judge(data, data.compare ? data.model : ''),
+      ...(data.compare ? judge(data.compare, `${data.compare.model} (השוואה, לא מחליט)`) : []),
       el('div', {
         class: 'meta',
         text: [
           data.rho == null ? `ρ: אין מספיק נתונים (${data.n} נמדדו)` : `ρ = ${data.rho.toFixed(2)} על ${data.n} פוסטים`,
+          data.compare?.rho != null ? `השוואה ρ = ${data.compare.rho.toFixed(2)}` : null,
+          `שופט ${data.model}`,
           `סף ${data.threshold}`,
           `${data.dropped} נפסלו`,
           `${data.drafts} יצאו כטיוטה`,
           data.lastSyncAt ? `צפיות עודכנו ${ago(data.lastSyncAt)}` : 'צפיות עוד לא נמשכו',
-        ].join(' · '),
+        ]
+          .filter(Boolean)
+          .join(' · '),
       })
     )
   );
@@ -1317,7 +1325,16 @@ function scoresView() {
   const table = el(
     'table',
     { class: 'list' },
-    el('tr', {}, el('th', { text: 'מתי' }), el('th', { text: 'ציון' }), el('th', { text: 'צפיות' }), el('th', { text: 'שער' }), el('th', { text: 'חלקים' }))
+    el(
+      'tr',
+      {},
+      el('th', { text: 'מתי' }),
+      el('th', { text: 'ציון' }),
+      data.compare ? el('th', { text: 'השוואה' }) : null,
+      el('th', { text: 'צפיות' }),
+      el('th', { text: 'שער' }),
+      el('th', { text: 'חלקים' })
+    )
   );
   for (const p of data.posts) {
     table.append(
@@ -1326,6 +1343,7 @@ function scoresView() {
         {},
         el('td', { class: 'meta', text: p.publishedAt ? clock(p.publishedAt) : '—' }),
         el('td', {}, el('b', { text: p.score == null ? '—' : String(p.score) })),
+        data.compare ? el('td', { class: 'meta', text: p.compareScore == null ? '—' : String(p.compareScore) }) : null,
         el('td', { text: p.views == null ? 'עוד לא נמדד' : p.views.toLocaleString('en-US') }),
         // A link only when it is https: the URL comes from Zernio, and a
         // javascript: URL in an href is code that runs on click.

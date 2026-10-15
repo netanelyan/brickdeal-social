@@ -343,5 +343,7 @@ export function scores({ limit = 30 } = {}) {
     drafts: all.filter((r) => r.path === 'draft').length,
     lastSyncAt: all.reduce((t, r) => Math.max(t, r.viewsAt || 0), 0) || null,
     threshold: configOr((c) => c.score.threshold, null),
+    model: configOr((c) => c.score.model, null),
+    compareModel: configOr((c) => c.score.compareModel, null),
   };
 }

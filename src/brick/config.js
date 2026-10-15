@@ -174,6 +174,17 @@ export function brickConfig() {
   if (!Object.values(weights).some((w) => w > 0)) {
     throw new Error('brick-config.json: score.weights are all zero, so every deck would score 0');
   }
+  // Which model judges, and optionally a second one judging the same decks
+  // beside it. Only `model` decides what is posted; `compareModel` is scored
+  // and stored so /score can show which of the two tracks views better.
+  const model = sc.model === undefined ? DEFAULT_SCORE_MODEL : sc.model;
+  if (typeof model !== 'string' || !/^claude-[a-z0-9.-]+$/.test(model)) {
+    throw new Error(`brick-config.json: score.model must be a Claude model id, not ${JSON.stringify(sc.model)}`);
+  }
+  const compareModel = sc.compareModel ?? null;
+  if (compareModel !== null && (typeof compareModel !== 'string' || !/^claude-[a-z0-9.-]+$/.test(compareModel))) {
+    throw new Error(`brick-config.json: score.compareModel must be a Claude model id or null, not ${JSON.stringify(sc.compareModel)}`);
+  }
 
   cached = {
     copy: { allowTrademark: raw.copy?.allowTrademark === true },
@@ -284,7 +295,7 @@ export function brickConfig() {
       countdownMin: Math.min(slides, Math.max(minSlides, count(deck.countdownMin, 5))),
     },
     approval: { mode },
-    score: { threshold, weights },
+    score: { threshold, weights, model, compareModel: compareModel === model ? null : compareModel },
     tiktok: {
       privacy,
       commercialContentType,
@@ -302,6 +313,9 @@ export function brickConfig() {
 const TIKTOK_PRIVACY = ['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'];
 const TIKTOK_COMMERCIAL = ['none', 'brand_organic', 'brand_content'];
 const TIKTOK_FALLBACKS = ['draft', 'none'];
+// The judge, by default. A vision model a good deal cheaper than Opus, which a
+// call per deck (two with a rebuild) does not need.
+const DEFAULT_SCORE_MODEL = 'claude-sonnet-5-5';
 const APPROVAL_MODES = ['auto', 'manual'];
 // The parts of a deck's score and what each weighs by default. The cover is
 // what most viewers read, so it weighs most.

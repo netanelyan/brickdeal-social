@@ -62,8 +62,23 @@ export function spearman(xs, ys) {
 export const chanceBar = (n) => (n > 1 ? 1.645 / Math.sqrt(n - 1) : 1);
 
 /**
- * The board: the last posts with their score and views, the correlation over
- * the ones that have views, and a verdict in plain words.
+ * One judge against views: the correlation over the posts that have both a
+ * score from it and a view count, and a verdict in plain words.
+ */
+export function judgeAgainstViews(posts, scoreOf) {
+  const measured = posts.filter((p) => scoreOf(p) != null && p.views != null);
+  const n = measured.length;
+  const rho = spearman(
+    measured.map(scoreOf),
+    measured.map((p) => p.views)
+  );
+  const bar = chanceBar(n);
+  return { n, rho, bar, verdict: verdictFor(n, rho, bar) };
+}
+
+/**
+ * The board: the last posts with their score (and the second judge's, when
+ * one is set) and views, each judge's correlation, and a verdict in words.
  *
  * `rows` is newest first, as store.scoredItems returns them.
  */
@@ -74,40 +89,41 @@ export function scoreboard(rows) {
     hook: r.hook || null,
     recipe: r.recipe || null,
     score: Number.isFinite(r.total) ? r.total : null,
+    model: r.model || null,
     sub: r.sub || null,
+    compareScore: Number.isFinite(r.compare?.total) ? r.compare.total : null,
+    compareModel: r.compare?.model || null,
     views: Number.isFinite(r.views) ? r.views : null,
     likes: r.likes ?? null,
     url: r.url || null,
     publishedAt: r.publishedAt || r.ts || null,
     viewsAt: r.viewsAt || null,
   }));
-  const measured = posts.filter((p) => p.score != null && p.views != null);
-  const n = measured.length;
-  const rho = spearman(
-    measured.map((p) => p.score),
-    measured.map((p) => p.views)
-  );
-  const bar = chanceBar(n);
+  const primary = judgeAgainstViews(posts, (p) => p.score);
+  const compared = posts.some((p) => p.compareScore != null);
+  const second = compared ? judgeAgainstViews(posts, (p) => p.compareScore) : null;
+  return {
+    posts,
+    ...primary,
+    minPosts: MIN_POSTS,
+    // The second judge, when one has scored any of these posts. Same test,
+    // same bar; it decided nothing, so this is the only place it can show
+    // whether it would have been the better judge.
+    compare: second ? { model: posts.find((p) => p.compareModel)?.compareModel || null, ...second } : null,
+  };
+}
 
-  let verdict;
+function verdictFor(n, rho, bar) {
   if (n < MIN_POSTS) {
-    verdict = {
-      state: 'early',
-      he: `עוד מוקדם לדעת: ${n} פוסטים נמדדו, צריך ${MIN_POSTS}.`,
-    };
-  } else if (rho == null || rho < bar) {
-    verdict = {
+    return { state: 'early', he: `עוד מוקדם לדעת: ${n} פוסטים נמדדו, צריך ${MIN_POSTS}.` };
+  }
+  if (rho == null || rho < bar) {
+    return {
       state: 'no',
       he:
         `הציון לא מנבא צפיות. על ${n} פוסטים הקשר בין הציון לצפיות הוא ρ = ${rho == null ? '—' : rho.toFixed(2)}, ` +
         `ומקרה לבד מגיע ל-${bar.toFixed(2)}. כרגע הסף מסנן לפי משהו שלא קשור לכמה אנשים צופים.`,
     };
-  } else {
-    verdict = {
-      state: 'yes',
-      he: `הציון מנבא צפיות: ρ = ${rho.toFixed(2)} על ${n} פוסטים, מעל ${bar.toFixed(2)} שמקרה לבד היה נותן.`,
-    };
   }
-
-  return { posts, n, rho, bar, minPosts: MIN_POSTS, verdict };
+  return { state: 'yes', he: `הציון מנבא צפיות: ρ = ${rho.toFixed(2)} על ${n} פוסטים, מעל ${bar.toFixed(2)} שמקרה לבד היה נותן.` };
 }

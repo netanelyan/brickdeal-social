@@ -2169,6 +2169,7 @@ group('what the review found — each one held to a test');
   throws('approval.mode: "" is refused rather than read as auto', () =>
     settings.writeRaw(JSON.stringify({ ...JSON.parse(original), approval: { mode: '' } }))
   );
+  throws('score.model must be a Claude model id', () => settings.writeRaw(withScore({ model: 'gpt-something' })));
   throws('tiktok.fallback must be draft or none', () =>
     settings.writeRaw(JSON.stringify({ ...JSON.parse(original), tiktok: { ...JSON.parse(original).tiktok, fallback: 'maybe' } }))
   );
@@ -2197,6 +2198,66 @@ group('generated photographs post like any other deck');
   ok('a deck of generated photographs is a direct post, not an inbox draft', !('draft' in body.tiktokSettings));
   ok('and carries no AI-label field', !('video_made_with_ai' in body.tiktokSettings));
   ok('there is no AI-photo policy in the config any more', !('aiPhotos' in brickConfig().tiktok));
+}
+
+/* -------------------------------------------------------------------------- */
+group('the judge is a setting, and a second one can score beside it');
+
+{
+  const sc = await import('../src/brick/score.js');
+  const settings = await import('../src/ops/settings.js');
+  const { brickConfig } = await import('../src/brick/config.js');
+  const { scoreboard } = await import('../src/ops/scoreboard.js');
+
+  eq('the judge is not Opus by default', brickConfig().score.model, 'claude-sonnet-5-5');
+  eq('and there is no second judge unless one is set', brickConfig().score.compareModel, null);
+
+  const original = settings.readRaw();
+  const raw = JSON.parse(original);
+  settings.writeRaw(JSON.stringify({ ...raw, score: { ...raw.score, compareModel: 'claude-opus-5-5' } }));
+
+  const asked = [];
+  const judging = (byModel) => {
+    const reply = (model) => ({
+      content: [{ type: 'text', text: JSON.stringify({ hook: byModel[model], slide1: byModel[model], photos: byModel[model], savings: byModel[model], variety: byModel[model], notes: 'n' }) }],
+      stop_reason: 'end_turn',
+      usage: {},
+      model,
+    });
+    const create = async (params) => (asked.push(params.model), reply(params.model));
+    return { messages: { create }, beta: { messages: { create } } };
+  };
+  const now = Date.now();
+  const deck = {
+    id: 'cmp',
+    tiktokCaption: 'כיתוב',
+    deck: {
+      recipe: 'savings',
+      hookHe: 'בואו תראו כמה כסף אתם חוסכים',
+      slides: Array.from({ length: 8 }, (_, i) => ({
+        productId: `c${i}`,
+        nameHe: `סט ${'אבגדהוזח'[i]}`,
+        image: { provenance: 'generated', checked: true },
+        deal: { price: 100, link: 'https://s.click.aliexpress.com/e/_r', image: 'https://example.invalid/a.jpg', priceCheckedAt: new Date(now - DAY).toISOString() },
+      })),
+      tiktok: [{ cover: true }, ...Array.from({ length: 8 }, () => ({})), { end: true }],
+    },
+  };
+  const r = await sc.scoreDeck(deck, { now, api: judging({ 'claude-sonnet-5-5': 60, 'claude-opus-5-5': 90 }), sheet: 'AAAA' });
+  ok('both judges are asked', asked.includes('claude-sonnet-5-5') && asked.includes('claude-opus-5-5'));
+  eq('the decision is the first judge\'s', r.pass, false);
+  eq('its score is the deck\'s score', r.total, 60);
+  eq('the second judge\'s is stored beside it', r.compare?.total, 90);
+  eq('under its own model', r.compare?.model, 'claude-opus-5-5');
+
+  settings.writeRaw(original);
+  eq('and the config goes back', brickConfig().score.compareModel, null);
+
+  const rows = Array.from({ length: 6 }, (_, i) => ({ id: `r${i}`, total: 60 + i, views: 100 * (6 - i), compare: { model: 'claude-opus-5-5', total: 60 + i, }, path: 'published' }));
+  rows.forEach((row, i) => (row.compare.total = 50 + 10 * i));
+  const board = scoreboard(rows);
+  ok('/score has a correlation for each judge', board.rho != null && board.compare?.rho != null);
+  eq('labelled with the second judge\'s model', board.compare?.model, 'claude-opus-5-5');
 }
 
 /* -------------------------------------------------------------------------- */

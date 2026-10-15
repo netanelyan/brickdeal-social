@@ -753,6 +753,7 @@ const unbuildable = (why) => ({
 
 /** The score as it is kept on the deck and in the store: everything but the noise. */
 const compact = (r, attempt, rebuilt) => ({
+  compare: r.compare || null,
   attempt,
   rebuilt: rebuilt || null,
   at: r.at,
@@ -869,9 +870,11 @@ export async function autoPipeline({ request = null, actor = null, progress = ()
       recipe: cand.deck.recipe,
       total: final.total,
       sub: final.sub,
+      model: final.model || null,
       threshold: final.threshold,
       attempts: scores.length,
       scores,
+      compare: final.compare || null,
       path: 'queued',
     });
     record('auto:queued', actor, { key: deckId, headline, score: final.total });
@@ -889,9 +892,11 @@ export async function autoPipeline({ request = null, actor = null, progress = ()
     recipe: built?.recipe || proposal.recipe,
     total: final.total,
     sub: final.sub,
+    model: final.model || null,
     threshold: final.threshold,
     attempts: scores.length,
     scores,
+    compare: final.compare || null,
     path: 'dropped',
     reason: why,
   });

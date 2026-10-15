@@ -617,9 +617,16 @@
       "Below `threshold` the deck is rebuilt once, with a new cover when the",
       "cover is its weakest part and with different sets otherwise, and dropped",
       "if it still falls short. Every score is kept, so /score can show whether",
-      "it predicts views at all."
+      "it predicts views at all.",
+      "",
+      "`model` is the judge whose score decides. `compareModel`, when set, judges",
+      "every deck as well, on the same contact sheet; its score is stored beside",
+      "the first and shown on /score against views, and decides nothing. Set it to",
+      "null to stop paying for the second call."
     ],
     "threshold": 70,
+    "model": "claude-sonnet-5-5",
+    "compareModel": null,
     "weights": { "hook": 0.3, "slide1": 0.2, "photos": 0.2, "savings": 0.2, "variety": 0.1 }
   },
 

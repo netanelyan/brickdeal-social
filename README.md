@@ -323,7 +323,7 @@ Requires Node 18+ (developed on 24) and no build step.
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env      # then fill it in
-npm test                  # 685 offline checks, no credentials needed
+npm test                  # 696 offline checks, no credentials needed
 npm run brick-lab         # look at the slides, ~15s a round
 npm run brick-once -- --fixture --no-images   # the whole path, publishing nothing
 npm start
@@ -438,9 +438,10 @@ vision check (a catalogue photo that nothing screened does not count); nothing a
 model or the feed wrote carries the trademark; there are eight sets, a cover
 and an end card; and the cover is within the word limit.
 
-**Stage B is one model call.** The judge sees every frame of the deck as one
-numbered contact sheet, next to the price table it was built from, and the
-measured covers with their view counts. It returns five scores from 0 to 100:
+**Stage B is one model call.** The judge (`score.model`, Claude Sonnet 5.5 by
+default, a vision model a good deal cheaper than Opus) sees every frame of the
+deck as one numbered contact sheet, next to the price table it was built from,
+and the measured covers with their view counts. It returns five scores from 0 to 100:
 the hook, the first set, the photographs and their legibility, the savings, and
 the variety of the sets. The total is their weighted average, computed in code
 (`score.weights`). An answer that is not clean JSON, or an API error, is a
@@ -451,6 +452,12 @@ once (a new cover when the cover is its weakest part or the only gate it
 failed, different sets otherwise) and dropped if it still falls short, with one
 line in Telegram saying why. Every score, the rebuilt ones included, is kept on
 the deck.
+
+**A second judge can score beside it.** Set `score.compareModel` and every deck
+is scored by both models on the same contact sheet. Only `score.model` decides
+what is posted; the second score is stored next to the first, and `/score` and
+the panel show each model's scores against views, with its own correlation, so
+the cheaper judge can be held against a stronger one before trusting it.
 
 **Then the drip posts it, never sooner than `POST_INTERVAL_MINUTES` after the
 last post**, whatever made that one. `DECKS_PER_DAY` still caps how many decks

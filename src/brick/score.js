@@ -36,10 +36,11 @@ import { measuredPosts } from '../store.js';
 
 export const SUBSCORES = ['hook', 'slide1', 'photos', 'savings', 'variety'];
 
-const MODEL = () => process.env.SCORE_MODEL || 'claude-opus-5-5';
 // Models that take the server-side refusal fallback. A judge that is refused
 // would otherwise drop the deck, which is safe but wasteful.
 const FALLBACK_MODELS = new Set(['claude-opus-5-5', 'claude-opus-5', 'claude-fable-5-1', 'claude-sonnet-5-5']);
+// Models that take `effort`. Haiku 4.5 and Sonnet 4.5 refuse the parameter.
+const takesEffort = (model) => !/(?:haiku|sonnet)-4-5/.test(model);
 
 let client = null;
 const getClient = () => (client ??= new Anthropic());
@@ -308,9 +309,11 @@ function pruneSheets(dir) {
 /**
  * Stage B: one call, strict answer. Never throws; `{ ok: false, error }` for
  * anything that is not a clean score.
+ *
+ * `model` is the judge, score.model in brick-config.json unless one is handed
+ * in; scoreDeck hands in score.compareModel for the second opinion.
  */
-export async function modelScore(cand, { api = null, sheet = null, weights = brickConfig().score.weights } = {}) {
-  const model = MODEL();
+export async function modelScore(cand, { api = null, sheet = null, weights = brickConfig().score.weights, model = brickConfig().score.model } = {}) {
   try {
     const image = sheet || (await contactSheet(cand)).base64;
     const c = api || getClient();
@@ -318,7 +321,10 @@ export async function modelScore(cand, { api = null, sheet = null, weights = bri
     const params = {
       model,
       max_tokens: 16000,
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCORE_SCHEMA } },
+      output_config: {
+        ...(takesEffort(model) ? { effort: 'medium' } : {}),
+        format: { type: 'json_schema', schema: SCORE_SCHEMA },
+      },
       system: [{ type: 'text', text: scoreSystem(benchmarks(measuredPosts())), cache_control: { type: 'ephemeral' } }],
       messages: [
         {
@@ -339,9 +345,9 @@ export async function modelScore(cand, { api = null, sheet = null, weights = bri
     if (res.stop_reason === 'max_tokens') return { ok: false, error: 'the judge ran out of tokens before answering' };
     const text = (res.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
     const parsed = parseScore(text, { weights });
-    return parsed.ok ? { ...parsed, model: res.model || model } : parsed;
+    return parsed.ok ? { ...parsed, model: res.model || model } : { ...parsed, model };
   } catch (e) {
-    return { ok: false, error: `the judge could not run: ${e.message}` };
+    return { ok: false, model, error: `the judge could not run: ${e.message}` };
   }
 }
 
@@ -356,15 +362,38 @@ export async function modelScore(cand, { api = null, sheet = null, weights = bri
  * `stage` is where it stopped: 'A' when a gate failed, 'B' otherwise.
  */
 export async function scoreDeck(cand, { now = Date.now(), api = null, sheet = null } = {}) {
-  const { threshold, weights } = brickConfig().score;
+  const { threshold, weights, model, compareModel } = brickConfig().score;
   const at = new Date(now).toISOString();
   const a = gates(cand, { now });
   if (!a.ok) {
     return { at, stage: 'A', pass: false, total: null, sub: null, threshold, gates: a.failures, why: a.failures.map((f) => f.why).join('; ') };
   }
-  const b = await modelScore(cand, { api, sheet, weights });
+
+  // One sheet for both judges, so the second opinion is about the same picture.
+  let image = sheet;
+  if (!image) {
+    try {
+      image = (await contactSheet(cand)).base64;
+    } catch (e) {
+      const error = `the contact sheet could not be made: ${e.message}`;
+      return { at, stage: 'B', pass: false, total: null, sub: null, threshold, gates: [], model, error, why: error };
+    }
+  }
+
+  // The second judge runs beside the first and decides nothing: its score is
+  // kept so /score can show which of the two tracks views.
+  const [b, c] = await Promise.all([
+    modelScore(cand, { api, sheet: image, weights, model }),
+    compareModel ? modelScore(cand, { api, sheet: image, weights, model: compareModel }) : null,
+  ]);
+  const compare = c
+    ? c.ok
+      ? { model: c.model, total: c.total, sub: c.sub, weakest: c.weakest, notes: c.notes }
+      : { model: c.model, total: null, sub: null, error: c.error }
+    : null;
+
   if (!b.ok) {
-    return { at, stage: 'B', pass: false, total: null, sub: null, threshold, gates: [], error: b.error, why: b.error };
+    return { at, stage: 'B', pass: false, total: null, sub: null, threshold, gates: [], model: b.model, error: b.error, why: b.error, compare };
   }
   const pass = b.total >= threshold;
   return {
@@ -378,6 +407,7 @@ export async function scoreDeck(cand, { now = Date.now(), api = null, sheet = nu
     model: b.model,
     threshold,
     gates: [],
+    compare,
     why: pass ? null : `${b.total} < ${threshold}, weakest: ${b.weakest}`,
   };
 }
