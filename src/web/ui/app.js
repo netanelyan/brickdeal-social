@@ -1127,8 +1127,7 @@ function queueView() {
         el(
           'td',
           {},
-          el('span', { class: 'tag', text: targetsHe(q.targets) || 'אין יעד' }),
-          q.draft ? el('span', { class: 'tag warn', text: 'טיקטוק: טיוטה (AI)' }) : null
+          el('span', { class: 'tag', text: targetsHe(q.targets) || 'אין יעד' })
         ),
         may('act')
           ? el(

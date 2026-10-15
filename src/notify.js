@@ -48,9 +48,10 @@ export function published({ headline, succeeded, failed = [], drafted = [], scor
   // reorders the words around it (see withDetail).
   const parts = [];
   if (posted.length) parts.push(`📤 פורסם: ${targetsHe(posted)}`);
-  // A draft is the one case that needs a person, so it says what to do.
-  // (Inbox, not the Drafts folder; it is in the README.)
-  if (drafted.length) parts.push(`📥 ${targetsHe(drafted)}: טיוטה בתיבה — לסמן "AI" ולפרסם באפליקציה`);
+  // A draft is the one case that needs a person: Zernio refused the post and it
+  // fell back to the inbox (why is in the notes message). Inbox, not the Drafts
+  // folder on the profile; it is in the README.
+  if (drafted.length) parts.push(`📥 ${targetsHe(drafted)}: טיוטה בתיבה — לפרסם באפליקציה`);
   if (score != null) parts.push(`ציון ${score}`);
   for (const f of failed) parts.push(`⚠️ ${TARGET_HE[f.target] || f.target}: ${f.message}`);
   return `${parts.join(' · ')} — ${headline}${link ? `\n${link}` : ''}`;

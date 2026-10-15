@@ -353,21 +353,24 @@ npm run admin -- remove <username>
 npm run admin -- signout-all                # replaces the session signing key
 ```
 
-## 9. TikTok, through Zernio
+## 9. TikTok, through Zernio, with TikTok's own API as the fallback
 
 Connect the TikTok account in Zernio's dashboard. Then, in `.env`:
 
 - `ZERNIO_API_KEY`, from Zernio's API settings.
-- `ZERNIO_TIKTOK_ACCOUNT_ID`, the id Zernio gives the connected TikTok account.
+- `ZERNIO_TIKTOK_ACCOUNT_ID`, only if Zernio holds more than one TikTok account.
 
 Zernio fetches the slides from `CARD_PUBLIC_BASE_URL`, so that has to be live
-first. There is no TikTok developer app, redirect URI or domain verification on
-this side any more: Zernio holds the connection and rehosts the images.
+first. The privacy level, the sound and the commercial disclosure are in the
+`tiktok` section of `brick-config.json`.
 
-The privacy level, the sound and the commercial disclosure are in the `tiktok`
-section of `brick-config.json`. `/tiktok` asks Zernio which privacy levels the
-account allows and says plainly when the configured one is not among them,
-because every post would be refused until it is fixed.
+The fallback, an inbox draft when Zernio refuses a deck, goes through TikTok's
+own API and needs the connection this bot always had: `TIKTOK_CLIENT_KEY`,
+`TIKTOK_CLIENT_SECRET`, `TIKTOK_REDIRECT_URI`, the slides' domain verified under
+URL properties in TikTok's developer portal (`TIKTOK_VERIFIED_DOMAINS` names it
+when there is more than one host), and a token from `npm run tiktok-token` run as
+the service user. Without it a refused deck is retried and held instead.
+`/tiktok` says which of the two is ready.
 
 ---
 

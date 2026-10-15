@@ -5,14 +5,15 @@ import * as jobs from './jobs.js';
 import { telegram as surface } from './surface.js';
 import { publishNext } from './publish.js';
 import { proposeDeck as planDeck, buildProposed, draftHook, countdownHook } from '../brick/build.js';
-import { toBrickCandidate, brickApprovalMessage, routeHe, tiktokRoute } from '../brick/candidate.js';
+import { toBrickCandidate, brickApprovalMessage } from '../brick/candidate.js';
 import { scoreDeck, decide, scoreLine } from '../brick/score.js';
 import { zernioConfigured, fetchViews } from '../publish/zernio.js';
 import { brickConfig } from '../brick/config.js';
 import { proposalMessage, proposalWarning } from '../brick/proposal.js';
 import { renderBrickCover, renderBrickSlideAt, coverSlide } from '../render/brickDeck.js';
 import { cachedShotFor, shotOrProduct } from '../images/homeShot.js';
-import { creatorSummary, defaultPrivacy, nextPrivacy, privacyHe, describeError as describeTikTokError } from '../publish/zernio.js';
+import { creatorSummary, describeZernioError } from '../publish/zernio.js';
+import { defaultPrivacy, nextPrivacy, privacyHe } from '../publish/tiktok.js';
 import { targetsForKind, targetsHe, liveTargets } from '../publish/targets.js';
 import { runOverridden, noteOverride } from '../override.js';
 
@@ -90,10 +91,6 @@ const say = (text) => surface().say(text).catch(() => {});
  */
 export async function attachTikTok(cand) {
   if (!cand.publishTargets?.includes('tiktok')) return cand;
-  // A draft has no privacy level to show you. TikTok asks you in the app when
-  // you post it, so asking here would spend a call to display a choice that
-  // is not yours to make.
-  if (cand.tiktokDraft) return cand;
   try {
     const info = await creatorSummary();
     return {
@@ -101,11 +98,11 @@ export async function attachTikTok(cand) {
       tiktok: {
         username: info.username,
         options: info.options,
-        privacy: defaultPrivacy(info.options),
+        privacy: defaultPrivacy(info.options, brickConfig().tiktok.privacy),
       },
     };
   } catch (e) {
-    const detail = describeTikTokError(e);
+    const detail = describeZernioError(e);
     console.error('tiktok: creator_info failed:', detail);
     return { ...cand, tiktok: { error: detail, options: [] } };
   }
@@ -166,14 +163,13 @@ export async function approve(key, { actor = null, tg = null } = {}) {
   if (!cand) return { ok: false, reason: 'gone', said: 'כבר טופל' };
   store.clearPendingEdit(key);
 
-  // Everything waits its turn in the queue, a TikTok draft included. A draft
-  // used to skip the drip, on the grounds that an inbox is not a feed. Through
-  // Zernio a draft counts against the same daily caps as a post, so it is paced
-  // like one.
+  // Everything waits its turn in the queue. TikTok used to be an inbox draft
+  // sent at once, on the grounds that an inbox is not a feed; it is a public
+  // post through Zernio now, and the drip paces it like one.
   const targets = cand.pendingTargets?.length ? cand.pendingTargets : cand.publishTargets || [];
   if (targets.length) store.enqueue({ ...cand, pendingTargets: targets });
   const pos = store.queueSize();
-  const said = `✅ אושר — ${pos} בתור${cand.tiktokDraft && targets.includes('tiktok') ? ' · טיקטוק כטיוטה (תמונות AI)' : ''}`;
+  const said = `✅ אושר — ${pos} בתור`;
 
   const who = describeActor(actor);
   await surface().settle(tg || cand.tg, who ? `${said} · ${who}` : said, cand);
@@ -399,20 +395,7 @@ export function newPhoto(key, n, { actor = null } = {}) {
         deck.preview[at + 1] = deck[deck.instagram ? 'instagram' : 'tiktok'][at + 1];
       }
 
-      // A new photograph can be a generated one, which changes how the deck
-      // reaches TikTok. Worked out again here so the card says what will
-      // happen; publishZernio checks it again at publish time either way.
-      const route = cand.tiktokRoute ? tiktokRoute(deck.slides) : null;
-      store.updateStaging(key, {
-        deck,
-        ...(route
-          ? {
-              tiktokRoute: route,
-              tiktokDraft: route.path === 'draft',
-              publishTargets: route.path === 'skip' ? (cand.publishTargets || []).filter((t) => t !== 'tiktok') : cand.publishTargets,
-            }
-          : {}),
-      });
+      store.updateStaging(key, { deck });
       const fresh = store.getStaging(key);
       console.log(`deck: new photo for slide ${n} · ${image.provenance} · ${slide.nameHe}`);
 
@@ -660,8 +643,6 @@ export function buildProposal(key, { targets = ['instagram'], actor = null } = {
         }
 
         // Rendered for the chosen destination only, and staged owing just that.
-        // Whether TikTok gets a post or an inbox draft is decided inside, by
-        // the photographs. See tiktokRoute.
         const cand = await toBrickCandidate(built, { targets });
 
         if (store.hasPublished(cand.id)) {
@@ -878,11 +859,7 @@ export async function autoPipeline({ request = null, actor = null, progress = ()
   const deckId = cand?.id || null;
   const headline = cand?.headline || proposal.subject;
 
-  // A pass that the AI-photo policy kept off TikTok, with nowhere else to go,
-  // is not a post. Said as a drop with its reason rather than queued to
-  // nowhere.
-  const nowhere = final.pass && cand && !(cand.publishTargets || []).length;
-  if (final.pass && !nowhere) {
+  if (final.pass) {
     store.enqueue({ ...cand, pendingTargets: cand.publishTargets });
     store.noteStagedAt();
     store.recordScore({
@@ -895,17 +872,15 @@ export async function autoPipeline({ request = null, actor = null, progress = ()
       threshold: final.threshold,
       attempts: scores.length,
       scores,
-      route: cand.tiktokRoute?.path || null,
       path: 'queued',
     });
-    record('auto:queued', actor, { key: deckId, headline, score: final.total, route: cand.tiktokRoute?.path || null });
-    // Which path the deck took, in the log. Telegram hears about it once, when
-    // it is actually posted.
-    console.log(`auto: queued ${deckId} · score ${final.total} · ${cand.tiktokRoute ? routeHe(cand.tiktokRoute) : 'no TikTok'}`);
-    return { ok: true, queued: true, id: deckId, headline, score: final.total, route: cand.tiktokRoute?.path || null };
+    record('auto:queued', actor, { key: deckId, headline, score: final.total });
+    // Telegram hears about it once, when it is actually posted.
+    console.log(`auto: queued ${deckId} · score ${final.total} · to ${(cand.publishTargets || []).join(' + ')}`);
+    return { ok: true, queued: true, id: deckId, headline, score: final.total };
   }
 
-  const why = nowhere ? routeHe(cand.tiktokRoute) : final.why;
+  const why = final.why;
   store.noteStagedAt();
   store.recordScore({
     id: deckId,
@@ -917,7 +892,6 @@ export async function autoPipeline({ request = null, actor = null, progress = ()
     threshold: final.threshold,
     attempts: scores.length,
     scores,
-    route: cand?.tiktokRoute?.path || null,
     path: 'dropped',
     reason: why,
   });

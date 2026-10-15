@@ -1,5 +1,7 @@
 import { instagramConfigured } from './instagram.js';
 import { zernioConfigured } from './zernio.js';
+import { tiktokConfigured } from './tiktok.js';
+import { cardHostConfigured } from './imageHosts.js';
 
 // Where an approved post actually goes.
 //
@@ -80,9 +82,11 @@ export function publishTargets(env = process.env) {
   // cards, it just has no channel to post them to afterwards.
   if (env.CHANNEL_ID) targets.push('telegram');
   if (instagramConfigured()) targets.push('instagram');
-  // TikTok goes through Zernio, which holds the TikTok connection itself, so
-  // "configured" here is a Zernio key, the account id and a public slide host.
-  if (zernioConfigured(env)) targets.push('tiktok');
+  // TikTok goes out through Zernio, which needs its key and a public slide
+  // host to fetch from; TikTok's own connection is the inbox-draft fallback.
+  // Either one is enough to make TikTok a destination, as tiyul-social does
+  // with its own connection alone.
+  if ((zernioConfigured(env) && cardHostConfigured(env)) || tiktokConfigured()) targets.push('tiktok');
   return targets;
 }
 

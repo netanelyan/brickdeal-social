@@ -13,7 +13,8 @@ import { subscribe, since as eventsSince, lastId } from '../ops/bus.js';
 import { cardOutputDir } from '../render/index.js';
 import { loadDeals } from '../brick/feed.js';
 import { remainingQuota, describeError as describeIgError, instagramConfigured } from '../publish/instagram.js';
-import { creatorSummary, describeError as describeTikTokError, zernioConfigured, privacyHe } from '../publish/zernio.js';
+import { creatorSummary, describeZernioError as describeTikTokError, zernioConfigured } from '../publish/zernio.js';
+import { privacyHe } from '../publish/tiktok.js';
 
 // The website: the same marketing, from a browser.
 //

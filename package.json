@@ -16,6 +16,7 @@
     "brick-once": "node scripts/brick-once.js",
     "fetch-emoji": "node scripts/fetch-emoji.js",
     "ig-token": "node scripts/ig-token.js",
+    "tiktok-token": "node scripts/tiktok-token.js",
     "contact-sheet": "node scripts/contact-sheet.js"
   },
   "dependencies": {

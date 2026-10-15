@@ -7,7 +7,9 @@ import { brickApprovalMessage, photoSummary } from '../brick/candidate.js';
 import { proposalMessage, proposalWarning } from '../brick/proposal.js';
 import { liveTargets, targetsForKind, allowedForKind, TARGET_HE } from '../publish/targets.js';
 import { instagramConfigured, tokenDaysLeft, authMode } from '../publish/instagram.js';
-import { zernioConfigured, privacyHe, TIKTOK_DAILY_CAP } from '../publish/zernio.js';
+import { zernioConfigured } from '../publish/zernio.js';
+import { privacyHe, tiktokConfigured, tokenHoursLeft as tiktokHoursLeft } from '../publish/tiktok.js';
+import { zernioDailyCap } from '../publish/tiktokRoute.js';
 import { configured as imagesEnabled } from '../images/homeShot.js';
 import { brickConfig } from '../brick/config.js';
 import { scoreboard } from './scoreboard.js';
@@ -175,9 +177,6 @@ export const queue = () =>
       headline: c.headline,
       id: c.id,
       targets: owed,
-      // Only when TikTok is still owed: a deck of generated photographs that
-      // will reach the inbox rather than the feed.
-      draft: Boolean(c.tiktokDraft && owed.includes('tiktok')),
       attempts: c.publishAttempts || 0,
       cover: slideView(c.deck?.preview?.[0] || c.card),
       slides: (c.deck?.preview || []).length || null,
@@ -252,16 +251,19 @@ export const connections = () => ({
         lastOkAt: store.lastOkAt('instagram'),
       }
     : { configured: false },
-  tiktok: zernioConfigured()
+  tiktok: zernioConfigured() || tiktokConfigured()
     ? {
         configured: true,
-        via: 'zernio',
+        via: zernioConfigured() ? 'zernio' : 'draft only',
+        // The inbox-draft fallback's own connection, and how long its token lasts.
+        fallbackReady: tiktokConfigured(),
+        fallbackTokenHoursLeft: tiktokConfigured() ? tiktokHoursLeft() : null,
         privacy: configOr((c) => c.tiktok.privacy, null),
         privacyHe: configOr((c) => privacyHe(c.tiktok.privacy), '?'),
         autoAddMusic: configOr((c) => c.tiktok.autoAddMusic, null),
         commercialContentType: configOr((c) => c.tiktok.commercialContentType, null),
-        aiPhotos: configOr((c) => c.tiktok.aiPhotos, null),
-        dailyCap: TIKTOK_DAILY_CAP(),
+        fallback: configOr((c) => c.tiktok.fallback, null),
+        dailyCap: zernioDailyCap(),
         usedInLast24h: store.tiktokPostsInLast24h(),
         capFreesAt: store.tiktokCapFreesAt(),
         lastOkAt: store.lastOkAt('tiktok'),

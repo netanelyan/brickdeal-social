@@ -24,13 +24,14 @@ import {
   tokenDaysLeft,
   describeError,
 } from './src/publish/instagram.js';
+import { zernioConfigured, creatorSummary, describeZernioError } from './src/publish/zernio.js';
 import {
-  zernioConfigured,
-  creatorSummary,
+  tiktokConfigured,
   privacyHe,
-  describeError as describeTikTokError,
-  TIKTOK_DAILY_CAP,
-} from './src/publish/zernio.js';
+  refreshTikTokToken,
+  tokenHoursLeft as tiktokHoursLeft,
+} from './src/publish/tiktok.js';
+import { zernioDailyCap } from './src/publish/tiktokRoute.js';
 import { brickConfig } from './src/brick/config.js';
 import { targetsForKind, liveTargets, targetsHe } from './src/publish/targets.js';
 import { configured as imagesEnabled } from './src/images/homeShot.js';
@@ -457,9 +458,7 @@ bot.command('queue', (ctx) => {
   const SHOWN = 12;
   const lines = rows.slice(0, SHOWN).map(
     (c) =>
-      `${c.n}. ${c.kind === 'deck' ? '🎞️' : '📰'} ${c.headline}\n   ${targetsHe(c.targets) || 'אין יעד'}${
-        c.draft ? ' · טיקטוק כטיוטה (AI)' : ''
-      }`
+      `${c.n}. ${c.kind === 'deck' ? '🎞️' : '📰'} ${c.headline}\n   ${targetsHe(c.targets) || 'אין יעד'}`
   );
 
   ctx.reply(
@@ -692,7 +691,15 @@ bot.command('resume', (ctx) => ctx.reply(ops.resume({ actor: actorOf(ctx) }).sai
 
 bot.command('tiktok', async (ctx) => {
   if (!zernioConfigured()) {
-    return ctx.reply('טיקטוק לא מחובר.\nהגדר ZERNIO_API_KEY ו-ZERNIO_TIKTOK_ACCOUNT_ID ב-.env (החשבון עצמו מחובר בלוח של Zernio)');
+    return ctx.reply(
+      [
+        'טיקטוק לא מחובר דרך Zernio.',
+        'הגדר ZERNIO_API_KEY ב-.env (והחשבון מחובר בלוח של Zernio).',
+        tiktokConfigured() ? 'עד אז כל מצגת תגיע לטיקטוק רק כטיוטה בתיבה, דרך החיבור הישיר.' : null,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    );
   }
 
   const health = store.targetHealth('tiktok');
@@ -703,8 +710,13 @@ bot.command('tiktok', async (ctx) => {
   // want next to the refusal.
   const local = [
     `⚙️ פרטיות: ${privacyHe(tt.privacy)} · סאונד: ${tt.autoAddMusic ? 'אוטומטי' : 'כבוי'} · תוכן מסחרי: ${tt.commercialContentType}`,
-    `🤖 מצגת עם תמונות AI: ${tt.aiPhotos === 'skip' ? 'לא נשלחת לטיקטוק' : 'טיוטה בתיבה, לסמן ולפרסם ידנית'}`,
-    `📊 ${store.tiktokPostsInLast24h()}/${TIKTOK_DAILY_CAP()} פוסטים ב-24 שעות`,
+    `📊 ${store.tiktokPostsInLast24h()}/${zernioDailyCap()} פוסטים ב-24 שעות`,
+    // The inbox-draft fallback, which needs TikTok's own connection.
+    tt.fallback !== 'draft'
+      ? '📥 גיבוי לטיוטות: כבוי'
+      : tiktokConfigured()
+        ? `📥 גיבוי לטיוטות: מוכן${tiktokHoursLeft() != null ? ` · טוקן ${tiktokHoursLeft()} שעות` : ''}`
+        : '📥 גיבוי לטיוטות: אין חיבור ישיר לטיקטוק (npm run tiktok-token)',
   ];
   if (health.lastOkAt) local.push(`✅ פורסם לאחרונה לפני ${notify.humanDuration(Date.now() - health.lastOkAt)}`);
   else local.push('⚪ עוד לא פורסם לטיקטוק מהמכונה הזו');
@@ -716,7 +728,7 @@ bot.command('tiktok', async (ctx) => {
     const allowed = info.options.includes(tt.privacy) ? '' : `\n🔴 ${privacyHe(tt.privacy)} לא מותר לחשבון — כל פרסום ייכשל עד שזה יתוקן`;
     ctx.reply([`🎵 ${info.username || '?'} · דרך Zernio`, `🔒 רמות פרטיות זמינות: ${levels}${allowed}`, ...local].join('\n'));
   } catch (e) {
-    ctx.reply([`🔴 ${describeTikTokError(e)}`, '', ...local].join('\n'));
+    ctx.reply([`🔴 ${describeZernioError(e)}`, '', ...local].join('\n'));
   }
 });
 
@@ -733,7 +745,7 @@ bot.command('health', (ctx) => {
   const rows = views.health();
   const extra = [];
   if (zernioConfigured()) {
-    const cap = TIKTOK_DAILY_CAP();
+    const cap = zernioDailyCap();
     const used = store.tiktokPostsInLast24h();
     extra.push(`🎵 טיקטוק (Zernio): ${used}/${cap} פוסטים ב-24 שעות האחרונות`);
     if (used >= cap) {
@@ -881,6 +893,9 @@ function tick() {
   if (day !== lastRunDay) {
     lastRunDay = day;
     refreshToken().catch(() => {});
+    // The fallback's token lasts a day, so it is renewed every day whether or
+    // not anything fell back, or the first fallback would find it dead.
+    refreshTikTokToken().catch(() => {});
     // Once a day, views for every scored post, so /score has something to
     // check the scorer against. Reads only, so the pause does not stop it.
     if (zernioConfigured()) ops.syncViews({ actor: { kind: 'timer' } });
@@ -977,7 +992,8 @@ async function main() {
     const tt = brickConfig().tiktok;
     console.log(
       `   tiktok: via Zernio · ${tt.privacy} · music ${tt.autoAddMusic ? 'on' : 'off'} · ` +
-        `commercial ${tt.commercialContentType} · AI-photo decks: ${tt.aiPhotos === 'skip' ? 'kept off TikTok' : 'inbox draft'}`
+        `commercial ${tt.commercialContentType} · cap ${zernioDailyCap()}/24h · ` +
+        `fallback ${tt.fallback === 'draft' ? (tiktokConfigured() ? 'inbox draft' : 'inbox draft, but no TikTok connection') : 'off'}`
     );
     // Said, not fixed. TikTok allows only its Commercial Music Library on a post
     // that discloses commercial content, so auto-added music attaches nothing
@@ -1011,15 +1027,16 @@ async function main() {
     `   proposals ${decksPerDay()}/day between ${runHour()}:00 and ${gatherUntilHour()}:00 · drip every ${minutes()} min`
   );
 
-  // The refresh is "maybe" by nature — it returns early unless the token is
-  // close enough to lapsing to be worth a call — so there is nothing to decide
-  // here beyond letting it fail quietly.
+  // Both refreshes are "maybe" by nature — each returns early unless the token
+  // is close enough to lapsing to be worth a call — so there is nothing to
+  // decide here beyond letting them fail quietly.
   //
   // And they must fail quietly. main() rejecting exits the process, pm2 starts
   // it again, and a refresh is a network call: one unreachable API at boot
   // would otherwise become a restart loop on a bot that had nothing wrong with
   // it. Whatever does not refresh now is retried at the next day change.
   await refreshToken().catch((e) => console.error('instagram token refresh at boot:', e.message));
+  await refreshTikTokToken().catch((e) => console.error('tiktok token refresh at boot:', e.message));
   await probeInstagram();
 
   setInterval(tick, 60_000);

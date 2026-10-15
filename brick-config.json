@@ -625,11 +625,11 @@
 
   "tiktok": {
     "_comment": [
-      "How a deck goes out on TikTok, through Zernio (src/publish/zernio.js).",
+      "How a deck goes out on TikTok: publicly through Zernio, the same way",
+      "tiyul-social posts (src/publish/zernio.js and tiktokRoute.js).",
       "",
-      "`privacy` is checked against the levels TikTok reports for the account",
-      "before every post, and a post is refused rather than moved to another",
-      "level when it is not allowed. One of PUBLIC_TO_EVERYONE,",
+      "`privacy` is sent as it is; a level the account does not allow is refused",
+      "by Zernio and the deck falls back as below. One of PUBLIC_TO_EVERYONE,",
       "MUTUAL_FOLLOW_FRIENDS, FOLLOWER_OF_CREATOR, SELF_ONLY.",
       "",
       "`autoAddMusic` lets TikTok put a sound on the post. It cannot be told",
@@ -642,17 +642,15 @@
       "disclosed post, and auto-added music is not from it. The bot warns about",
       "that combination at boot and changes neither value.",
       "",
-      "`aiPhotos` is what happens to a deck carrying any generated photograph.",
-      "TikTok requires those to be labelled as AI-generated, and a direct photo",
-      "post through the API cannot carry the label (Zernio rejects",
-      "video_made_with_ai on photos). 'draft' sends such a deck to the TikTok",
-      "inbox and tells you on Telegram to add the label and post it. 'skip'",
-      "keeps it off TikTok. Only a deck made entirely of screened seller or",
-      "catalogue photos is posted by itself."
+      "`fallback: \"draft\"` sends a deck Zernio refused, for any reason that is",
+      "not a limit, to the TikTok inbox as a draft through TikTok's own API, and",
+      "the publish notice says so. A limit waits instead, and a deck Zernio is",
+      "still processing is never sent there. 'none' leaves a refused deck to the",
+      "ordinary retry. The daily cap is the lower of 15 and TIKTOK_DAILY_CAP."
     ],
     "privacy": "PUBLIC_TO_EVERYONE",
     "autoAddMusic": true,
     "commercialContentType": "none",
-    "aiPhotos": "draft"
+    "fallback": "draft"
   }
 }

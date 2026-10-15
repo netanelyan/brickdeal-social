@@ -1674,10 +1674,11 @@ group('jobs and the bus');
 }
 
 /* -------------------------------------------------------------------------- */
-group('TikTok through Zernio — the request, and what each answer means');
+group('TikTok through Zernio — ported from tiyul-social, and the inbox draft only as a fallback');
 
 {
   const z = await import('../src/publish/zernio.js');
+  const route = await import('../src/publish/tiktokRoute.js');
   const fixture = JSON.parse(readFileSync(new URL('./fixtures/zernio-request.json', import.meta.url), 'utf8'));
   const images = fixture.mediaItems.map((m) => m.url);
 
@@ -1690,145 +1691,113 @@ group('TikTok through Zernio — the request, and what each answer means');
         : v;
   const same = (a, b) => JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
 
-  const body = z.requestBody({
-    accountId: 'acc_tiktok_1',
-    hook: fixture.content,
-    caption: fixture.tiktokSettings.description,
-    images,
-    privacy: 'PUBLIC_TO_EVERYONE',
-  });
-  ok('the request body matches the snapshot in scripts/fixtures/zernio-request.json', same(body, fixture), JSON.stringify(body));
-  eq('a photo carousel, cover first', `${body.tiktokSettings.media_type}/${body.tiktokSettings.photo_cover_index}`, 'photo/0');
-  eq('with sound', body.tiktokSettings.auto_add_music, true);
-  ok('and no AI flag, which Zernio rejects on a direct photo post', !('video_made_with_ai' in body.tiktokSettings));
-  ok('and no sound id, which only video posts take', !('musicSoundInfo' in body.tiktokSettings));
-  ok('a direct post is not a draft', !('draft' in body.tiktokSettings));
-
-  const drafted = z.requestBody({ accountId: 'acc_tiktok_1', hook: fixture.content, caption: '', images, privacy: 'PUBLIC_TO_EVERYONE', draft: true });
-  eq('a draft goes to the inbox through tiktokSettings.draft', drafted.tiktokSettings.draft, true);
-
-  eq('the title loses its hashtags and links', z.coverTitle('תראו את זה #fyp https://x.co/a brickdeal.co.il'), 'תראו את זה');
-  const long = Array.from({ length: 30 }, () => 'מילה').join(' ');
-  ok('and stops at 90 characters, on a word', z.coverTitle(long).length <= 90 && z.coverTitle(long).endsWith('מילה'));
-
-  // The four kinds publish.js branches on.
-  eq('a daily-limit sentence is a limit', z.classify({ message: 'You have created too many posts in the last 24 hours via the API.' }).kind, 'limit');
-  eq('capacity is a limit', z.classify({ message: 'TikTok direct posting is at capacity right now.' }).kind, 'limit');
-  eq('a 429 is a limit', z.classify({ status: 429 }).kind, 'limit');
-  eq('a bad key is a connection problem', z.classify({ status: 401, code: 'invalid_credentials' }).kind, 'connection');
-  eq('a privacy level the account lacks is a connection problem', z.classify({ message: "Selected privacy level 'X' is not available for this creator." }).kind, 'connection');
-  eq('missing scopes are a connection problem', z.classify({ message: 'Missing required TikTok permissions. Please reconnect with all required scopes.' }).kind, 'connection');
-  eq('a duplicate is the card', z.classify({ status: 409, code: 'content_duplicate' }).kind, 'card');
-  eq('a moderation flag is the card', z.classify({ message: 'TikTok flagged this post as potentially risky (spam_risk)' }).kind, 'card');
-  eq('a 5xx is transient', z.classify({ status: 502 }).kind, 'transient');
-  eq('and so is a sentence nobody has seen', z.classify({ message: 'something odd' }).kind, 'transient');
-
-  // A 207 is a 2xx. The post status decides.
-  const posted = z.interpretPost({ status: 201, json: { post: { _id: 'zp1', status: 'published', platforms: [{ platform: 'tiktok', status: 'published', platformPostUrl: 'https://www.tiktok.com/@b/photo/1' }] } } });
-  eq('a published post gives back its id', posted.postId, 'zp1');
-  eq('and its link', posted.url, 'https://www.tiktok.com/@b/photo/1');
-  const held = z.interpretPost({ status: 207, json: { post: { _id: 'zp3', status: 'scheduled', platforms: [{ platform: 'tiktok', status: 'pending' }] } } });
-  ok('a post Zernio is holding is accepted, not failed', held.pending && held.postId === 'zp3');
-  let refused = null;
-  try {
-    z.interpretPost({ status: 207, json: { post: { _id: 'zp2', status: 'failed', platforms: [{ platform: 'tiktok', status: 'failed', errorMessage: 'TikTok direct posting is at capacity right now.' }] } } });
-  } catch (e) {
-    refused = e;
-  }
-  eq('a 207 with a failed post throws', refused?.name, 'ZernioError');
-  eq('as the kind its message says', refused?.kind, 'limit');
-  eq('naming the Zernio post', refused?.postId, 'zp2');
-
-  // Creator info, before every post.
-  const info = (over = {}) => ({
-    creator: { canPostMore: true },
-    privacyLevels: [{ value: 'PUBLIC_TO_EVERYONE' }, { value: 'SELF_ONLY' }],
-    postingLimits: { interactionSettings: { allow_comment: { enabled: true } } },
-    commercialContentTypes: [{ value: 'none' }, { value: 'brand_organic' }],
-    ...over,
-  });
-  eq('an allowed level passes', z.checkCreator(info(), { privacy: 'PUBLIC_TO_EVERYONE' }).privacy, 'PUBLIC_TO_EVERYONE');
-  let denied = null;
-  try {
-    z.checkCreator(info({ privacyLevels: [{ value: 'SELF_ONLY' }] }), { privacy: 'PUBLIC_TO_EVERYONE' });
-  } catch (e) {
-    denied = e;
-  }
-  eq('a level the account does not allow is refused, not moved', denied?.code, 'privacy_not_allowed');
-  eq('loudly, as a connection problem', denied?.kind, 'connection');
-  const quiet = z.checkCreator(info({ postingLimits: { interactionSettings: { allow_comment: { enabled: false } } } }), { privacy: 'SELF_ONLY' });
-  ok('comments the creator switched off stay off, and that is said', quiet.allowComment === false && quiet.notes.length === 1);
-  let full = null;
-  try {
-    z.checkCreator(info({ creator: { canPostMore: false } }), { privacy: 'SELF_ONLY' });
-  } catch (e) {
-    full = e;
-  }
-  eq('an account that cannot post more is a limit', full?.kind, 'limit');
-
-  // The whole publish against a fake Zernio.
-  const saved = Object.fromEntries(
-    ['ZERNIO_API_KEY', 'ZERNIO_TIKTOK_ACCOUNT_ID', 'CARD_PUBLIC_BASE_URL', 'CARD_PUBLIC_BASE_URLS'].map((k) => [k, process.env[k]])
-  );
-  process.env.ZERNIO_API_KEY = 'test-key';
-  process.env.ZERNIO_TIKTOK_ACCOUNT_ID = 'acc_tiktok_1';
-  process.env.CARD_PUBLIC_BASE_URL = 'https://cards.example.co';
-  delete process.env.CARD_PUBLIC_BASE_URLS;
-
-  const sent = [];
-  const fake = (answer) => ({
-    creatorInfo: async () => info(),
-    createPost: async (b, { idempotencyKey }) => {
-      sent.push({ body: b, idempotencyKey });
-      if (answer instanceof Error) throw answer;
-      return answer;
-    },
-  });
   const cand = {
     kind: 'deck',
     id: 'd1',
-    headline: 'בדיקה',
-    deck: { hookHe: fixture.content, tiktok: images.map((url, i) => ({ url, index: i + 1 })) },
+    headline: 'שם המצגת לתור',
+    deck: { hookHe: fixture.content, tiktok: images.map((url, i) => ({ url, index: i + 1 })), slides: [{ image: { provenance: 'generated', checked: true } }] },
     tiktokCaption: fixture.tiktokSettings.description,
   };
 
-  const done = await z.publishZernio(cand, {
-    client: fake({ status: 201, json: { post: { _id: 'zp9', status: 'published', platforms: [{ platform: 'tiktok', status: 'published' }] } } }),
-  });
-  ok('publishZernio sends exactly the snapshot body', same(sent[0].body, fixture), JSON.stringify(sent[0].body));
-  eq('and returns the Zernio post id', done.postId, 'zp9');
-  ok('with an idempotency key', /^brickdeal-d1-/.test(sent[0].idempotencyKey));
+  const body = z.carouselBody(cand, { accountId: 'acc_tiktok_1', privacy: 'PUBLIC_TO_EVERYONE', autoAddMusic: true });
+  ok('the carousel body matches the snapshot in scripts/fixtures/zernio-request.json', same(body, fixture), JSON.stringify(body));
+  eq('a photo carousel, cover first', `${body.tiktokSettings.media_type}/${body.tiktokSettings.photo_cover_index}`, 'photo/0');
+  eq('published now, not scheduled', body.publishNow, true);
+  eq('with sound', body.tiktokSettings.auto_add_music, true);
+  eq('the title is the cover hook, not the queue name', body.content, fixture.content);
+  ok('no AI-label field, on a deck whose photographs are generated', !('video_made_with_ai' in body.tiktokSettings));
+  ok('and not a draft', !('draft' in body.tiktokSettings));
+  ok('no sound id, which only video posts take', !('musicSoundInfo' in body.tiktokSettings));
+  eq('auto_add_music follows the config', z.carouselBody(cand, { accountId: 'a', privacy: 'SELF_ONLY', autoAddMusic: false }).tiktokSettings.auto_add_music, false);
+  eq('a draft only when asked for in so many words', z.carouselBody(cand, { accountId: 'a', privacy: 'SELF_ONLY', autoAddMusic: true, draft: true }).tiktokSettings.draft, true);
+  eq('the title loses its hashtags and links', z.coverTitle('תראו את זה #fyp https://x.co/a brickdeal.co.il'), 'תראו את זה');
 
-  let timeout = null;
+  // The whole call, against a fake fetch, as tiyul-social tests it.
+  const zenv = { ZERNIO_API_KEY: 'test-key', ZERNIO_TIKTOK_ACCOUNT_ID: 'acc_tiktok_1' };
+  const answering = (posts) => {
+    const seen = [];
+    let polled = 0;
+    const fetchImpl = async (url, opts = {}) => {
+      seen.push({ url: String(url), method: opts.method || 'GET', body: opts.body ? JSON.parse(opts.body) : null });
+      const post = opts.method === 'POST' ? posts.create : posts.poll[Math.min(polled++, posts.poll.length - 1)];
+      return { ok: true, status: opts.method === 'POST' ? 201 : 200, json: async () => ({ post }) };
+    };
+    return { fetchImpl, seen };
+  };
+  const tiktokPost = (status, extra = {}) => ({ _id: 'zp1', status, platforms: [{ platform: 'tiktok', status, ...extra }] });
+
+  const ok1 = answering({ create: tiktokPost('publishing'), poll: [tiktokPost('published', { platformPostUrl: 'https://www.tiktok.com/@b/photo/7300000000000000001' })] });
+  const done = await z.publishZernioTikTok(cand, { privacy: 'PUBLIC_TO_EVERYONE', env: zenv, fetchImpl: ok1.fetchImpl, pollMs: 1 });
+  ok('it posts once and polls until TikTok has it', ok1.seen.filter((s) => s.method === 'POST').length === 1 && done.status === 'published');
+  eq('the post id comes from the URL', done.postId, '7300000000000000001');
+  eq('Zernio\'s own id is kept', done.zernioId, 'zp1');
+  ok('the body it sent is the snapshot', same(ok1.seen[0].body, fixture));
+  eq('a post is not a draft', done.draft, false);
+
+  let refused = null;
   try {
-    await z.publishZernio(cand, { client: fake(new z.ZernioError('socket hang up', { kind: 'transient' })) });
+    const no = answering({ create: tiktokPost('publishing'), poll: [tiktokPost('failed', { errorMessage: 'images rejected', errorCategory: 'user_content' })] });
+    await z.publishZernioTikTok(cand, { privacy: 'SELF_ONLY', env: zenv, fetchImpl: no.fetchImpl, pollMs: 1 });
   } catch (e) {
-    timeout = e;
+    refused = e;
   }
-  ok('after a timeout the key is handed back to be reused', timeout?.idempotencyKey === sent[1].idempotencyKey);
-  await z.publishZernio({ ...cand, zernioKey: timeout.idempotencyKey }, {
-    client: fake({ status: 200, json: { post: { _id: 'zp9', status: 'published', platforms: [{ platform: 'tiktok', status: 'published' }] } } }),
-  });
-  eq('and the retry sends the same key, so Zernio returns the original post', sent[2].idempotencyKey, sent[1].idempotencyKey);
+  ok("a refusal comes back as a card-level error with TikTok's reason", refused && z.isCardLevelZernio(refused) && /images rejected/.test(refused.message));
 
-  let failed = null;
+  const slow = answering({ create: tiktokPost('publishing'), poll: [tiktokPost('publishing')] });
+  const pending = await z.publishZernioTikTok(cand, { privacy: 'SELF_ONLY', env: zenv, fetchImpl: slow.fetchImpl, pollMs: 1, timeoutMs: 5 });
+  ok('a post Zernio is still working on is pending, not an error, so nothing posts it twice', pending.pending === true);
+
+  ok('a 429 is a limit', z.isPlatformLimitZernio(new z.ZernioError('slow down', { status: 429 })));
+  ok('a bad key is a connection problem', z.isConfigProblemZernio(new z.ZernioError('no', { status: 401 })));
+  ok('no connected account is a connection problem', z.isConfigProblemZernio(new z.ZernioError('no', { step: 'config', code: 'no_account' })));
+  let fewImages = null;
   try {
-    await z.publishZernio(cand, {
-      client: fake({ status: 207, json: { post: { _id: 'zp4', status: 'failed', platforms: [{ platform: 'tiktok', status: 'failed', errorMessage: 'TikTok flagged this post as potentially risky (spam_risk)' }] } } }),
-    });
+    await z.publishZernioTikTok({ ...cand, deck: { ...cand.deck, tiktok: [{ url: 'https://c/1.jpg' }] } }, { privacy: 'SELF_ONLY', env: zenv, fetchImpl: ok1.fetchImpl });
   } catch (e) {
-    failed = e;
+    fewImages = e;
   }
-  eq('after a definite failure the key is dropped', failed?.idempotencyKey, null);
+  ok('one image is not a carousel, and that is the card', z.isCardLevelZernio(fewImages));
 
-  const dry = await z.publishZernio({ ...cand, tiktokDraft: true }, { client: fake(null), dryRun: true });
-  ok('a dry run creates nothing', sent.length === 4 && dry.dryRun === true);
-  eq('and shows the draft flag a deck of generated photographs would carry', dry.body.tiktokSettings.draft, true);
-
-  for (const [k, v] of Object.entries(saved)) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
+  // The route: Zernio first, the inbox draft only as a fallback, the cap before both.
+  const cfg = { privacy: 'PUBLIC_TO_EVERYONE', autoAddMusic: true, commercialContentType: 'none', fallback: 'draft' };
+  let drafted = 0;
+  const draft = async (c) => (drafted++, { draft: true, notes: [], tiktokDraft: c.tiktokDraft });
+  const viaZ = await route.publishTikTokRouted(cand, { cfg, deps: { zernio: async () => ({ draft: false, via: 'zernio' }), draft, usedLast24h: () => 0, cap: () => 3 } });
+  ok('a deck goes through Zernio, and no draft is made', viaZ.via === 'zernio' && drafted === 0);
+  const fell = await route.publishTikTokRouted(cand, { cfg, deps: { zernio: async () => { throw new z.ZernioError('boom', { status: 500 }); }, draft, usedLast24h: () => 0, cap: () => 3 } });
+  ok('when Zernio fails, the same deck goes to the inbox as a draft', fell.draft === true && fell.fellBack === true && drafted === 1);
+  ok('and the notice says why', fell.notes.some((n) => /Zernio נכשל/.test(n) && /boom/.test(n)));
+  let limited = null;
+  try {
+    await route.publishTikTokRouted(cand, { cfg, deps: { zernio: async () => { throw new z.ZernioError('slow down', { status: 429 }); }, draft, usedLast24h: () => 0, cap: () => 3 } });
+  } catch (e) {
+    limited = e;
   }
+  ok('a limit is not a failure: the deck waits, no draft is made', limited && z.isPlatformLimitZernio(limited) && drafted === 1);
+  let off = null;
+  try {
+    await route.publishTikTokRouted(cand, { cfg: { ...cfg, fallback: 'none' }, deps: { zernio: async () => { throw new z.ZernioError('boom', { status: 500 }); }, draft, usedLast24h: () => 0, cap: () => 3 } });
+  } catch (e) {
+    off = e;
+  }
+  ok('with the fallback off, the Zernio error goes up as it is', off?.message === 'boom' && drafted === 1);
+  let capped = null;
+  let zernioCalled = false;
+  try {
+    await route.publishTikTokRouted(cand, { cfg, deps: { zernio: async () => { zernioCalled = true; return {}; }, draft, usedLast24h: () => 3, cap: () => 3 } });
+  } catch (e) {
+    capped = e;
+  }
+  ok('the daily cap stops the deck before Zernio is called', capped?.code === 'zernio_daily_cap' && !zernioCalled);
+  ok('and the cap is a limit, so it waits rather than falling back', z.isPlatformLimitZernio(capped));
+  const savedCap = process.env.TIKTOK_DAILY_CAP;
+  process.env.TIKTOK_DAILY_CAP = '40';
+  eq('the cap is never above Zernio\'s 15', route.zernioDailyCap(), 15);
+  process.env.TIKTOK_DAILY_CAP = '3';
+  eq('and follows TIKTOK_DAILY_CAP below it', route.zernioDailyCap(), 3);
+  if (savedCap === undefined) delete process.env.TIKTOK_DAILY_CAP;
+  else process.env.TIKTOK_DAILY_CAP = savedCap;
+  eq('a privacy value nobody knows posts as SELF_ONLY, never public', route.privacyLevel('PUBLIC'), 'SELF_ONLY');
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2007,7 +1976,7 @@ group('auto mode — publish, rebuild once, or drop');
   store.clearQueue();
 
   // Fakes for the five steps. Everything the loop decides is real.
-  const run = async (scores, { publishTargets = ['tiktok'], route = { path: 'post', generated: 0 } } = {}) => {
+  const run = async (scores, { publishTargets = ['tiktok'] } = {}) => {
     const calls = { plan: [], redraw: 0 };
     let n = 0;
     let built = 0;
@@ -2025,8 +1994,6 @@ group('auto mode — publish, rebuild once, or drop');
         headline: `מצגת ${b.slides[0].productId}`,
         deck: { recipe: b.recipe, hookHe: b.hookHe, slides: b.slides },
         publishTargets,
-        tiktokRoute: route,
-        tiktokDraft: route.path === 'draft',
       }),
       score: async () => ({ threshold: 70, gates: [], at: new Date().toISOString(), ...scores[n++] }),
       redraw: async (deck) => {
@@ -2070,13 +2037,8 @@ group('auto mode — publish, rebuild once, or drop');
   ok('and dropped when the rebuild fails too', d.result.dropped);
   said.length = 0;
 
-  const e = await run([pass(90)], { publishTargets: [], route: { path: 'skip', generated: 3 } });
-  ok('a pass the AI-photo policy keeps off TikTok, with nowhere else to go, is not queued', e.result.dropped && store.queueSize() === 0);
-  ok('and the reason says so', /tiktok\.aiPhotos/.test(e.result.why));
-  said.length = 0;
-
-  const f = await run([pass(77)], { route: { path: 'draft', generated: 2 } });
-  ok('a pass with generated photographs is queued as a TikTok draft', f.result.route === 'draft' && store.queuedItems()[0]?.tiktokDraft === true);
+  const f = await run([pass(77)]);
+  ok('a pass with generated photographs is queued as an ordinary post', f.result.queued && !store.queuedItems()[0]?.tiktokDraft);
 
   store.clearQueue();
   detach();
@@ -2120,7 +2082,6 @@ group('closing the loop — views against scores, and the covers fed back');
   const store = await import('../src/store.js');
   const ops = await import('../src/ops/marketing.js');
   const jobs = await import('../src/ops/jobs.js');
-  const z = await import('../src/publish/zernio.js');
 
   const saved = Object.fromEntries(['ZERNIO_API_KEY', 'ZERNIO_TIKTOK_ACCOUNT_ID', 'CARD_PUBLIC_BASE_URL'].map((k) => [k, process.env[k]]));
   process.env.ZERNIO_API_KEY = 'test-key';
@@ -2130,28 +2091,31 @@ group('closing the loop — views against scores, and the covers fed back');
   store.recordScore({ id: 'v1', hook: 'שער אחד', total: 81, path: 'published', zernioPostId: 'zp-v1', publishedAt: Date.now() - 2 * DAY });
   store.recordScore({ id: 'v2', hook: 'שער שניים', total: 72, path: 'draft', zernioPostId: 'zp-v2', publishedAt: Date.now() - DAY });
   let asked = null;
-  z.setClient({
-    analytics: async (query) => {
-      asked = query;
-      return {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    asked = String(url);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
         posts: [
           { _id: 'zp-v1', platformPostUrl: 'https://www.tiktok.com/@b/photo/1', analytics: { views: 1234, likes: 50, comments: 3, shares: 2 } },
           { postId: 'zp-v2', analytics: { views: 99 } },
         ],
         pagination: { pages: 1 },
-      };
-    },
-  });
+      }),
+    };
+  };
   const started = ops.syncViews({ actor: { kind: 'timer' } });
   for (let i = 0; i < 50 && jobs.get(started.job.id)?.status === 'running'; i++) await new Promise((r) => setTimeout(r, 10));
-  eq('the views job asks Zernio about TikTok', asked?.platform, 'tiktok');
+  globalThis.fetch = realFetch;
+  ok('the views job asks Zernio about TikTok', /\/analytics\?platform=tiktok/.test(asked || ''));
   const v1 = store.scoredItems({ limit: 10 }).find((r) => r.id === 'v1');
   eq('and keeps the views next to the score', v1?.views, 1234);
   eq('with the link TikTok gave the post', v1?.url, 'https://www.tiktok.com/@b/photo/1');
   eq('an inbox draft is not measured', store.scoredItems({ limit: 10 }).find((r) => r.id === 'v2')?.views, null);
   ok('and a measured post is what the benchmark list is built from', store.measuredPosts().some((p) => p.id === 'v1'));
 
-  z.setClient(null);
   for (const [k, v] of Object.entries(saved)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -2166,77 +2130,30 @@ group('what the review found — each one held to a test');
   const z = await import('../src/publish/zernio.js');
   const ops = await import('../src/ops/marketing.js');
   const settings = await import('../src/ops/settings.js');
-  const { publishNext } = await import('../src/ops/publish.js');
   const { detach } = await import('../src/ops/surface.js');
   detach();
-
-  const saved = Object.fromEntries(
-    ['ZERNIO_API_KEY', 'ZERNIO_TIKTOK_ACCOUNT_ID', 'CARD_PUBLIC_BASE_URL', 'CARD_PUBLIC_BASE_URLS', 'IG_USER_ID', 'IG_ACCESS_TOKEN', 'CHANNEL_ID'].map((k) => [k, process.env[k]])
-  );
-  process.env.ZERNIO_API_KEY = 'test-key';
-  process.env.ZERNIO_TIKTOK_ACCOUNT_ID = 'acc_tiktok_1';
-  process.env.CARD_PUBLIC_BASE_URL = 'https://cards.example.co';
-  for (const k of ['CARD_PUBLIC_BASE_URLS', 'IG_USER_ID', 'IG_ACCESS_TOKEN', 'CHANNEL_ID']) delete process.env[k];
-  store.clearQueue();
-  store.clearDegraded('tiktok');
-
-  const info = { creator: { canPostMore: true }, privacyLevels: [{ value: 'PUBLIC_TO_EVERYONE' }] };
-  const deck = (over = {}) => ({
-    kind: 'deck',
-    id: 'rev1',
-    headline: 'בדיקה',
-    publishTargets: ['tiktok'],
-    deck: { hookHe: 'שער', tiktok: [{ url: 'https://cards.example.co/r-1.jpg' }], slides: [] },
-    tiktokCaption: 'כיתוב',
-    ...over,
-  });
-
-  // A key a timeout left must survive a later failure before the post call.
-  z.setClient({ creatorInfo: async () => { throw new z.ZernioError('HTTP 503', { kind: 'transient', status: 503 }); } });
-  await publishNext(deck({ zernioKey: 'brickdeal-rev1-saved' }));
-  eq('a creator-info failure leaves the saved idempotency key alone', store.queuedItems()[0]?.zernioKey, 'brickdeal-rev1-saved');
   store.clearQueue();
 
-  z.setClient({
-    creatorInfo: async () => info,
-    createPost: async () => { throw new z.ZernioError('still processing', { kind: 'limit', code: 'idempotency_conflict', status: 409 }); },
-  });
-  await publishNext(deck({ zernioKey: 'brickdeal-rev1-saved' }));
-  eq('and so does Zernio saying the first request is still in flight', store.queuedItems()[0]?.zernioKey, 'brickdeal-rev1-saved');
-  store.clearQueue();
-
-  // A generated photograph is never posted direct, whatever the card says.
-  const sent = [];
-  z.setClient({ creatorInfo: async () => info, createPost: async (b) => (sent.push(b), { status: 201, json: { post: { _id: 'zr', status: 'published', platforms: [{ platform: 'tiktok', status: 'published' }] } } }) });
-  const stale = deck({ id: 'rev2', tiktokDraft: false, deck: { hookHe: 'שער', tiktok: [{ url: 'https://cards.example.co/r-2.jpg' }], slides: [{ image: { provenance: 'generated', checked: true } }] } });
-  await z.publishZernio(stale);
-  eq('a card that says "direct" with a generated photograph on it goes as a draft', sent[0]?.tiktokSettings?.draft, true);
-
-  eq('five waiting drafts need a person, not a wait', z.classify({ message: 'TikTok allows only 5 pending drafts per account in any 24-hour period.' }).kind, 'connection');
-
-  z.setClient({
-    analytics: async () => ({
-      posts: [
-        { _id: 'a', analytics: { views: null } },
-        { _id: 'b', syncStatus: 'pending', analytics: { views: 0 } },
-        { _id: 'c', syncStatus: 'synced', analytics: { views: 0 } },
-      ],
-    }),
-  });
-  const viewed = await z.fetchViews({});
+  const answers = [
+    { _id: 'a', analytics: { views: null } },
+    { _id: 'b', syncStatus: 'pending', analytics: { views: 0 } },
+    { _id: 'c', syncStatus: 'synced', analytics: { views: 0 } },
+  ];
+  const viewed = await z.fetchViews({ env: { ZERNIO_API_KEY: 'k' }, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ posts: answers }) }) });
   eq('a view count that is not a number is not zero', viewed[0].views, null);
   eq('nor is one Zernio has not synced yet', viewed[1].views, null);
   eq('a synced zero is a zero', viewed[2].views, 0);
 
   // The same deck does not go into the queue twice.
-  store.enqueue(deck({ id: 'auto-dup' }));
+  const deck = (id) => ({ kind: 'deck', id, headline: 'בדיקה', publishTargets: ['tiktok'], deck: { hookHe: 'שער', slides: [] } });
+  store.enqueue(deck('auto-dup'));
   const dup = await ops.autoPipeline(
     {},
     {
       targets: ['tiktok'],
       plan: async () => ({ subject: 'סטים', recipe: 'savings' }),
       build: async () => ({ recipe: 'savings', slides: [{ productId: 'dup' }] }),
-      wrap: async () => deck({ id: 'auto-dup' }),
+      wrap: async () => deck('auto-dup'),
       score: async () => ({ stage: 'B', pass: true, total: 90, threshold: 70, gates: [] }),
     }
   );
@@ -2246,74 +2163,77 @@ group('what the review found — each one held to a test');
 
   // A blank value in the config fails closed.
   const original = settings.readRaw();
-  const withScore = (score) => JSON.stringify({ ...JSON.parse(original), score });
+  const withScore = (score) => JSON.stringify({ ...JSON.parse(original), score: { ...JSON.parse(original).score, ...score } });
   throws('score.threshold: null is refused rather than read as 0', () => settings.writeRaw(withScore({ threshold: null })));
   throws('so is a threshold written as a string', () => settings.writeRaw(withScore({ threshold: '70' })));
   throws('approval.mode: "" is refused rather than read as auto', () =>
     settings.writeRaw(JSON.stringify({ ...JSON.parse(original), approval: { mode: '' } }))
   );
-  eq('and the file is untouched after all three', settings.readRaw(), original);
-
-  z.setClient(null);
-  for (const [k, v] of Object.entries(saved)) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
+  throws('tiktok.fallback must be draft or none', () =>
+    settings.writeRaw(JSON.stringify({ ...JSON.parse(original), tiktok: { ...JSON.parse(original).tiktok, fallback: 'maybe' } }))
+  );
+  eq('and the file is untouched after all of them', settings.readRaw(), original);
 }
 
+
 /* -------------------------------------------------------------------------- */
-group('a generated photograph sends the deck to the inbox, not the feed');
+group('generated photographs post like any other deck');
 
 {
-  const { tiktokRoute } = await import('../src/brick/candidate.js');
-  const shot = (provenance) => ({ image: { provenance, checked: true } });
-  eq('screened seller photos only: posted', tiktokRoute([shot('stock'), shot('stock')]).path, 'post');
-  const one = tiktokRoute([shot('stock'), shot('generated'), shot('stock')]);
-  eq('one generated photograph: an inbox draft', one.path, 'draft');
-  eq('and it counts them, for the message', one.generated, 1);
-  eq('the policy can keep such a deck off TikTok instead', tiktokRoute([shot('generated')], 'skip').path, 'skip');
-  eq('there is no policy that posts it unlabelled', tiktokRoute([shot('generated')], 'post').path, 'draft');
+  const z = await import('../src/publish/zernio.js');
+  const { brickConfig } = await import('../src/brick/config.js');
+  const generated = {
+    kind: 'deck',
+    id: 'gen1',
+    headline: 'סטים',
+    publishTargets: ['tiktok'],
+    deck: {
+      hookHe: 'שער',
+      slides: [{ image: { provenance: 'generated', checked: true } }, { image: { provenance: 'generated', checked: true } }],
+      tiktok: [{ url: 'https://cards.example.co/g-1.jpg' }, { url: 'https://cards.example.co/g-2.jpg' }],
+    },
+  };
+  const body = z.carouselBody(generated, { accountId: 'a', privacy: 'PUBLIC_TO_EVERYONE', autoAddMusic: true });
+  ok('a deck of generated photographs is a direct post, not an inbox draft', !('draft' in body.tiktokSettings));
+  ok('and carries no AI-label field', !('video_made_with_ai' in body.tiktokSettings));
+  ok('there is no AI-photo policy in the config any more', !('aiPhotos' in brickConfig().tiktok));
 }
 
 /* -------------------------------------------------------------------------- */
-group('publishing through Zernio — the four kinds of failure, end to end');
+group('publishing through Zernio — every kind of failure, end to end');
 
 {
   const store = await import('../src/store.js');
-  const z = await import('../src/publish/zernio.js');
   const { publishNext } = await import('../src/ops/publish.js');
   const { detach } = await import('../src/ops/surface.js');
   detach();
 
   const saved = Object.fromEntries(
-    ['ZERNIO_API_KEY', 'ZERNIO_TIKTOK_ACCOUNT_ID', 'CARD_PUBLIC_BASE_URL', 'CARD_PUBLIC_BASE_URLS', 'IG_USER_ID', 'IG_ACCESS_TOKEN', 'CHANNEL_ID'].map(
+    ['ZERNIO_API_KEY', 'ZERNIO_TIKTOK_ACCOUNT_ID', 'CARD_PUBLIC_BASE_URL', 'CARD_PUBLIC_BASE_URLS', 'IG_USER_ID', 'IG_ACCESS_TOKEN', 'CHANNEL_ID', 'TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET'].map(
       (k) => [k, process.env[k]]
     )
   );
   process.env.ZERNIO_API_KEY = 'test-key';
   process.env.ZERNIO_TIKTOK_ACCOUNT_ID = 'acc_tiktok_1';
   process.env.CARD_PUBLIC_BASE_URL = 'https://cards.example.co';
-  for (const k of ['CARD_PUBLIC_BASE_URLS', 'IG_USER_ID', 'IG_ACCESS_TOKEN', 'CHANNEL_ID']) delete process.env[k];
+  // No TikTok connection of its own, so a Zernio failure reaches publishNext
+  // as it is rather than becoming a draft. The fallback has its own tests.
+  for (const k of ['CARD_PUBLIC_BASE_URLS', 'IG_USER_ID', 'IG_ACCESS_TOKEN', 'CHANNEL_ID', 'TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET']) delete process.env[k];
 
-  const info = {
-    creator: { canPostMore: true },
-    privacyLevels: [{ value: 'PUBLIC_TO_EVERYONE' }],
-    postingLimits: { interactionSettings: { allow_comment: { enabled: true } } },
+  // Zernio, answering from a fake fetch.
+  const realFetch = globalThis.fetch;
+  const answer = (status, json) => {
+    globalThis.fetch = async (url) => {
+      if (!String(url).startsWith('https://zernio.com/')) throw new Error(`unexpected fetch ${url}`);
+      return { ok: status < 300, status, json: async () => json };
+    };
   };
-  const answering = (answer) =>
-    z.setClient({
-      creatorInfo: async () => info,
-      createPost: async () => {
-        if (answer instanceof Error) throw answer;
-        return answer;
-      },
-    });
   const deck = (id) => ({
     kind: 'deck',
     id,
     headline: `דק ${id}`,
     publishTargets: ['tiktok'],
-    deck: { hookHe: 'שער', tiktok: [{ url: `https://cards.example.co/${id}-1.jpg` }], slides: [], score: { total: 81 } },
+    deck: { hookHe: 'שער', tiktok: [{ url: `https://cards.example.co/${id}-1.jpg` }, { url: `https://cards.example.co/${id}-2.jpg` }], slides: [], score: { total: 81 } },
     tiktokCaption: 'כיתוב',
   });
   const reset = () => {
@@ -2323,40 +2243,40 @@ group('publishing through Zernio — the four kinds of failure, end to end');
   };
   reset();
 
-  answering({ status: 201, json: { post: { _id: 'zp-ok', status: 'published', platforms: [{ platform: 'tiktok', status: 'published', platformPostUrl: 'https://www.tiktok.com/@b/photo/9' }] } } });
+  answer(201, { post: { _id: 'zp-ok', status: 'published', platforms: [{ platform: 'tiktok', status: 'published', platformPostUrl: 'https://www.tiktok.com/@b/photo/9000000001' }] } });
   ok('a published post is published', await publishNext(deck('ok1')));
   const row = store.recentPublished().find((p) => p.id === 'ok1');
-  eq('and the log keeps Zernio\'s post id', row?.zernioPostId, 'zp-ok');
-  eq('and its link', row?.tiktokUrl, 'https://www.tiktok.com/@b/photo/9');
+  eq("and the log keeps Zernio's post id", row?.zernioPostId, 'zp-ok');
+  eq('and its link', row?.tiktokUrl, 'https://www.tiktok.com/@b/photo/9000000001');
   eq('and its score', row?.score, 81);
+  eq('and it is not a draft', row?.tiktokDraft, false);
   reset();
 
-  answering(new z.ZernioError('slow down', { kind: 'limit' }));
+  answer(429, { error: 'Too Many Requests' });
   await publishNext(deck('lim1'));
   eq('a limit puts the post back to wait', store.queueSize(), 1);
   eq('without spending an attempt', store.queuedItems()[0]?.publishAttempts || 0, 0);
   ok('and TikTok stays healthy', !store.isDegraded('tiktok'));
   reset();
 
-  answering(new z.ZernioError('flagged (spam_risk)', { kind: 'card' }));
+  answer(201, { post: { _id: 'zp-c', status: 'failed', platforms: [{ platform: 'tiktok', status: 'failed', errorMessage: 'images rejected', errorCategory: 'user_content' }] } });
   await publishNext(deck('card1'));
   eq('a card-level refusal is abandoned, not retried', store.queueSize(), 0);
   ok('and TikTok stays healthy', !store.isDegraded('tiktok'));
   reset();
 
-  answering(new z.ZernioError('privacy level not allowed', { kind: 'connection', code: 'privacy_not_allowed' }));
+  answer(401, { error: 'Unauthorized', code: 'invalid_credentials' });
   await publishNext(deck('conn1'));
-  ok('a connection problem stands TikTok down at once', store.isDegradedLatched('tiktok'));
+  ok('a bad key stands TikTok down at once', store.isDegradedLatched('tiktok'));
   eq('and keeps the post', store.queueSize() + store.heldCount(), 1);
   reset();
 
-  answering(new z.ZernioError('socket hang up', { kind: 'transient' }));
+  answer(502, { error: 'Bad Gateway' });
   await publishNext(deck('tr1'));
-  eq('a transient failure is retried', store.queuedItems()[0]?.publishAttempts, 1);
-  ok('carrying the key, so the retry cannot duplicate', /^brickdeal-tr1-/.test(store.queuedItems()[0]?.zernioKey || ''));
+  eq('a server error is retried', store.queuedItems()[0]?.publishAttempts, 1);
   reset();
 
-  z.setClient(null);
+  globalThis.fetch = realFetch;
   for (const [k, v] of Object.entries(saved)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;

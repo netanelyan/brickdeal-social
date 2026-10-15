@@ -181,11 +181,6 @@ Three rules, in `src/images/homeShot.js`:
    it is screened the same way first — and when it fails, the deal gets no
    slide at all rather than an advertisement with Hebrew type over it.
 
-A deck that carries generated photographs has to be labelled as AI-generated on
-TikTok, and the API cannot do it for a photo post. So such a deck goes to the
-TikTok inbox as a draft, and Telegram says to add the label and post it. See
-*How a deck reaches TikTok*.
-
 **Why rules 2 and 3 grew.** A deck went out carrying a grey pencil sketch of a
 Star Destroyer with a red `1500+PCS` badge and `Desktop Decoration` printed
 across it. Everything in this file passed it: the listing image on this
@@ -328,7 +323,7 @@ Requires Node 18+ (developed on 24) and no build step.
 npm install
 npx playwright install --with-deps chromium
 cp .env.example .env      # then fill it in
-npm test                  # 698 offline checks, no credentials needed
+npm test                  # 685 offline checks, no credentials needed
 npm run brick-lab         # look at the slides, ~15s a round
 npm run brick-once -- --fixture --no-images   # the whole path, publishing nothing
 npm start
@@ -348,24 +343,40 @@ of it happens at render time. Two scripts exist to look at them:
   a fine outline gives out first.
 - **`brick-once`** is the whole pipeline — feed, Brickset, FX, cover,
   photographs, render, score — written to `out/brick/` with a contact sheet and
-  every price claim printed with its source. It ends with the exact request
-  Zernio would be sent, handed to a fake client that records it, so nothing
-  reaches Zernio or TikTok. `--fixture` generates a feed with today's dates so it
-  works offline; `--no-images` skips the expensive step (and so fails the photo
-  gate, which the output says); `--no-score` skips the judge's model call.
+  every price claim printed with its source. The cover line is written to
+  `out/brick/cover.txt` with its first code points, so its direction can be
+  checked without trusting a terminal. It ends with the full request Zernio is
+  sent (the key redacted) and what came back, and the spend: every model and
+  image call, its tokens, and an estimate. `--fixture` generates a feed with
+  today's dates so it works offline; `--no-images` skips the expensive step (and
+  so fails the photo gate, which the output says); `--no-score` skips the
+  judge's model calls.
+- **`brick-once --zernio`** is real: it uploads the slides to Zernio's storage
+  (a laptop has no public host), posts the deck through the real API **as an
+  inbox draft**, forced for that run whatever the config says, and fetches every
+  media URL from outside to check it answers. Without `--zernio` the request
+  goes to a fake client and nothing reaches Zernio or TikTok.
 
-TikTok is connected in Zernio's dashboard; `.env` takes `ZERNIO_API_KEY` and
-`ZERNIO_TIKTOK_ACCOUNT_ID`.
+TikTok is connected in Zernio's dashboard; `.env` takes `ZERNIO_API_KEY` (and
+`ZERNIO_TIKTOK_ACCOUNT_ID` when Zernio holds more than one TikTok account). The
+fallback's own connection is made once with `npm run tiktok-token`.
 
 ## How a deck reaches TikTok
 
 ### Through Zernio
 
 TikTok's own Content Posting API was the first way in, and it could not do the
-job unattended. Before TikTok audits an app it may post only as private; it has
-no field for choosing a sound; and so every deck went to the creator's inbox to
-be finished by hand. Zernio posts through an app that has passed the audit, so
-`src/publish/zernio.js` sends one request:
+job unattended. Before TikTok audits an app it may post only as private, and so
+every deck went to the creator's inbox to be finished by hand. Zernio posts
+through an app that has passed the audit.
+
+**The code is tiyul-social's.** `src/publish/zernio.js` and
+`src/publish/tiktokRoute.js` are ported from that repo (`carouselBody`,
+`accountIdFor`, `createAndWait`, `platformPart`, `publishTikTokRouted`) with the
+same logic, so the two bots post to TikTok the same way. Two things differ, both
+about this repo: the title is the deck's cover hook, and there is no video or
+Reel path, because a BrickDeal deck is a photo carousel and nothing else. One
+request:
 
 ```
 POST https://zernio.com/api/v1/posts
@@ -378,9 +389,10 @@ POST https://zernio.com/api/v1/posts
 ```
 
 The exact body is in `scripts/fixtures/zernio-request.json`, and the suite holds
-the code to it. Before every post it asks Zernio's creator-info which privacy
-levels the account allows, and a post whose configured level is not among them
-is refused, loudly, rather than sent at a different level.
+the code to it. `publishNow` is set, so it is a post and not a scheduled one.
+Then `createAndWait` polls Zernio until TikTok has the post or has refused it.
+A post Zernio is still working on when the wait runs out is not an error: it
+comes back pending and is never sent a second time.
 
 **The sound is TikTok's choice, not ours.** `musicSoundInfo`, Zernio's way to
 name a track, is for video posts only. A photo carousel gets `auto_add_music`
@@ -391,22 +403,27 @@ anything but `none`, TikTok allows only its Commercial Music Library, and
 auto-added music attaches nothing. The bot says so at boot and on the panel and
 changes neither setting.
 
-**A deck with a generated photograph goes to the inbox.** TikTok requires such
-a post to be labelled as AI-generated, and Zernio rejects that label on a direct
-photo post. So the deck goes out as a draft (`tiktokSettings.draft`), lands in
-the TikTok inbox (not the Drafts folder on the profile), and Telegram says
-`📥 טיקטוק: טיוטה בתיבה — לסמן "AI" ולפרסם באפליקציה`. Only a deck made entirely
-of screened seller or catalogue photos is posted by itself. `tiktok.aiPhotos:
-"skip"` keeps such decks off TikTok instead; nothing posts them unlabelled. While
-image generation is on, most decks have generated photographs, so most TikTok
-posts will be drafts. That is the cost of the rule.
+**No AI-label field.** The photographs are generated (homeShot), and nothing in
+the request labels them: Zernio rejects `video_made_with_ai` on a direct photo
+post, and nothing is sent in its place.
 
-Zernio's failures map onto the four kinds `src/ops/publish.js` already had: a
-daily cap or a busy TikTok waits, a bad card is abandoned, a bad key or a
-privacy level the account lacks stands TikTok down until it is fixed, and
-anything else is retried. After a timeout the retry reuses the request's
-idempotency key, so a post Zernio did make comes back instead of being made
-twice. Instagram still goes through the Graph API, unchanged.
+**The inbox draft is only the fallback.** When Zernio refuses a deck for any
+reason that is not a limit, `publishTikTokRouted` sends the same deck to the
+TikTok inbox as a draft through TikTok's own API (`src/publish/tiktok.js`, the
+client this bot used before Zernio), and the publish notice says it fell back
+and why. A limit (a 429, a rate limit, the daily cap) is not a failure: the deck
+waits for it instead. The fallback needs TikTok's own connection
+(`npm run tiktok-token`); without one, a refused deck is retried and held like
+any other failure. `tiktok.fallback: "none"` turns it off. The draft lands in
+the TikTok inbox, not the Drafts folder on the profile.
+
+**The daily cap is the lower of 15 and `TIKTOK_DAILY_CAP`**, checked before
+Zernio is asked, and it counts fallback drafts as well as posts.
+
+A refusal of the deck itself (Zernio's `user_content`, too few images) is
+abandoned, a bad key or a missing account stands TikTok down until it is fixed,
+and anything else is retried. Instagram still goes through the Graph API,
+unchanged.
 
 ### The scorer
 
@@ -529,7 +546,7 @@ exist.
 `/deck דירוג`, `/deck דירוג רכבים`, `/deck בונסאי` name it · `/pause` `/resume`
 the kill switch · `/score` score against views · `/site` where the panel is ·
 `/status` · `/health` every destination separately, with its last error ·
-`/usage` tokens and cost · `/igquota` · `/tiktok` the Zernio account, its privacy
+`/usage` tokens and cost · `/igquota` · `/tiktok` the Zernio account, the fallback's connection, its privacy
 levels and the daily cap · `/pending` · `/queue` what is waiting, numbered ·
 `/next` publish the next · `/post 3` publish that one out of turn · `/held`
 `/retry` `/clear_held` `/resend`
@@ -578,7 +595,9 @@ one it stepped over, on the card, before you tap.
 | `src/images/homeShot.js` | the generated photograph, and the check that it is the right set |
 | `src/render/brickSlide.js` | the slide: the frame, the block, the outline, the watermark |
 | `src/render/brickDeck.js` | a deck to JPEGs, at both sizes |
-| `src/publish/` | Instagram Graph API, TikTok through Zernio, publish targets |
+| `src/publish/zernio.js` | TikTok through Zernio, ported from tiyul-social |
+| `src/publish/tiktokRoute.js` | Zernio first, the inbox draft only as a fallback, and the daily cap |
+| `src/publish/` | also the Instagram Graph API, TikTok's own API (the fallback), publish targets |
 | `src/store.js` | one JSON file: dedupe, proposals, staging, queue, publish log, accounts, audit |
 
 **Why the website is in the same process.** `src/store.js` holds the whole of

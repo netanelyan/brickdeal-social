@@ -133,9 +133,13 @@ export function brickConfig() {
       `brick-config.json: tiktok.commercialContentType must be one of ${TIKTOK_COMMERCIAL.join(', ')}, not "${commercialContentType}"`
     );
   }
-  const aiPhotos = String(tt.aiPhotos || 'draft');
-  if (!AI_PHOTO_POLICIES.includes(aiPhotos)) {
-    throw new Error(`brick-config.json: tiktok.aiPhotos must be one of ${AI_PHOTO_POLICIES.join(', ')}, not "${aiPhotos}"`);
+  // What happens to a deck Zernio refused for a reason that is not a limit:
+  // the TikTok inbox as a draft, or nothing (the ordinary retry and hold).
+  const tiktokFallback = tt.fallback === undefined ? 'draft' : tt.fallback;
+  if (!TIKTOK_FALLBACKS.includes(tiktokFallback)) {
+    throw new Error(
+      `brick-config.json: tiktok.fallback must be one of ${TIKTOK_FALLBACKS.join(', ')}, not ${JSON.stringify(tiktokFallback)}`
+    );
   }
 
   // Who decides what is posted: the scorer, or a person tapping. Absent means
@@ -287,7 +291,7 @@ export function brickConfig() {
       // On unless it is switched off in so many words. A silent photo post
       // reaches fewer people, and TikTok picks the track either way.
       autoAddMusic: tt.autoAddMusic !== false,
-      aiPhotos,
+      fallback: tiktokFallback,
     },
   };
 
@@ -297,9 +301,7 @@ export function brickConfig() {
 // TikTok's own vocabularies, as Zernio passes them through.
 const TIKTOK_PRIVACY = ['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'];
 const TIKTOK_COMMERCIAL = ['none', 'brand_organic', 'brand_content'];
-// What happens to a deck carrying a generated photograph: the TikTok inbox,
-// where a person adds the AI label, or not TikTok at all.
-const AI_PHOTO_POLICIES = ['draft', 'skip'];
+const TIKTOK_FALLBACKS = ['draft', 'none'];
 const APPROVAL_MODES = ['auto', 'manual'];
 // The parts of a deck's score and what each weighs by default. The cover is
 // what most viewers read, so it weighs most.

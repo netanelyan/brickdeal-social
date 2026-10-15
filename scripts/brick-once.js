@@ -5,17 +5,18 @@ import path from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { buildDeck } from '../src/brick/build.js';
 import { renderBrickDeckSize } from '../src/render/brickDeck.js';
+import { renderBrickSlideHtml } from '../src/render/brickSlide.js';
 import { captionFor, instagramCaptionFor, dressing } from '../src/brick/caption.js';
 import { closeBrowser } from '../src/render/index.js';
 import { writeContactSheet } from './lib/contact-sheet.js';
 import { roomFor } from './lib/rooms.js';
 import { sampleDeals } from './fixtures/deals.js';
 import { gates, modelScore, contactSheet, decide, scoreLine, SUBSCORES } from '../src/brick/score.js';
-import { tiktokRoute, routeHe } from '../src/brick/candidate.js';
-import { publishZernio } from '../src/publish/zernio.js';
+import { publishZernioTikTok, uploadMedia, zernioConfigured } from '../src/publish/zernio.js';
+import { privacyLevel } from '../src/publish/tiktokRoute.js';
 import { brickConfig } from '../src/brick/config.js';
 
-// The whole path, printed, publishing nothing.
+// The whole path, printed.
 //
 //   npm run brick-once
 //   npm run brick-once -- "harry-potter"
@@ -23,15 +24,23 @@ import { brickConfig } from '../src/brick/config.js';
 //   npm run brick-once -- --fixture       a generated feed, no network
 //   npm run brick-once -- --rooms         stand-in photographs, no image calls
 //   npm run brick-once -- --no-images     no photographs at all
-//   npm run brick-once -- --no-score      skip the scorer's model call
+//   npm run brick-once -- --no-score      skip the scorer's model calls
+//   npm run brick-once -- --zernio        A REAL TIKTOK DRAFT: see below
 //
 // Every deck is scored as auto mode would score it, and the request TikTok
-// would get through Zernio is printed, sent to a fake client that records it
-// and answers like Zernio. Nothing reaches Zernio or TikTok, with or without
-// a ZERNIO_API_KEY.
+// would get through Zernio is printed in full, the API key redacted.
 //
-// Writes to out/brick/ instead of to Telegram, with a contact sheet. Touches
-// neither the store nor any destination, so it is safe to run on the VPS.
+// Without --zernio, that request goes to a fake client that records it and
+// answers like Zernio, and nothing reaches Zernio or TikTok.
+//
+// WITH --zernio IT IS REAL. The slides are uploaded to Zernio's own storage
+// (a laptop has no public host for them), and the deck is posted through the
+// real API as an INBOX DRAFT: `tiktokSettings.draft = true` is forced for this
+// run, whatever the config says, so it lands in the TikTok app to be checked
+// and nothing reaches the profile. It needs ZERNIO_API_KEY and refuses to run
+// without it. Each media URL is then fetched from here and its status printed.
+//
+// Writes to out/brick/ instead of to Telegram, with a contact sheet.
 //
 // Every expensive step degrades rather than failing, and this script is where
 // that gets checked: with no BRICKSET_API_KEY every slide loses its comparison
@@ -47,6 +56,7 @@ const useRooms = argv.includes('--rooms');
 const noImages = argv.includes('--no-images') || useRooms;
 const useFixture = argv.includes('--fixture');
 const noScore = argv.includes('--no-score');
+const realZernio = argv.includes('--zernio');
 
 // Several requests build several decks onto one sheet. A deck is only really
 // judgeable next to another one — whether five slides read as a series, whether
@@ -61,8 +71,92 @@ const indent = (text) =>
     .map((l) => `    ${l}`)
     .join('\n');
 
+/* -------------------------------------------------------------------------- */
+/* What the run spent                                                         */
+/* -------------------------------------------------------------------------- */
+
+// Every model and image call goes through fetch: homeShot's generation and its
+// two vision checks call it directly, and the Anthropic SDK uses it underneath.
+// So the bill is counted here, at the one door they all use, without touching
+// any of them.
+const spend = { anthropic: {}, gemini: { calls: 0, images: 0, inputTokens: 0, outputTokens: 0 }, zernio: 0, other: 0 };
+
+function countSpend() {
+  const real = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = String(input?.url || input);
+    const res = await real(input, init);
+    try {
+      if (url.startsWith('https://api.anthropic.com/')) {
+        const json = await res.clone().json();
+        const model = json?.model || 'unknown';
+        const m = (spend.anthropic[model] ??= { calls: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0 });
+        m.calls++;
+        m.input += json?.usage?.input_tokens || 0;
+        m.output += json?.usage?.output_tokens || 0;
+        m.cacheWrite += json?.usage?.cache_creation_input_tokens || 0;
+        m.cacheRead += json?.usage?.cache_read_input_tokens || 0;
+      } else if (url.includes('generativelanguage.googleapis.com')) {
+        const json = await res.clone().json();
+        spend.gemini.calls++;
+        const parts = json?.candidates?.[0]?.content?.parts || [];
+        if (parts.some((p) => p.inlineData || p.inline_data)) spend.gemini.images++;
+        spend.gemini.inputTokens += json?.usageMetadata?.promptTokenCount || 0;
+        spend.gemini.outputTokens += json?.usageMetadata?.candidatesTokenCount || 0;
+      } else if (url.includes('zernio.com')) {
+        spend.zernio++;
+      } else {
+        spend.other++;
+      }
+    } catch {
+      /* a body that is not JSON is not a model call */
+    }
+    return res;
+  };
+}
+
+// $ per million tokens, from the published rates on 2026-10-15. Stated, so the
+// estimate can be checked rather than trusted.
+const RATES = {
+  'claude-opus-5-5': [4, 20],
+  'claude-opus-5': [5, 25],
+  'claude-sonnet-5-5': [2, 10],
+  'claude-haiku-4-5': [1, 5],
+};
+const GEMINI_IMAGE = { input: 0.3, output: 30 }; // gemini-2.5-flash-image, $ per million tokens
+
+function spendReport() {
+  console.log('\n  spend');
+  let total = 0;
+  for (const [model, m] of Object.entries(spend.anthropic)) {
+    const key = Object.keys(RATES).find((k) => model.startsWith(k));
+    const [inRate, outRate] = RATES[key] || [null, null];
+    const cost = inRate == null ? null : (m.input * inRate + m.cacheWrite * inRate * 1.25 + m.cacheRead * inRate * 0.1 + m.output * outRate) / 1e6;
+    if (cost != null) total += cost;
+    console.log(
+      `    ${model}: ${m.calls} call(s) · ${m.input} in + ${m.cacheWrite} cache-write + ${m.cacheRead} cache-read · ${m.output} out` +
+        (cost == null ? ' · rate unknown' : ` · ~$${cost.toFixed(4)}`)
+    );
+  }
+  const g = spend.gemini;
+  const gCost = (g.inputTokens * GEMINI_IMAGE.input + g.outputTokens * GEMINI_IMAGE.output) / 1e6;
+  total += gCost;
+  console.log(`    image generation: ${g.calls} call(s), ${g.images} image(s) · ${g.inputTokens} in · ${g.outputTokens} out · ~$${gCost.toFixed(4)}`);
+  console.log(`    zernio: ${spend.zernio} request(s) · other: ${spend.other}`);
+  console.log(`    total, estimated: ~$${total.toFixed(4)}`);
+}
+
+/* -------------------------------------------------------------------------- */
+
 async function main() {
+  countSpend();
   mkdirSync(OUT, { recursive: true });
+
+  if (realZernio && !zernioConfigured()) {
+    console.error('\n  --zernio posts a real draft and needs ZERNIO_API_KEY in .env; nothing was built.\n');
+    process.exitCode = 1;
+    return;
+  }
 
   // The fixture is written to disk rather than injected, so it goes through
   // exactly the same loader, the same validation and the same freshness rule as
@@ -86,7 +180,9 @@ async function main() {
 
   const total = sheets.reduce((t, d) => t + d.slides.length, 0);
   console.log(`\n  ${total} slides in ${sheets.length} deck(s)`);
-  console.log(`  ${path.join(OUT, 'index.html')}\n`);
+  console.log(`  ${path.join(OUT, 'index.html')}`);
+  spendReport();
+  console.log('');
 }
 
 async function buildOne(request, n) {
@@ -124,6 +220,7 @@ async function buildOne(request, n) {
   console.log(
     `  cover:  "${deck.hookHe}"${deck.emphasisHe ? `   [shout: ${deck.emphasisHe}]` : ''}   [${deck.hookFrom}]`
   );
+  coverCheck(deck, n);
 
   const rateNote = Object.entries(deck.rates)
     .map(([c, r]) => `${c}/ILS ${r.rate} on ${r.date}`)
@@ -153,10 +250,9 @@ async function buildOne(request, n) {
     console.log(`       photo: ${s.image?.provenance || 'none'}${s.image?.note ? ` (${s.image.note})` : ''}`);
   }
 
-  if (deck.dropped.length) {
-    console.log('\n  dropped');
-    for (const d of deck.dropped) console.log(`    ${d.id} — ${d.why}`);
-  }
+  console.log('\n  dropped');
+  if (deck.dropped.length) for (const d of deck.dropped) console.log(`    ${d.id} — ${d.why}`);
+  else console.log('    none');
   if (deck.feedDropped?.length) {
     console.log(`\n  feed: ${deck.feedDropped.length} record(s) were not usable`);
     for (const d of deck.feedDropped.slice(0, 6)) console.log(`    ${d.id} — ${d.why}`);
@@ -173,6 +269,7 @@ async function buildOne(request, n) {
 
   console.log('\n  rendering');
   const slides = await renderBrickDeckSize(deck, { size: 'tiktok', outDir: OUT });
+  console.log(`    cover: ${slides[0]?.file}`);
 
   // The deck as auto mode would hand it to the scorer and the publisher.
   const cand = {
@@ -184,8 +281,6 @@ async function buildOne(request, n) {
     instagramCaption: instagramCaptionFor(deck, dress),
     publishTargets: ['tiktok'],
   };
-  cand.tiktokRoute = tiktokRoute(deck.slides);
-  cand.tiktokDraft = cand.tiktokRoute.path === 'draft';
   await scoreOne(cand);
   await zernioOne(cand);
 
@@ -196,6 +291,27 @@ async function buildOne(request, n) {
     note: `${deck.subject} · "${deck.hookHe}"`,
     slides: slides.map((s) => ({ ...s, spot: null })),
   };
+}
+
+/**
+ * The cover line, checked for direction: written to a UTF-8 file, its first
+ * code points printed, and held against the HTML the cover is rendered from.
+ *
+ * A terminal can show Hebrew backwards; the string cannot be backwards and
+ * still read right on the slide, because the slide's own bidi algorithm would
+ * reverse it a second time. The code points are the only thing that settles
+ * which it is.
+ */
+function coverCheck(deck, n) {
+  const hook = String(deck.hookHe || '');
+  const file = path.join(OUT, n ? `cover-${n}.txt` : 'cover.txt');
+  writeFileSync(file, `${hook}\n`, 'utf8');
+  const points = [...hook].slice(0, 5).map((c) => `U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`);
+  const html = renderBrickSlideHtml({ hookHe: deck.hookHe, emphasisHe: deck.emphasisHe, image: null }, { cover: true });
+  const text = html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ');
+  console.log(`  cover.txt: ${file}`);
+  console.log(`    first code points: ${points.join(' ')}  ("${[...hook].slice(0, 5).join('')}")`);
+  console.log(`    the slide's HTML carries it in the same order: ${text.includes(hook.replace(/\s+/g, ' ')) ? 'yes' : 'NO'}`);
 }
 
 /**
@@ -214,69 +330,111 @@ async function scoreOne(cand) {
     for (const f of a.failures) console.log(`      ✗ ${f.gate}: ${f.why}   [fix: ${f.fix}]`);
   }
 
+  const { threshold, model, compareModel } = brickConfig().score;
   let result;
   if (noScore) {
     console.log('    stage B: skipped (--no-score)');
-    result = { stage: 'A', pass: false, gates: a.failures, total: null };
+    result = { stage: 'A', pass: a.ok, gates: a.failures, total: null };
   } else {
     const sheet = await contactSheet(cand, { outDir: OUT });
     console.log(`    contact sheet: ${sheet.file}`);
-    const b = await modelScore(cand, { sheet: sheet.base64 });
     const label = a.ok ? 'stage B' : 'stage B (shown for the dry run only; production would not reach it)';
-    if (!b.ok) {
-      console.log(`    ${label}: FAILED CLOSED — ${b.error}`);
-    } else {
-      console.log(`    ${label}: ${b.total}/100 from ${b.model} · threshold ${brickConfig().score.threshold}`);
+    const show = (b, role) => {
+      if (!b.ok) return console.log(`    ${label}, ${role} ${b.model}: FAILED CLOSED — ${b.error}`);
+      console.log(`    ${label}, ${role} ${b.model}: ${b.total}/100 · threshold ${threshold}`);
       console.log(`      ${SUBSCORES.map((k) => `${k} ${b.sub[k]}`).join(' · ')} · weakest: ${b.weakest}`);
       if (b.notes) console.log(`      judge: ${b.notes}`);
-    }
+    };
+    const [b, c] = await Promise.all([
+      modelScore(cand, { sheet: sheet.base64, model }),
+      compareModel ? modelScore(cand, { sheet: sheet.base64, model: compareModel }) : null,
+    ]);
+    show(b, 'judge');
+    if (c) show(c, 'compare (decides nothing)');
     result = a.ok
       ? b.ok
-        ? { stage: 'B', pass: b.total >= brickConfig().score.threshold, total: b.total, sub: b.sub, weakest: b.weakest, threshold: brickConfig().score.threshold, gates: [] }
-        : { stage: 'B', pass: false, total: null, error: b.error, gates: [], threshold: brickConfig().score.threshold }
-      : { stage: 'A', pass: false, gates: a.failures, total: null, threshold: brickConfig().score.threshold, why: a.failures.map((f) => f.why).join('; ') };
+        ? { stage: 'B', pass: b.total >= threshold, total: b.total, sub: b.sub, weakest: b.weakest, threshold, gates: [] }
+        : { stage: 'B', pass: false, total: null, error: b.error, gates: [], threshold }
+      : { stage: 'A', pass: false, gates: a.failures, total: null, threshold, why: a.failures.map((f) => f.why).join('; ') };
   }
   const next = decide(result, { attempt: 1 });
   console.log(
     `    decision: ${{ publish: 'PUBLISH', cover: 'rebuild once with a new cover', recipe: 'rebuild once with different sets', drop: 'DROP' }[next]}` +
       (result.total == null ? '' : ` (${scoreLine(result)})`)
   );
-  console.log(`    tiktok route: ${cand.tiktokRoute.path} — ${routeHe(cand.tiktokRoute)}`);
 }
 
-/** What Zernio would be sent, through a fake client that records it. */
+/**
+ * What Zernio is sent, in full, and what it answered.
+ *
+ * Mock by default: a fake fetch that answers the account lookup and the post
+ * like Zernio. With --zernio, the real API, the slides uploaded to Zernio's
+ * storage first, and the post forced to an inbox draft.
+ */
 async function zernioOne(cand) {
-  console.log('\n  Zernio (mock client — nothing is sent anywhere)');
-  // The fake answers creator-info as an account allowing every level, and the
-  // post as published. The checks in publishZernio still run against it.
+  const cfg = brickConfig().tiktok;
+  const privacy = privacyLevel(cfg.privacy);
+  console.log(`\n  Zernio (${realZernio ? 'REAL — an inbox draft, forced for this run' : 'mock client — nothing is sent anywhere'})`);
+
+  let target = cand;
+  if (realZernio) {
+    // A laptop has no public host for the slides, so they go to Zernio's own
+    // storage first and the post uses those addresses.
+    console.log('    uploading the slides to Zernio storage');
+    const urls = [];
+    for (const s of cand.deck.tiktok) urls.push(await uploadMedia(s.file));
+    target = { ...cand, deck: { ...cand.deck, tiktok: cand.deck.tiktok.map((s, i) => ({ ...s, url: urls[i] })) } };
+  }
+
   const sent = [];
-  const mock = {
-    creatorInfo: async () => ({
-      creator: { nickname: '(mock account)', canPostMore: true },
-      privacyLevels: ['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'].map((value) => ({ value })),
-      postingLimits: { interactionSettings: { allow_comment: { enabled: true } } },
-      commercialContentTypes: [{ value: 'none' }],
-    }),
-    createPost: async (body, { idempotencyKey }) => {
-      sent.push({ body, idempotencyKey });
-      return { status: 201, json: { post: { _id: 'mock-post-1', status: 'published', platforms: [{ platform: 'tiktok', status: 'published', platformPostUrl: null }] } } };
-    },
+  const mockFetch = async (url, init = {}) => {
+    const u = String(url);
+    if (init.method === 'POST' && u.endsWith('/posts')) {
+      sent.push(JSON.parse(init.body));
+      return { ok: true, status: 201, json: async () => ({ post: { _id: 'mock-post-1', status: 'published', platforms: [{ platform: 'tiktok', status: 'published', platformPostUrl: null }] } }) };
+    }
+    if (u.includes('/accounts?')) {
+      return { ok: true, status: 200, json: async () => ({ accounts: [{ _id: 'mock-account', platform: 'tiktok', isActive: true }] }) };
+    }
+    return { ok: false, status: 404, json: async () => ({ error: 'not mocked' }) };
   };
-  // publishZernio refuses without these. Placeholders are enough for a client
-  // that never leaves this process.
-  process.env.ZERNIO_API_KEY ||= 'mock-key';
-  process.env.ZERNIO_TIKTOK_ACCOUNT_ID ||= 'mock-account';
+  const env = realZernio ? process.env : { ...process.env, ZERNIO_API_KEY: process.env.ZERNIO_API_KEY || 'mock-key' };
+
+  let out;
   try {
-    const out = await publishZernio(cand, { client: mock });
-    const { body, idempotencyKey } = sent[0];
-    console.log(`    POST ${process.env.ZERNIO_API_BASE || 'https://zernio.com/api/v1'}/posts`);
-    console.log('    Authorization: Bearer <ZERNIO_API_KEY>');
-    console.log(`    Idempotency-Key: ${idempotencyKey}`);
-    console.log(indent(JSON.stringify(body, null, 2)));
-    console.log(`    -> mock answered: zernio ${out.postId} · ${out.status}${out.draft ? ' · inbox draft' : ''}`);
-    for (const n of out.notes || []) console.log(`    note: ${n}`);
+    out = await publishZernioTikTok(target, {
+      privacy,
+      autoAddMusic: cfg.autoAddMusic,
+      commercialContentType: cfg.commercialContentType,
+      draft: realZernio,
+      env,
+      ...(realZernio ? { pollMs: 5_000, timeoutMs: 180_000 } : { fetchImpl: mockFetch, pollMs: 1, timeoutMs: 10 }),
+    });
   } catch (e) {
-    console.log(`    publishZernio refused before sending: ${e.message}`);
+    console.log(`    publishZernioTikTok refused or failed: ${e.message}${e.code ? ` [${e.code}]` : ''}${e.status ? ` HTTP ${e.status}` : ''}`);
+    return;
+  }
+
+  console.log(`    POST ${(process.env.ZERNIO_BASE || 'https://zernio.com/api/v1').replace(/\/$/, '')}/posts`);
+  console.log('    Authorization: Bearer <redacted>');
+  console.log(indent(JSON.stringify(out.body, null, 2)));
+  console.log('    response:');
+  console.log(indent(JSON.stringify(out.response, null, 2)));
+  console.log(`    -> zernio post ${out.zernioId} · ${out.status}${out.draft ? ' · inbox draft' : ''}${out.url ? ` · ${out.url}` : ''}`);
+  for (const note of out.notes || []) console.log(`    note: ${note}`);
+
+  // Every image the post points at, fetched from here: a laptop is outside
+  // the server, which is the question.
+  console.log('    media URLs:');
+  for (const item of out.body.mediaItems) {
+    let status;
+    try {
+      const res = await fetch(item.url, { method: 'GET', signal: AbortSignal.timeout(20_000) });
+      status = `${res.status} ${res.headers.get('content-type') || ''} ${res.headers.get('content-length') || '?'} bytes`;
+    } catch (e) {
+      status = `unreachable: ${e.message}`;
+    }
+    console.log(`      ${status} · ${item.url}`);
   }
 }
 
@@ -286,5 +444,6 @@ main().catch(async (e) => {
     for (const d of e.feedDropped.slice(0, 10)) console.error(`    ${d.id} — ${d.why}`);
   }
   await closeBrowser();
+  spendReport();
   process.exitCode = 1;
 });

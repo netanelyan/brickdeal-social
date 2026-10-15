@@ -8,12 +8,12 @@ import {
   isPlatformLimit as isPlatformLimitInstagram,
 } from '../publish/instagram.js';
 import {
-  publishZernio,
-  describeError as describeTikTokError,
-  isCardLevel as isCardLevelTikTok,
-  isPlatformLimit as isPlatformLimitTikTok,
-  isConfigProblem as isConfigProblemTikTok,
-} from '../publish/zernio.js';
+  publishTikTokRouted,
+  describeTikTokAny as describeTikTokError,
+  isCardLevelTikTokAny as isCardLevelTikTok,
+  isPlatformLimitTikTokAny as isPlatformLimitTikTok,
+  isConfigProblemTikTokAny as isConfigProblemTikTok,
+} from '../publish/tiktokRoute.js';
 import { targetsForKind, targetsHe, allowedForKind, publishTargets } from '../publish/targets.js';
 import { overrideNotes } from '../override.js';
 
@@ -64,11 +64,11 @@ const publishedFacts = (cand) => ({
   // Where the post was about. A deck names its region; a card names it on the
   // trip, which is the field verify.js already insists every card have.
   place: (cand.deck ? cand.deck.where : cand.trip?.where) || null,
-  // So the row does not claim a post that has not been made. A deck with
-  // generated photographs reaches the TikTok inbox rather than the feed, and
-  // whether it was ever posted happens in the app, where this process cannot
-  // see it.
-  tiktokDraft: Boolean(cand.tiktokDraft),
+  // So the row does not claim a post that has not been made. A deck that fell
+  // back to the TikTok inbox did not reach the feed, and whether it was ever
+  // posted happens in the app, where this process cannot see it. Set from what
+  // the publish returned; see the succeeded path below.
+  tiktokDraft: false,
   // What the cover said and what it scored, which is what the score-against-
   // views loop reads back. Null on a deck built in manual mode, which is not
   // scored.
@@ -190,7 +190,8 @@ export async function publishNext(item = null) {
     // client — which is the truth in that situation.
     telegram: () => surface().publishToChannel(cand),
     instagram: () => publishInstagram(cand),
-    tiktok: () => publishZernio(cand),
+    // Zernio first, the TikTok inbox only when Zernio refused. See tiktokRoute.js.
+    tiktok: () => publishTikTokRouted(cand),
   };
   const errorText = {
     instagram: describeError,
@@ -230,12 +231,6 @@ export async function publishNext(item = null) {
       // the retry can ask "is this already live?" with, and without it the retry
       // posts a second copy of a post that went out fine.
       if (target === 'instagram' && e?.creationId) cand.instagramCreationId = e.creationId;
-      // Zernio's version of the same problem. After a timeout nobody knows
-      // whether the post was made, and sending the same idempotency key again
-      // returns it if it was. Only the post call's own answer changes the key:
-      // a creator-info failure or the daily cap on the next attempt must not
-      // erase the key a timeout left, or that attempt posts the deck twice.
-      if (target === 'tiktok' && e?.keyDecided) cand.zernioKey = e.idempotencyKey || null;
 
       // "Not now" — checked BEFORE the card-level test, because a platform
       // limit arrives as step:'config' from our own preflight and would
@@ -243,6 +238,16 @@ export async function publishNext(item = null) {
       // cannot publish yet. The destination keeps its health (nothing is wrong
       // with it), the card keeps its place, and nothing is abandoned.
       if (platformLimit[target]?.(e)) {
+        limited.push({ target, message: detail });
+        continue;
+      }
+
+      // The connection is wrong, and no number of attempts repairs it. Asked
+      // before the card-level question, because Zernio says "no account" and
+      // "not configured" with `step: 'config'`, and a card abandoned for a
+      // missing key would be a deck thrown away over a setting.
+      if (configProblem[target]?.(e)) {
+        store.degrade(target, detail);
         limited.push({ target, message: detail });
         continue;
       }
@@ -255,17 +260,6 @@ export async function publishNext(item = null) {
       // them were skipped and held without ever being attempted.
       if (e?.step === 'config' || cardLevel[target]?.(e)) {
         abandoned.push({ target, message: detail });
-        continue;
-      }
-
-      // The connection is wrong, and no number of attempts repairs it. Held
-      // rather than abandoned — the same deck publishes perfectly once the
-      // scope is granted — and the destination is stood down at once instead
-      // of after three posts have each spent three calls proving the same
-      // thing.
-      if (configProblem[target]?.(e)) {
-        store.degrade(target, detail);
-        limited.push({ target, message: detail });
         continue;
       }
 
@@ -285,13 +279,14 @@ export async function publishNext(item = null) {
   if (succeeded.length) {
     store.recordPublished({
       ...publishedFacts(cand),
+      tiktokDraft: Boolean(done.tiktok?.draft),
       telegram: Boolean(done.telegram),
       instagram: Boolean(done.instagram),
       tiktok: Boolean(done.tiktok),
       // The id the analytics job asks Zernio about, and the link the
       // notification carries. TikTok often has no link for some minutes after
       // a post; the analytics job fills it in later.
-      zernioPostId: done.tiktok?.postId || null,
+      zernioPostId: done.tiktok?.zernioId || null,
       tiktokUrl: done.tiktok?.url || null,
     });
 
@@ -300,7 +295,7 @@ export async function publishNext(item = null) {
     // is measured by its TikTok post, and one that skipped TikTok is not
     // measured at all.
     const scored = done.tiktok
-      ? { path: cand.tiktokDraft ? 'draft' : 'published', zernioPostId: done.tiktok.postId || null, url: done.tiktok.url || null, publishedAt: Date.now() }
+      ? { path: done.tiktok.draft ? 'draft' : 'published', zernioPostId: done.tiktok.zernioId || null, url: done.tiktok.url || null, publishedAt: Date.now() }
       : !(cand.publishTargets || []).includes('tiktok')
         ? { path: 'instagram', publishedAt: Date.now() }
         : null;
@@ -339,7 +334,7 @@ export async function publishNext(item = null) {
       // A deck handed to your inbox did not publish, and saying it did is the
       // one wrong thing to say here: you would read "posted" and not open the
       // app, which is the only place the AI label and the last tap can happen.
-      const drafted = cand.tiktokDraft && succeeded.includes('tiktok') ? ['tiktok'] : [];
+      const drafted = done.tiktok?.draft ? ['tiktok'] : [];
       await say(
         notify.published({
           headline: cand.headline,
@@ -347,7 +342,7 @@ export async function publishNext(item = null) {
           failed: [],
           drafted,
           score: publishedFacts(cand).score,
-          link: done.tiktok?.url || (done.tiktok?.postId ? `zernio ${done.tiktok.postId}` : null),
+          link: done.tiktok?.url || (done.tiktok?.zernioId ? `zernio ${done.tiktok.zernioId}` : null),
         })
       );
       emit('published', { headline: cand.headline, succeeded, drafted, id: cand.id });

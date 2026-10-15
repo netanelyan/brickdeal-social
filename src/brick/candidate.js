@@ -78,45 +78,14 @@ export function brickRepeats(deck, history = recentPublished()) {
 }
 
 /**
- * How the photographs on this deck were made.
- *
- * Counted and reported because it decides what has to happen after the deck
- * is built: a deck carrying generated photographs has to be labelled as
- * AI-generated on TikTok, which is a rule of the owner's own product-shot
- * skill and something the API cannot do. See `tiktokRoute`.
+ * How the photographs on this deck were made, counted for the approval card
+ * and the panel: generated, catalogue, or none.
  */
 export function photoSummary(slides) {
   const counts = {};
   for (const s of slides) counts[s.image?.provenance || 'none'] = (counts[s.image?.provenance || 'none'] || 0) + 1;
   return counts;
 }
-
-/**
- * Which way this deck goes to TikTok, decided by its photographs.
- *
- *   post   every photograph is a screened seller or catalogue photo, so the
- *          deck is posted as it is.
- *   draft  at least one is generated. TikTok requires the AI label and Zernio
- *          rejects it on a direct photo post, so the deck goes to the inbox
- *          and a person adds the label and posts it.
- *   skip   generated, and the policy says to keep such decks off TikTok.
- *
- * `tiktok.aiPhotos` in brick-config.json picks between the last two. There is
- * no setting that posts a generated deck unlabelled.
- */
-export function tiktokRoute(slides, policy = brickConfig().tiktok.aiPhotos) {
-  const generated = (slides || []).filter((s) => s.image?.provenance === 'generated').length;
-  if (!generated) return { path: 'post', generated: 0 };
-  return { path: policy === 'skip' ? 'skip' : 'draft', generated };
-}
-
-/** The route, as the line that says it, for the approval card and the log. */
-export const routeHe = (route) =>
-  route?.path === 'draft'
-    ? `טיקטוק: טיוטה בתיבה — ${route.generated} תמונות נוצרו בבינה מלאכותית, צריך לסמן "AI" ולפרסם באפליקציה`
-    : route?.path === 'skip'
-      ? `טיקטוק: לא יישלח — ${route.generated} תמונות נוצרו בבינה מלאכותית (tiktok.aiPhotos = skip)`
-      : 'טיקטוק: פוסט רגיל — אין בה תמונות שנוצרו בבינה מלאכותית';
 
 /**
  * The approval message.
@@ -177,7 +146,6 @@ export function brickApprovalMessage(cand) {
   const photos = photoSummary(deck.slides);
   const he = { generated: 'נוצרו בבינה מלאכותית', stock: 'תמונות קטלוג', none: 'ללא תמונה' };
   lines.push(`📷 ${Object.entries(photos).map(([k, n]) => `${n} ${he[k] || k}`).join(' · ')}`);
-  if (cand.tiktokRoute) lines.push(`   ${cand.tiktokRoute.path === 'post' ? '✅' : '⚠️'} ${routeHe(cand.tiktokRoute)}`);
   // A catalogue photo is the marketplace's own listing image, and a listing
   // image is an advertisement: a piece-count badge, a price, English captions,
   // a coloured banner. The generated path refuses all of that outright — see
@@ -232,14 +200,7 @@ export async function toBrickCandidate(
 
   const id = brickDeckId(built);
   const deck = { ...built, id };
-  // Rendered for every destination asked for, TikTok included even when the
-  // route below then keeps the deck off it: the scorer judges the 9:16 frames.
   const rendered = await renderBrickDeck(deck, { sizes: sizesFor(targets) });
-
-  // Decided before the photographs are stripped below, because the provenance
-  // on each slide is what decides it.
-  const route = targets.includes('tiktok') ? tiktokRoute(deck.slides) : null;
-  const publishTargets = route?.path === 'skip' ? targets.filter((t) => t !== 'tiktok') : targets;
 
   // Drop the photographs now that they are baked into the JPEGs.
   //
@@ -268,9 +229,7 @@ export async function toBrickCandidate(
     pillar: 'day',
     tags: [],
     deck: { ...deck, ...rendered },
-    publishTargets,
-    tiktokDraft: route?.path === 'draft',
-    tiktokRoute: route,
+    publishTargets: targets,
     createdAt: deck.createdAt,
     overrides: overrideActive() ? overrideNotes() : [],
     notes: brickRepeats(deck),

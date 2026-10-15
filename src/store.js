@@ -88,6 +88,11 @@ const empty = {
   // come back, rather than being dropped. /retry replays them.
   held: [],
   igToken: null,
+  // TikTok's own token pair, for the inbox-draft fallback when Zernio refuses
+  // a post (src/publish/tiktokRoute.js). Kept separately from igToken because
+  // the two expire on completely different clocks — 60 days against 24 hours —
+  // and the refresh token here is the one that needs a browser to replace.
+  tiktokToken: null,
   // The kill switch. { at, by } while /pause is in force, null otherwise.
   // Persisted, because a pause that a restart quietly lifted would be a kill
   // switch that works until pm2 restarts the process.
@@ -1169,6 +1174,30 @@ export function setIgToken({ token, expiresAt }) {
   save();
 }
 export const getIgToken = () => state.igToken || null;
+
+// --- TikTok token -------------------------------------------------------------
+// For the direct TikTok client, which is now only the inbox-draft fallback.
+// Two clocks, both persisted. The access token lasts a day and is refreshed on
+// the publish path; the refresh token lasts about a year and cannot be renewed
+// without opening a browser, so its expiry is worth being able to report before
+// it arrives rather than after.
+export function setTikTokToken({ accessToken, refreshToken, expiresAt, refreshExpiresAt, openId, scope }) {
+  state.tiktokToken = {
+    accessToken,
+    refreshToken,
+    expiresAt,
+    refreshExpiresAt,
+    openId: openId ?? state.tiktokToken?.openId ?? null,
+    scope: scope ?? state.tiktokToken?.scope ?? null,
+    updatedAt: Date.now(),
+  };
+  save();
+}
+export const getTikTokToken = () => state.tiktokToken || null;
+export function clearTikTokToken() {
+  state.tiktokToken = null;
+  save();
+}
 
 // --- runtime settings ---------------------------------------------------------
 //
